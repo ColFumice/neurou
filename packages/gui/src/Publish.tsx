@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PublishSummary } from './types.js';
 
 interface PublishProps {
@@ -13,29 +13,41 @@ function pct(n: number, total: number): number {
   return total > 0 ? Math.round((n / total) * 100) : 0;
 }
 
+/** ≤20 字的一句诊断。 */
+function shortDiagnosis(grade: PublishSummary['grade']): string {
+  if (grade === '红') return '还站不稳，先修死局';
+  if (grade === '黄') return '太均衡了，缺意外';
+  return '站得住，也有分歧';
+}
+
 /**
- * 发布：全屏覆盖，不是弹窗。
+ * 发布：全屏纯黑。
  *
- * 默认只留三行——分数、区、一句话诊断。命运分布、维度、死规则都折叠在「展开」里。
+ * 默认只有两样东西——大号分数、一句诊断。命运分布/维度/死规则在「＋」后面。
+ * Esc 或点背景返回。
  */
 export function Publish({ status, summary, error, onRun, onClose }: PublishProps) {
   const [expanded, setExpanded] = useState(false);
 
-  return (
-    <div className="layer layer--publish" data-testid="publish">
-      <button className="publish__close" onClick={onClose} data-testid="publish-close">
-        关闭
-      </button>
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
+  return (
+    <div className="layer layer--publish" data-testid="publish" onClick={onClose}>
       {status === 'running' && (
-        <div className="publish__running" data-testid="publish-running">
+        <div className="publish__running" data-testid="publish-running" onClick={(e) => e.stopPropagation()}>
           <div className="spinner" />
           <div>正在跑 600 局…</div>
         </div>
       )}
 
       {status === 'error' && (
-        <div className="publish__error">
+        <div className="publish__error" onClick={(e) => e.stopPropagation()}>
           <div>模拟没有跑完：{error ?? '未知错误'}</div>
           <button className="ghost-btn" onClick={onRun}>
             再试一次
@@ -44,30 +56,32 @@ export function Publish({ status, summary, error, onRun, onClose }: PublishProps
       )}
 
       {status === 'done' && summary && (
-        <div className="publish__stage" data-testid="publish-result">
-          <div className="publish__kicker" data-publish-line>
-            音准仪
+        <div className="publish__stage" data-testid="publish-result" onClick={(e) => e.stopPropagation()}>
+          <div className={`publish__score publish__score--${summary.grade}`} data-publish-line>
+            {summary.score}
           </div>
-          <div className="publish__scoreline" data-publish-line>
-            <span className={`publish__score publish__score--${summary.grade}`}>{summary.score}</span>
-            <span className="publish__den">/100</span>
-            <span className={`publish__grade publish__grade--${summary.grade}`}>
-              {summary.grade === '红' ? '红区 · 还站不稳' : summary.grade === '绿' ? '绿区 · 可以发布' : '黄区 · 过于均衡'}
-            </span>
-          </div>
-          <p className="publish__verdict" data-publish-line>
-            {summary.verdict}
+          <p className="publish__diagnosis" data-publish-line>
+            {shortDiagnosis(summary.grade)}
           </p>
 
-          <button className="publish__more" onClick={() => setExpanded((v) => !v)} data-testid="publish-more">
-            {expanded ? '收起' : '展开'}
+          <button
+            className="publish__more"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? '收起' : '展开'}
+            data-testid="publish-more"
+          >
+            {expanded ? '−' : '＋'}
           </button>
 
           {expanded && (
             <div className="publish__detail" data-testid="publish-detail">
-              <div className="publish__meta">
-                {summary.runs} 局 · {Math.round(summary.elapsedMs)}ms · 平均 {summary.meanTicks} 拍 · 以作品本身模拟（本次调音不写入）
+              <div className="publish__zone">
+                {summary.grade === '红' ? '红区 · 还站不稳' : summary.grade === '绿' ? '绿区 · 可以发布' : '黄区 · 过于均衡'}
+                {' · '}
+                {summary.runs} 局 · {Math.round(summary.elapsedMs)}ms · 平均 {summary.meanTicks} 拍
               </div>
+              <p className="publish__long">{summary.verdict}</p>
+              <p className="publish__long muted">以作品本身模拟（本次调音不写入）</p>
 
               <div className="publish__section">
                 <div className="publish__section-title">命运分布</div>
@@ -114,9 +128,6 @@ export function Publish({ status, summary, error, onRun, onClose }: PublishProps
               <div className="publish__actions">
                 <button className="ghost-btn" onClick={onRun}>
                   再跑一次
-                </button>
-                <button className="ghost-btn" onClick={onClose}>
-                  回到世界
                 </button>
               </div>
             </div>

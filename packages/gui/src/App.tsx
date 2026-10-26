@@ -56,6 +56,10 @@ export function App() {
   const [remaining, setRemaining] = useState(PLAY_SECONDS);
   const [playOver, setPlayOver] = useState<string | null>(null);
   const [publish, setPublish] = useState<PublishState>({ open: false, status: 'idle' });
+  const [immersive, setImmersive] = useState(false);
+  const [topReveal, setTopReveal] = useState(false);
+  const [worldFlash, setWorldFlash] = useState(false);
+  const [thumbFor, setThumbFor] = useState<'pressure' | 'cruelty' | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const pulseTimers = useRef<number[]>([]);
@@ -64,6 +68,12 @@ export function App() {
   const termClose = useRef<number | null>(null);
   const loopClose = useRef<number | null>(null);
   const hairlineClose = useRef<number | null>(null);
+  const immersiveRef = useRef(false);
+  const revealTimer = useRef<number | null>(null);
+  const worldFlashTimer = useRef<number | null>(null);
+  const thumbTimer = useRef<number | null>(null);
+  const sliderDragging = useRef(false);
+  const seenForcings = useRef<Set<string>>(new Set());
 
   const world = WORLDS[worldKey];
 
@@ -85,6 +95,11 @@ export function App() {
     setPlayOver(null);
     setPublish({ open: false, status: 'idle' });
     setMode('phenomenon');
+    setImmersive(false);
+    immersiveRef.current = false;
+    setTopReveal(false);
+    setThumbFor(null);
+    seenForcings.current = new Set();
     forceTermShown.current = false;
     setVersion((v) => v + 1);
   }, [worldKey]);
@@ -96,13 +111,14 @@ export function App() {
 
   // —— 术语浮现 ——
   const exposeTerm = useCallback((id: TermId, x: number, y: number) => {
+    if (immersiveRef.current) return;
     if (!registerExposure(id)) return;
     setTermPopup({ id, x, y, nonce: Date.now() });
   }, []);
 
   useEffect(() => {
     if (!termPopup) return;
-    const timer = window.setTimeout(() => setTermPopup(null), 2600);
+    const timer = window.setTimeout(() => setTermPopup(null), 1200);
     return () => window.clearTimeout(timer);
   }, [termPopup]);
 
@@ -139,7 +155,7 @@ export function App() {
 
   useEffect(() => {
     if (!flash) return;
-    const timer = window.setTimeout(() => setFlash(null), 2800);
+    const timer = window.setTimeout(() => setFlash(null), 1200);
     return () => window.clearTimeout(timer);
   }, [flash]);
 
@@ -183,9 +199,10 @@ export function App() {
       if (u.state.ended) return;
       const result = u.tick();
       ingest(result.cues);
-      const authored = result.fired.filter((name) => !name.startsWith('调性.'));
+      const authored = result.fired.filter((name) => !name.startsWith('调性.') && !seenForcings.current.has(name));
       if (authored.length > 0) {
         const name = authored[authored.length - 1]!;
+        seenForcings.current.add(name);
         setFlash({ name, at: Date.now() });
         if (!forceTermShown.current) {
           forceTermShown.current = true;
@@ -201,24 +218,27 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
-      if (mode === 'play') return;
+      if (mode === 'play' || publish.open || immersiveRef.current) return;
       e.preventDefault();
       setMode((m) => (m === 'structure' ? 'phenomenon' : 'structure'));
       setHover(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode]);
+  }, [mode, publish.open]);
 
-  // —— ← →：切换示例世界（测试脚手架，不是产品形态） ——
+  // —— ← →：切换示例世界；右下角 1/2 只浮现 1.2 秒 ——
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      if (mode === 'play' || publish.open) return;
+      if (mode === 'play' || publish.open || immersiveRef.current) return;
       if (e.target instanceof HTMLInputElement) return;
       e.preventDefault();
       const i = WORLD_ORDER.indexOf(worldKey);
       const next = e.key === 'ArrowRight' ? (i + 1) % WORLD_ORDER.length : (i - 1 + WORLD_ORDER.length) % WORLD_ORDER.length;
+      if (worldFlashTimer.current !== null) window.clearTimeout(worldFlashTimer.current);
+      setWorldFlash(true);
+      worldFlashTimer.current = window.setTimeout(() => setWorldFlash(false), 1200);
       setWorldKey(WORLD_ORDER[next]!);
     };
     window.addEventListener('keydown', onKey);
@@ -265,6 +285,10 @@ export function App() {
   const handleCharacterHover = useCallback(
     (entity: string | null, rect: DOMRect | null) => {
       cancelHairlineClose();
+      if (immersiveRef.current) {
+        setHover(null);
+        return;
+      }
       if (entity && rect) {
         setHover({ entity, rect });
         if (hoverEntity.current !== entity) {
@@ -333,6 +357,8 @@ export function App() {
 
   const enterPlay = () => {
     if (!runtime) return;
+    immersiveRef.current = false;
+    setImmersive(false);
     setPlaySnapshot(runtime.universe.snapshot());
     setRemaining(PLAY_SECONDS);
     setPlayOver(null);
@@ -389,6 +415,72 @@ export function App() {
     startWorker();
   };
 
+  // —— 隐形化：角落按钮、滑块头、沉浸模式 ——
+  const revealTop = () => {
+    if (revealTimer.current !== null) {
+      window.clearTimeout(revealTimer.current);
+      revealTimer.current = null;
+    }
+    setTopReveal(true);
+  };
+
+  const scheduleHideTop = () => {
+    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
+    revealTimer.current = window.setTimeout(() => setTopReveal(false), 1500);
+  };
+
+  const showThumbFor = (id: 'pressure' | 'cruelty') => {
+    if (thumbTimer.current !== null) {
+      window.clearTimeout(thumbTimer.current);
+      thumbTimer.current = null;
+    }
+    setThumbFor(id);
+  };
+
+  const hideThumbAfter = (ms: number) => {
+    if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
+    thumbTimer.current = window.setTimeout(() => setThumbFor(null), ms);
+  };
+
+  const toggleImmersive = () => {
+    const next = !immersiveRef.current;
+    immersiveRef.current = next;
+    setImmersive(next);
+    if (next) {
+      setTopReveal(false);
+      setThumbFor(null);
+      setTermPopup(null);
+      setTermCard(null);
+      setHover(null);
+      setLoopHover(null);
+      setFlash(null);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      const key = e.key.toLowerCase();
+      if (key === 'f') {
+        if (mode !== 'phenomenon' || publish.open) return;
+        e.preventDefault();
+        toggleImmersive();
+        return;
+      }
+      if (mode === 'play' || publish.open || immersiveRef.current) return;
+      if (key === 'p') {
+        e.preventDefault();
+        enterPlay();
+      } else if (key === 'r') {
+        e.preventDefault();
+        openPublish();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, publish.open, runtime, tuning, worldKey]);
+
   const hasChord = (rule: IRRule) => rule.effects.some((e) => e.k === 'apply');
 
   if (!snap) return <div className="fatal">正在装载世界…</div>;
@@ -397,7 +489,12 @@ export function App() {
   const loopInfo = loopHover ? runtime?.ir.loops.find((l) => l.id === loopHover.id) : undefined;
 
   return (
-    <div className="studio" data-testid="studio" data-mode={mode}>
+    <div
+      className={`studio ${immersive ? 'is-immersive' : ''}`}
+      data-testid="studio"
+      data-mode={mode}
+      data-immersive={immersive}
+    >
       {mode === 'phenomenon' && (
         <div className="layer layer--phenomenon">
           <Scene
@@ -450,21 +547,40 @@ export function App() {
 
       {mode !== 'play' && (
         <header className="hud hud--top">
+          <div
+            className="reveal-zone"
+            data-testid="reveal-zone"
+            onMouseEnter={revealTop}
+            onMouseLeave={scheduleHideTop}
+          />
           <div className="hud__left">
             <span className="brand" data-ui="brand">
               neurou
             </span>
-            <span className="world-title" data-ui="world-title">
-              {world.title}
-            </span>
           </div>
 
-          <div className="hud__right">
-            <button className="ghost-btn" data-ui="play-btn" onClick={enterPlay} data-testid="enter-play">
-              试玩
+          <div className={`hud__right ${topReveal ? 'is-revealed' : ''}`}>
+            <button
+              className="icon-btn"
+              data-ui="play-btn"
+              onClick={enterPlay}
+              onMouseEnter={revealTop}
+              data-testid="enter-play"
+              aria-label="试玩"
+              title="试玩（P）"
+            >
+              ▶
             </button>
-            <button className="ghost-btn" data-ui="publish-btn" onClick={openPublish} data-testid="open-publish">
-              发布
+            <button
+              className="icon-btn"
+              data-ui="publish-btn"
+              onClick={openPublish}
+              onMouseEnter={revealTop}
+              data-testid="open-publish"
+              aria-label="发布"
+              title="发布（R）"
+            >
+              ↑
             </button>
           </div>
         </header>
@@ -472,49 +588,78 @@ export function App() {
 
       {mode === 'phenomenon' && (
         <footer className="hud hud--bottom">
-          <div className="mixer">
-            <div className="mixer__label" data-ui="mixer-label">
-              <Term id="调性" onOpen={openTerm}>
-                调性
-              </Term>
-            </div>
-            <label className="slider">
-              <span className="slider__name" data-ui="slider-name">
-                压力 ↔ 舒缓
-              </span>
+          <div className="mixer" data-ui="tuner">
+            <label
+              className={`slider ${thumbFor === 'pressure' ? 'is-thumb' : ''}`}
+              data-testid="slider-block-pressure"
+              onPointerEnter={() => showThumbFor('pressure')}
+              onPointerLeave={() => {
+                if (sliderDragging.current) return;
+                if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
+                setThumbFor(null);
+              }}
+            >
+              <span className="slider__name">压力</span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={tuning.pressure}
-                aria-label="压力与舒缓"
+                aria-label="压力"
                 data-testid="slider-pressure"
                 onPointerDown={(e) => {
+                  sliderDragging.current = true;
+                  showThumbFor('pressure');
                   setDragging(true);
                   exposeTerm('调性', e.clientX + 12, e.clientY - 30);
                 }}
-                onPointerUp={() => setDragging(false)}
-                onPointerCancel={() => setDragging(false)}
+                onPointerUp={() => {
+                  sliderDragging.current = false;
+                  setDragging(false);
+                  hideThumbAfter(1000);
+                }}
+                onPointerCancel={() => {
+                  sliderDragging.current = false;
+                  setDragging(false);
+                  hideThumbAfter(1000);
+                }}
                 onChange={(e) => changeTuning({ ...tuning, pressure: Number(e.target.value) })}
               />
             </label>
-            <label className="slider">
-              <span className="slider__name" data-ui="slider-name">
-                残酷 ↔ 温情
-              </span>
+            <label
+              className={`slider ${thumbFor === 'cruelty' ? 'is-thumb' : ''}`}
+              data-testid="slider-block-cruelty"
+              onPointerEnter={() => showThumbFor('cruelty')}
+              onPointerLeave={() => {
+                if (sliderDragging.current) return;
+                if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
+                setThumbFor(null);
+              }}
+            >
+              <span className="slider__name">残酷</span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={tuning.cruelty}
-                aria-label="残酷与温情"
+                aria-label="残酷"
                 data-testid="slider-cruelty"
                 onPointerDown={(e) => {
+                  sliderDragging.current = true;
+                  showThumbFor('cruelty');
                   setDragging(true);
                   exposeTerm('调性', e.clientX + 12, e.clientY - 30);
                 }}
-                onPointerUp={() => setDragging(false)}
-                onPointerCancel={() => setDragging(false)}
+                onPointerUp={() => {
+                  sliderDragging.current = false;
+                  setDragging(false);
+                  hideThumbAfter(1000);
+                }}
+                onPointerCancel={() => {
+                  sliderDragging.current = false;
+                  setDragging(false);
+                  hideThumbAfter(1000);
+                }}
                 onChange={(e) => changeTuning({ ...tuning, cruelty: Number(e.target.value) })}
               />
             </label>
@@ -522,7 +667,7 @@ export function App() {
         </footer>
       )}
 
-      {mode !== 'play' && (
+      {mode !== 'play' && worldFlash && (
         <div className="world-index" data-ui="world-index" data-testid="world-index">
           {WORLD_ORDER.indexOf(worldKey) + 1} / {WORLD_ORDER.length}
         </div>

@@ -1466,10 +1466,6 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 3px;
 }
 
-/* ============================================================
-   极简修正：全屏即宇宙，界面元素退到背景里
-   ============================================================ */
-
 /* 1. 段落名与进度条：默认极淡，悬停才升 */
 .scene__phase {
   opacity: 0.26;
@@ -1824,3 +1820,326 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: 0.08em;
   opacity: 0.32;
 }
+
+
+/* ============================================================
+   隐形化修正：首屏几乎什么都没有
+   ============================================================ */
+
+/* 品牌只留一个极淡的字标；世界标题常驻移除 */
+.brand {
+  opacity: 0.4;
+  font-size: 17px;
+}
+
+.world-title {
+  display: none;
+}
+
+/* 右上角按钮：默认隐形，悬停 120×60 区域 / P / R 才浮出 */
+.hud__left,
+.hud__right {
+  position: relative;
+  z-index: 1;
+}
+
+/* 右侧容器本身不拦截鼠标，让下面的 120×60 热区接管；只有浮出的按钮可点。 */
+.hud__right {
+  pointer-events: none;
+}
+
+.reveal-zone {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: 60px;
+  z-index: 0;
+  pointer-events: auto;
+}
+
+.icon-btn {
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+  padding: 8px 10px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.hud__right.is-revealed .icon-btn {
+  opacity: 0.5;
+  pointer-events: auto;
+}
+
+.hud__right.is-revealed .icon-btn:hover {
+  opacity: 1;
+}
+
+/* 滑块：1px 轨道 + 两个 2 字标签；滑块头悬停才出现 */
+.mixer {
+  opacity: 0.25;
+  transition: opacity 0.35s ease;
+}
+
+.mixer:hover {
+  opacity: 0.92;
+}
+
+.slider {
+  gap: 8px;
+}
+
+.slider__name {
+  opacity: 1;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+input[type="range"] {
+  width: 128px;
+  height: 1px;
+  background: rgba(234, 228, 216, 0.18);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  width: 8px;
+  height: 8px;
+  background: rgba(234, 228, 216, 0.75);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  background: rgba(234, 228, 216, 0.75);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.slider.is-thumb input[type="range"]::-webkit-slider-thumb {
+  opacity: 0.6;
+}
+
+.slider.is-thumb input[type="range"]::-moz-range-thumb {
+  opacity: 0.6;
+}
+
+/* 段落名只在切换时浮现 2 秒；没有进度条 */
+.scene__phase {
+  opacity: 0;
+  animation: phaseFlash 2s ease forwards;
+  pointer-events: none;
+}
+
+.scene__phase:hover {
+  opacity: 0;
+}
+
+.scene__phase-bar {
+  display: none;
+}
+
+@keyframes phaseFlash {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.55;
+  }
+  74% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 世界索引只在 ← → 时浮现 1.2 秒 */
+.world-index {
+  opacity: 0;
+  animation: indexFlash 1.2s ease forwards;
+}
+
+@keyframes indexFlash {
+  0% {
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.55;
+  }
+  70% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 力迫提示条：只出现 1.2 秒 */
+.ticker {
+  opacity: 0;
+  animation: tickerFlash 1.2s ease forwards;
+}
+
+@keyframes tickerFlash {
+  0% {
+    opacity: 0;
+  }
+  16% {
+    opacity: 0.4;
+  }
+  70% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 术语浮出：1.2 秒 */
+.term-popup {
+  animation: termFloat 1.2s ease forwards;
+}
+
+/* 发布：纯黑、无面板；默认只有分数 + 一句诊断 */
+.layer--publish {
+  background: #000;
+  padding: 40px;
+}
+
+.publish__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(720px, 100%);
+}
+
+.publish__score {
+  display: block;
+  font-size: 120px;
+  line-height: 1;
+  margin: 0;
+}
+
+.publish__diagnosis {
+  margin: 18px 0 0;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.publish__more {
+  margin-top: 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(234, 228, 216, 0.14);
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.publish__more:hover {
+  opacity: 1;
+  border-color: rgba(234, 228, 216, 0.3);
+}
+
+.publish__detail {
+  width: 100%;
+  max-width: 640px;
+  margin: 26px auto 0;
+  padding-top: 20px;
+  border-top: 1px solid rgba(234, 228, 216, 0.1);
+  text-align: left;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.publish__zone {
+  margin-bottom: 10px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.publish__long {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--ink);
+}
+
+/* 结构层：纯黑、细线、极淡的标签；品丝已在代码里收紧到 >80% */
+.layer--structure {
+  background: #000;
+}
+
+.layer--structure .ghost {
+  opacity: 0.12;
+}
+
+.layer--structure .loop__path {
+  stroke-width: 0.6;
+}
+
+.layer--structure .loop:hover .loop__path,
+.layer--structure .loop--active .loop__path,
+.layer--structure .loop:focus .loop__path {
+  stroke-width: 1.2;
+}
+
+.layer--structure .loop__label {
+  opacity: 0.22;
+}
+
+.layer--structure .loop:hover .loop__label,
+.layer--structure .loop--active .loop__label {
+  opacity: 1;
+}
+
+.layer--structure .voice__name {
+  fill-opacity: 0.35;
+}
+
+.structure__note {
+  opacity: 0.3;
+}
+
+/* 沉浸模式：只留世界 */
+.studio.is-immersive .hud {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.studio.is-immersive [data-ui] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.studio.is-immersive .ticker,
+.studio.is-immersive .cues,
+.studio.is-immersive .term-popup,
+.studio.is-immersive .term-card,
+.studio.is-immersive .hairlines,
+.studio.is-immersive .scene__phase,
+.studio.is-immersive .reveal-zone,
+.studio.is-immersive .tab-hint {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.studio.is-immersive .actor {
+  pointer-events: none;
+}
+

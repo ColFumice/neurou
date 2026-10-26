@@ -10,10 +10,10 @@ page.on('console', (m) => {
 await page.goto('http://127.0.0.1:5189/', { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="scene"]', { timeout: 10000 });
 const hasScene = (await page.locator('[data-testid="scene"]').count()) === 1;
-await page.locator('[data-testid="open-publish"]').click();
+await page.keyboard.press('r');
 await page.waitForSelector('[data-testid="publish-result"]', { timeout: 15000 });
-const text = await page.locator('[data-testid="publish-result"]').innerText();
-const score = Number((text.match(/(\d+)\s*\/100/) ?? [])[1] ?? -1);
-console.log(JSON.stringify({ hasScene, score, errors }, null, 2));
+const lines = await page.locator('[data-publish-line]').allInnerTexts();
+const score = Number(lines[0]?.trim() ?? -1);
+console.log(JSON.stringify({ hasScene, score, lines, errors }, null, 2));
 await browser.close();
 process.exitCode = hasScene && score > 0 && errors.length === 0 ? 0 : 1;

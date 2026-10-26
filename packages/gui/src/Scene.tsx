@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { WorldIR } from '@neurou/core';
 import type { ViewSnapshot } from './types.js';
 import { booleanOf, numeric } from './types.js';
@@ -30,6 +30,28 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
   const sheltered = booleanOf(snap, '蛞蝓猫.在避难所');
   const phase = snap.phase;
   const warmth = Math.max(0, (visuals['烛光'] ?? 0) + 0.4);
+
+  // 段落名只在切换时浮现 2 秒；没有进度条，雨循环靠雨量/暗度/光晕感知。
+  const [phaseFlash, setPhaseFlash] = useState<string | null>(null);
+  const lastPhase = useRef<string | null>(phase);
+  useEffect(() => {
+    if (phase && lastPhase.current && phase !== lastPhase.current) {
+      setPhaseFlash(phase);
+      const timer = window.setTimeout(() => setPhaseFlash(null), 2000);
+      lastPhase.current = phase;
+      return () => window.clearTimeout(timer);
+    }
+    lastPhase.current = phase;
+    return undefined;
+  }, [phase]);
+
+  // 结局也只浮现一次，不做常驻状态条。
+  useEffect(() => {
+    if (!snap.ended) return;
+    setPhaseFlash(`结局 · ${snap.ended}`);
+    const timer = window.setTimeout(() => setPhaseFlash(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [snap.ended]);
 
   const drops = useMemo(() => {
     const count = Math.round(28 + intensity * 72);
@@ -251,14 +273,9 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
       <div className="scene__vignette" style={{ opacity: Math.min(0.6, Math.abs(visuals['暗角'] ?? 0) * 0.8) }} />
       <div className="scene__grain" />
 
-      {!ghost && (phase || snap.ended) && (
+      {!ghost && phaseFlash && (
         <div className="scene__phase" data-ui="phase" aria-hidden="true">
-          <span className="scene__phase-name">{snap.ended ? `结局 · ${snap.ended}` : phase}</span>
-          {!snap.ended && (
-            <span className="scene__phase-bar">
-              <i style={{ transform: `scaleX(${Math.max(0.02, snap.phaseProgress)})` }} />
-            </span>
-          )}
+          <span className="scene__phase-name">{phaseFlash}</span>
         </div>
       )}
     </div>

@@ -98,6 +98,20 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
   const pulseOwner = activeString ? world.strings.find((s) => s.id === activeString)?.owner ?? null : null;
   void pulseSet;
 
+  // 只保留张力 >80% 的品丝，并给出最多 5 个（张力最高的那些）。
+  const hotFrets = useMemo(() => {
+    const all: { key: string; tension: number }[] = [];
+    for (const seg of layout.segs.values()) {
+      if (!isNumeric(seg.s) || seg.value === null) continue;
+      for (const f of seg.frets) {
+        const tension = 1 - Math.min(1, Math.abs(seg.value - f.v) / (seg.max - seg.min || 1));
+        if (tension > 0.8) all.push({ key: `${seg.s.id}:${f.kind}`, tension });
+      }
+    }
+    all.sort((a, b) => b.tension - a.tension);
+    return new Set(all.slice(0, 5).map((x) => x.key));
+  }, [layout]);
+
   return (
     <div className="layer layer--structure" data-testid="structure">
       <div className="ghost" aria-hidden="true">
@@ -138,7 +152,8 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
                 seg.frets.map((f, i) => {
                   if (seg.value === null) return null;
                   const tension = 1 - Math.min(1, Math.abs(seg.value - f.v) / (seg.max - seg.min || 1));
-                  if (tension <= 0.7) return null;
+                  if (tension <= 0.8) return null;
+                  if (!hotFrets.has(`${seg.s.id}:${f.kind}`)) return null;
                   const ft = (f.v - seg.min) / (seg.max - seg.min || 1);
                   return (
                     <line
