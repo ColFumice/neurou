@@ -1,23 +1,36 @@
 /* ============================================================
-   墨网测试体：3 节点、4 根横向弦、2 条回路
-   白纸黑墨；Tab = 反色 + 全局失焦 + 局部聚焦
+   调律台基础：纸与墨
+   v0.6 起首屏只有一张纸、一根弦（StringField 绘制）；
+   这里只留颜色 token、字体 token 与最外层容器，没有任何组件装饰。
    ============================================================ */
+
+:root {
+  --paper: #fafafa;
+  --ink: #0b0b0b;
+  --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
+  --sans: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
 
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
-  background: #fafafa;
+  background: var(--paper);
   overflow: hidden;
 }
 
+body {
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
 .ink-app {
-  --paper: #fafafa;
-  --ink: #0b0b0b;
-  --ink-soft: rgba(0, 0, 0, 0.55);
-  --ink-faint: rgba(0, 0, 0, 0.2);
-  --shadow: rgba(0, 0, 0, 0.36);
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -25,222 +38,4 @@ body,
   color: var(--ink);
   user-select: none;
   touch-action: none;
-}
-
-.ink-app.is-inverted {
-  --paper: #000000;
-  --ink: #f2f2f2;
-  --ink-soft: rgba(255, 255, 255, 0.55);
-  --ink-faint: rgba(255, 255, 255, 0.2);
-  --shadow: rgba(255, 255, 255, 0.32);
-}
-
-.ink-base,
-.ink-focus {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.ink-focus {
-  pointer-events: none;
-}
-
-/* —— 节点 —— */
-
-.ink-node {
-  cursor: pointer;
-}
-
-.ink-node-hit {
-  fill: transparent;
-}
-
-.ink-node-spine {
-  stroke: var(--ink);
-  stroke-width: 1;
-  opacity: 0.12;
-}
-
-.ink-node-dot {
-  fill: var(--ink);
-  opacity: 0.4;
-}
-
-.ink-node-label {
-  fill: var(--ink);
-  opacity: 0.55;
-  font-family: var(--serif);
-  font-size: 13px;
-  letter-spacing: 0.14em;
-}
-
-.ink-node-ring {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 1;
-  opacity: 0.35;
-}
-
-.ink-focus-node .ink-node-dot {
-  opacity: 1;
-}
-
-.ink-focus-node .ink-node-label {
-  opacity: 0.95;
-}
-
-/* —— 弦 —— */
-
-.ink-string {
-  cursor: grab;
-}
-
-.ink-string:active {
-  cursor: grabbing;
-}
-
-.ink-ribbon {
-  pointer-events: none;
-  transition: filter 0.12s ease;
-}
-
-.ink-bleed {
-  fill: var(--ink);
-  opacity: 0.12;
-  filter: blur(4px);
-  pointer-events: none;
-}
-
-.ink-trail {
-  fill: var(--ink);
-  opacity: 0.11;
-  filter: blur(2.5px);
-  pointer-events: none;
-}
-
-.ink-ribbon.is-lifted {
-  filter: drop-shadow(0 12px 18px var(--shadow));
-}
-
-.ink-app.is-inverted .ink-ribbon.is-lifted {
-  filter: drop-shadow(0 0 14px var(--shadow));
-}
-
-.ink-flow {
-  fill: none;
-  stroke: var(--paper);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-dasharray: 6 120;
-  opacity: 0.58;
-  pointer-events: none;
-  animation-name: inkFlow;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-}
-
-@keyframes inkFlow {
-  from {
-    stroke-dashoffset: 0;
-  }
-  to {
-    stroke-dashoffset: -126;
-  }
-}
-
-.ink-string-name {
-  fill: var(--ink);
-  opacity: 0.5;
-  font-family: var(--serif);
-  font-size: 12px;
-  letter-spacing: 0.16em;
-  pointer-events: none;
-}
-
-.ink-marker {
-  stroke: var(--paper);
-  stroke-width: 1.6;
-  opacity: 0.62;
-  pointer-events: none;
-}
-
-.ink-fret {
-  stroke: var(--paper);
-  pointer-events: none;
-}
-
-.ink-fret--verge {
-  stroke-width: 1.4;
-  opacity: 0.55;
-}
-
-.ink-fret--safe {
-  stroke-width: 0.8;
-  opacity: 0.22;
-}
-
-.ink-hit {
-  cursor: grab;
-}
-
-/* —— 回路 —— */
-
-.ink-loop {
-  pointer-events: none;
-}
-
-.ink-loop path {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 1;
-  opacity: 0.13;
-}
-
-.ink-loop--balance path {
-  stroke-dasharray: 3 5;
-}
-
-.ink-loop-name {
-  fill: var(--ink);
-  opacity: 0.32;
-  font-family: var(--serif);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-}
-
-/* —— 聚焦层：反色后它保持绝对清晰 —— */
-
-.ink-focus .ink-ribbon {
-  filter: none;
-}
-
-.ink-focus .ink-string-name {
-  opacity: 0.92;
-}
-
-.ink-focus .ink-flow {
-  opacity: 0.85;
-}
-
-.ink-fatal {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px;
-  background: #fafafa;
-  color: #111;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ink-flow {
-    animation: none;
-    opacity: 0.3;
-  }
 }

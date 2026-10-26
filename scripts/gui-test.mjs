@@ -1,9 +1,8 @@
 /**
- * 墨网测试体验收：3 节点、4 根横向弦、2 条回路、Tab 反色失焦，
- * 以及 v0.5 的两个新交互：点击处墨晕生长→消散、贯穿屏幕的基准弦塑形+发声。
+ * 单弦调律台（v0.6）验收：一张白纸 + 一根黑弦 + 隐形键盘映射 + 8 类弦 + Tab/ESC。
  *
  * 运行：node scripts/gui-test.mjs（需要 127.0.0.1:5188 的 dev server）
- * 结果：artifacts/ink-test.json + artifacts/8x-*.png
+ * 结果：artifacts/string-test.json + artifacts/9x-*.png
  */
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -20,303 +19,379 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 }
 
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await chromium.launch({
+  channel: 'msedge',
+  headless: true,
+  args: ['--autoplay-policy=no-user-gesture-required'],
+});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('console', (m) => {
-  if (m.type() === 'error') consoleErrors.push(m.text());
+  if (m.type() === 'error' && !m.text().includes('favicon')) consoleErrors.push(m.text());
 });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
 await page.goto(URL, { waitUntil: 'networkidle' });
-await page.waitForSelector('[data-testid="ink-app"]');
+await page.waitForSelector('[data-testid="string-field"]');
 await page.waitForTimeout(900);
 
-// ============ 1. 默认世界：3 节点、4 弦、2 回路 ============
-check('默认是墨网测试体', (await page.locator('[data-testid="ink-app"]').count()) === 1);
-check('背景是纸白', (await page.locator('[data-testid="ink-app"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
-check('只有 3 个节点', (await page.locator('[data-node]').count()) === 3);
-check('只有 4 根弦', (await page.locator('[data-string]').count()) === 4);
-check('只有 2 条回路', (await page.locator('[data-loop]').count()) === 2);
+const field = page.locator('[data-testid="string-field"]');
+const attr = async (name) => field.getAttribute(name);
+const state = () => page.evaluate(() => window.__neurouString.state());
+const u = () => page.evaluate(() => window.__neurouString.u());
+const lastTouch = () => page.evaluate(() => window.__neurouString.lastTouch());
+const rms = () => page.evaluate(() => window.__neurouString.rms());
+const reset = async () => {
+  await page.evaluate(() => window.__neurouString.reset());
+  await page.waitForTimeout(260);
+};
+const hash = async () => createHash('sha256').update(await page.screenshot()).digest('hex').slice(0, 10);
 
-const nodeNames = await page.locator('.ink-node-label').allTextContents();
-const stringNames = await page.locator('.ink-string-name').allTextContents();
-const loopNames = await page.locator('.ink-loop-name').allTextContents();
-check('节点名', ['自我', '他人', '环境'].every((n) => nodeNames.includes(n)), nodeNames.join(' / '));
-check('弦名', ['信任', '恐惧', '能量', '压力'].every((n) => stringNames.includes(n)), stringNames.join(' / '));
-check('回路名', ['正反馈', '负反馈'].every((n) => loopNames.includes(n)), loopNames.join(' / '));
-
-check('没有侧栏/工具栏/按钮/输入框', (await page.locator('button, input, .desk, .desk__toolbar, .desk__preview').count()) === 0);
-
-// 节点在左列：所有 dot 的 cx 一致，cy 不同
-const nodes = await page.locator('.ink-node-dot').evaluateAll((ns) => ns.map((n) => ({ cx: Number(n.getAttribute('cx')), cy: Number(n.getAttribute('cy')) })));
-check('节点排成一列', new Set(nodes.map((n) => n.cx)).size === 1 && new Set(nodes.map((n) => n.cy)).size === 3, JSON.stringify(nodes));
-
-// 弦是横向的：每根 flow 的 bbox 宽度 > 900
-const flowBoxes = await page.locator('.ink-flow').evaluateAll((ns) => ns.map((n) => {
-  const b = n.getBBox();
-  return { w: Math.round(b.width), h: Math.round(b.height) };
-}));
-check('四根弦都是横向的', flowBoxes.length === 4 && flowBoxes.every((b) => b.w > 900), JSON.stringify(flowBoxes));
-
-// ============ 2. 水墨材质：半透明、粗细不一、流动 ============
-const ribbons = await page.locator('.ink-ribbon').evaluateAll((ns) => ns.map((n) => ({
-  fill: getComputedStyle(n).fill,
-  opacity: Number(getComputedStyle(n).fillOpacity),
-  h: Math.round(n.getBBox().height),
-})));
-check('弦是深黑', ribbons.every((r) => r.fill === 'rgb(11, 11, 11)'), JSON.stringify(ribbons));
-check('弦是半透明（0.6–0.85）', ribbons.every((r) => r.opacity >= 0.6 && r.opacity <= 0.85), ribbons.map((r) => r.opacity).join(' / '));
-const widths = await page.locator('.ink-ribbon').evaluateAll((ns) => ns.map((n) => Math.round(n.getBBox().height)));
-check('粗细不一', new Set(widths).size >= 2, widths.join(' / '));
-check('有墨迹晕染层', (await page.locator('.ink-bleed').count()) === 4);
-
-const durations = await page.locator('.ink-flow').evaluateAll((ns) => [...new Set(ns.map((n) => getComputedStyle(n).animationDuration))]);
-check('流动速度随张力分档', durations.length >= 2, durations.join(' / '));
-
-const flow = page.locator('[data-string="自我.信任"] .ink-flow');
-const off0 = await flow.evaluate((n) => getComputedStyle(n).strokeDashoffset);
-await page.waitForTimeout(500);
-const off1 = await flow.evaluate((n) => getComputedStyle(n).strokeDashoffset);
-check('墨迹在流动', off0 !== off1, `${off0} → ${off1}`);
-
-const hashes = [];
-for (let i = 0; i < 3; i++) {
-  const buf = await page.screenshot({ path: `artifacts/86-flow-${i}.png` });
-  hashes.push(createHash('sha256').update(buf).digest('hex').slice(0, 10));
-  if (i < 2) await page.waitForTimeout(420);
-}
-check('连续三帧不同', new Set(hashes).size === 3, hashes.join(' / '));
-await page.screenshot({ path: 'artifacts/80-ink.png' });
-
-// 灰度 token：整个 app 没有彩色
-const badColors = await page.evaluate(() => {
-  const parse = (v) => {
-    const m = String(v).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-  };
-  const bad = [];
-  for (const el of document.querySelectorAll('[data-testid="ink-app"] *')) {
-    const s = getComputedStyle(el);
-    for (const prop of ['color', 'backgroundColor', 'stroke', 'fill']) {
-      const rgb = parse(s[prop]);
-      if (rgb && Math.max(...rgb) - Math.min(...rgb) > 2) {
-        bad.push(`${el.tagName}.${prop}=${s[prop]}`);
-        if (bad.length > 6) return bad;
-      }
-    }
-  }
-  return bad;
-});
-check('DOM 里没有彩色 token', badColors.length === 0, badColors.join(' | '));
-
-// ============ 3. 悬停：弹性拉伸 + 墨影 ============
-const ribbon = page.locator('[data-string="自我.信任"] .ink-ribbon');
-const d0 = await ribbon.getAttribute('d');
-await page.mouse.move(700, 180);
-await page.waitForTimeout(300);
-const d1 = await ribbon.getAttribute('d');
-check('悬停使弦形变', d0 !== d1, `${(d0 ?? '').slice(0, 32)} → ${(d1 ?? '').slice(0, 32)}`);
-const shadow = await ribbon.evaluate((n) => getComputedStyle(n).filter);
-check('悬停出现墨影', shadow.includes('drop-shadow'), shadow);
-check('墨影有模糊', /blur|shadow/.test(shadow), shadow);
-check('悬停出现拉丝残影', (await page.locator('[data-string="自我.信任"] .ink-trail').count()) === 1);
-await page.screenshot({ path: 'artifacts/81-hover.png' });
-
-// ============ 4. 拖动：控制点拉伸 + 值位置改变 ============
-const marker0 = Number(await page.locator('[data-string="自我.信任"] .ink-marker').getAttribute('x1'));
-await page.mouse.down();
-await page.mouse.move(700, 100, { steps: 10 });
-await page.waitForTimeout(250);
-const marker1 = Number(await page.locator('[data-string="自我.信任"] .ink-marker').getAttribute('x1'));
-const dDrag = await ribbon.getAttribute('d');
-check('拖动改变弦的值位置', marker1 !== marker0, `x ${marker0} → ${marker1}`);
-check('拖动继续拉伸贝塞尔', dDrag !== d1, '控制点已变');
-await page.screenshot({ path: 'artifacts/82-drag.png' });
-await page.mouse.up();
-await page.waitForTimeout(600);
-await page.mouse.move(700, 180);
-await page.waitForTimeout(200);
-
-// ============ 5. Tab：反色 + 2px 失焦 + 局部聚焦 ============
-await page.keyboard.press('Tab');
-await page.waitForTimeout(300);
-const inverted = await page.locator('[data-testid="ink-app"]').getAttribute('data-inverted');
-check('Tab 进入反色', inverted === 'true', String(inverted));
-check('反色后背景纯黑', (await page.locator('[data-testid="ink-app"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(0, 0, 0)');
-const blur = await page.locator('.ink-base').evaluate((n) => getComputedStyle(n).filter);
-check('全局失焦 2px', blur.includes('blur(2px)'), blur);
-check('悬停弦被局部聚焦', (await page.locator('[data-focus-string]').count()) === 1, `${await page.locator('[data-focus-string]').count()} 条`);
-const focusColor = await page.locator('[data-focus-string] .ink-ribbon').first().evaluate((n) => getComputedStyle(n).fill);
-check('聚焦弦是白线', focusColor === 'rgb(242, 242, 242)', focusColor);
-await page.screenshot({ path: 'artifacts/83-tab-string.png' });
-
-await page.mouse.click(112, 700);
-await page.waitForTimeout(300);
-check('点击节点进入聚焦', (await page.locator('[data-focus-node]').count()) === 1, await page.locator('[data-focus-node]').getAttribute('data-focus-node').catch(() => 'none'));
-check('节点对应的弦也清晰', (await page.locator('[data-focus-string]').count()) >= 1, `${await page.locator('[data-focus-string]').count()} 条`);
-await page.screenshot({ path: 'artifacts/84-tab-node.png' });
-
-await page.keyboard.press('Tab');
-await page.waitForTimeout(300);
-check('再次 Tab 恢复白底', (await page.locator('[data-testid="ink-app"]').getAttribute('data-inverted')) === 'false');
-check('恢复后没有模糊', (await page.locator('.ink-base').evaluate((n) => getComputedStyle(n).filter)) === 'none');
-check('恢复后聚焦层消失', (await page.locator('.ink-focus').count()) === 0);
-await page.screenshot({ path: 'artifacts/85-back.png' });
-
-// ============ 6. 墨晕：点击处魔法生长，约 3s 后消散 ============
-const bloomCanvas = page.locator('[data-testid="ink-blooms"]');
-check('有墨晕画布', (await bloomCanvas.count()) === 1);
-check('墨晕画布不挡指针', (await bloomCanvas.evaluate((n) => getComputedStyle(n).pointerEvents)) === 'none');
-
-const inkPixels = () =>
+/** 画布墨迹统计：像素 alpha>10 视为墨。 */
+const canvasStats = () =>
   page.evaluate(() => {
-    const canvas = document.querySelector('[data-testid="ink-blooms"]');
-    if (!(canvas instanceof HTMLCanvasElement)) return -1;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return -1;
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let count = 0;
-    for (let i = 3; i < data.length; i += 4) if (data[i] > 8) count++;
-    return count;
-  });
-const inkIsGrayscale = () =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('[data-testid="ink-blooms"]');
-    if (!(canvas instanceof HTMLCanvasElement)) return false;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return false;
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] <= 8) continue;
-      if (Math.abs(data[i] - data[i + 1]) > 1 || Math.abs(data[i + 1] - data[i + 2]) > 1) return false;
-    }
-    return true;
-  });
-/** 墨晕墨迹的包围盒：宽高比必须横向（用户要求：沿水平扩散，不是四面八方）。 */
-const inkBounds = () =>
-  page.evaluate(() => {
-    const canvas = document.querySelector('[data-testid="ink-blooms"]');
+    const canvas = document.querySelector('[data-testid="string-canvas"]');
     if (!(canvas instanceof HTMLCanvasElement)) return null;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     const { width, height } = canvas;
     const data = ctx.getImageData(0, 0, width, height).data;
+    let ink = 0;
+    let colored = 0;
     let minX = width;
     let minY = height;
     let maxX = -1;
     let maxY = -1;
-    let total = 0;
-    let outsideBand = 0;
-    // 点击 y=520，视口高 900：把「横向带 ±130px」换算到画布像素。
-    const clickY = (520 / 900) * height;
-    const band = (130 / 900) * height;
+    const rowCounts = new Array(height).fill(0);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4 + 3] <= 8) continue;
-        total++;
+        const i = (y * width + x) * 4;
+        if (data[i + 3] <= 10) continue;
+        ink++;
+        rowCounts[y]++;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
-        if (Math.abs(y - clickY) > band) outsideBand++;
+        if (Math.abs(data[i] - data[i + 1]) > 1 || Math.abs(data[i + 1] - data[i + 2]) > 1) colored++;
       }
     }
-    if (total === 0) return { w: 0, h: 0, ratio: 0, outsideRatio: 0, total };
-    const w = maxX - minX + 1;
-    const h = maxY - minY + 1;
-    return { w, h, ratio: w / h, outsideRatio: outsideBand / total, total };
+    return {
+      w: width,
+      h: height,
+      ink,
+      colored,
+      bbox: ink === 0 ? { x: 0, y: 0, w: 0, h: 0 } : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+      rows: rowCounts,
+    };
   });
 
-const empty0 = await (async () => {
-  // 上一节点节点时会顺带长一簇墨，等它自然消散后再量空白基线。
-  await page.waitForFunction(
-    () => document.querySelector('[data-testid="ink-blooms"]')?.getAttribute('data-blooms') === '0',
-    null,
-    { timeout: 6000 },
-  );
-  await page.waitForTimeout(120);
-  return inkPixels();
-})();
-check('点击前画布是空的', empty0 === 0, `${empty0} 个墨像素`);
-const spawnedBefore = Number(await bloomCanvas.getAttribute('data-spawned'));
-await page.mouse.click(620, 520);
+/** 横向带计数（总览谱面用）：连续有墨的行算一条带，允许 2px 断裂。 */
+const countRowBands = (rows, threshold = 4, gapTolerance = 26) => {
+  const bands = [];
+  let current = null;
+  let gap = 0;
+  for (let y = 0; y < rows.length; y++) {
+    const hit = rows[y] > threshold;
+    if (hit) {
+      if (!current) current = { start: y, end: y, ink: rows[y] };
+      else current.end = y;
+      current.ink += rows[y];
+      gap = 0;
+    } else if (current) {
+      gap++;
+      if (gap > gapTolerance) {
+        bands.push(current);
+        current = null;
+        gap = 0;
+      }
+    }
+  }
+  if (current) bands.push(current);
+  return bands;
+};
+
+/** 某逻辑 x 处墨迹的纵向范围。 */
+const columnExtent = (logicalX) =>
+  page.evaluate((xLogical) => {
+    const canvas = document.querySelector('[data-testid="string-canvas"]');
+    if (!(canvas instanceof HTMLCanvasElement)) return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const { width, height } = canvas;
+    const x = Math.round((xLogical / 1440) * (width - 1));
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let count = 0;
+    let minY = height;
+    let maxY = -1;
+    for (let y = 0; y < height; y++) {
+      if (data[(y * width + x) * 4 + 3] <= 10) continue;
+      count++;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    return { count, minY, maxY, span: maxY - minY + 1 };
+  }, logicalX);
+
+/** 不在当前弦几何上的残余墨像素（拖尾 / 帧残留）。 */
+const strayInk = () =>
+  page.evaluate(() => {
+    const arr = window.__neurouString.u();
+    const canvas = document.querySelector('[data-testid="string-canvas"]');
+    if (!(canvas instanceof HTMLCanvasElement)) return -1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return -1;
+    const { width, height } = canvas;
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const n = arr.length;
+    const center = height / 2;
+    let stray = 0;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4 + 3] <= 10) continue;
+        const idx = Math.round((x / (width - 1)) * (n - 1));
+        const lineY = center + arr[idx] * (height / 900);
+        if (Math.abs(y - lineY) > 8) stray++;
+      }
+    }
+    return stray;
+  });
+
+// ============ 1. 默认：一张白纸 + 一根水平黑弦 ============
+check('首屏是弦场', (await page.locator('[data-testid="string-field"]').count()) === 1);
+check('只有一张画布', (await page.locator('[data-testid="string-canvas"]').count()) === 1);
+check(
+  '没有任何按钮/输入框/面板',
+  (await page.locator('button, input, textarea, select, .desk, .panel, [data-testid="ink-network"]').count()) === 0,
+);
+check('没有任何常驻文字', (await page.evaluate(() => document.body.innerText.trim())) === '');
+check('背景是纸白', (await page.locator('[data-testid="ink-app"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
+check('默认模式是单弦', (await attr('data-mode')) === 'string');
+check('默认是第一类弦（叙事）', (await attr('data-kind')) === '叙事' && (await attr('data-kind-index')) === '0');
+check('默认没有拨弦', (await attr('data-plucks')) === '0');
+check('键盘映射共 46 键', (await attr('data-key-count')) === '46', String(await attr('data-key-count')));
+check('默认是静止的', (await attr('data-resting')) === 'true');
+
+const restStats = await canvasStats();
+check('静止时只有一条横线', restStats !== null && restStats.bbox.h <= 6 && restStats.bbox.w >= 1400, JSON.stringify(restStats?.bbox));
+check('横线在画面正中', restStats !== null && Math.abs(restStats.bbox.y + restStats.bbox.h / 2 - 450) <= 3, `中心 y=${restStats ? restStats.bbox.y + restStats.bbox.h / 2 : '?'}`);
+check('静止画面没有彩色像素', restStats !== null && restStats.colored === 0, `${restStats?.colored ?? '?'} 个彩色像素`);
+
+const idleA = await hash();
+await page.waitForTimeout(450);
+const idleB = await hash();
+check('静止时没有 idle 动画', idleA === idleB, `${idleA} / ${idleB}`);
+await page.screenshot({ path: 'artifacts/90-string-rest.png' });
+
+// ============ 2. 点击：方向、幅度、振动 ============
+await page.mouse.click(720, 250);
+await page.waitForTimeout(140);
+check('点击后累计一次拨弦', (await attr('data-plucks')) === '1', String(await attr('data-plucks')));
+check('点击位置在弦上方 → 向上拨', (await attr('data-last-direction')) === 'up', String(await attr('data-last-direction')));
+const amp = Number(await attr('data-last-amplitude'));
+check('幅度 = 点击位置到弦的距离', Math.abs(amp - 200) <= 4, String(amp));
+check('点击落在隐形键盘的某个键上', (await attr('data-last-key')) !== '', String(await attr('data-last-key')));
+
+const pluckState = await state();
+check('松手后弦在振动', pluckState.amplitude > 40 && pluckState.resting === false, `amplitude=${pluckState.amplitude.toFixed(1)}`);
+const pluckStats = await canvasStats();
+check('振动时墨迹不再是一条线', pluckStats !== null && pluckStats.bbox.h > 20, JSON.stringify(pluckStats?.bbox));
+check('振动时墨量明显增加（拖影）', restStats !== null && pluckStats !== null && pluckStats.ink > restStats.ink * 2.2, `${restStats?.ink} → ${pluckStats?.ink}`);
+/** 当前行波的波峰位置/强度；用于证明点击是局部行波而不是整弦同步摆。 */
+const wavePeak = () =>
+  page.evaluate(() => {
+    const arr = window.__neurouString.u();
+    const n = arr.length;
+    let absMax = 0;
+    let index = 0;
+    let active = 0;
+    for (let i = 0; i < n; i++) {
+      const value = Math.abs(arr[i]);
+      if (value > absMax) {
+        absMax = value;
+        index = i;
+      }
+      if (value > 10) active++;
+    }
+    return {
+      amp: absMax,
+      x: (index / (n - 1)) * 1440,
+      ends: Math.max(Math.abs(arr[2]), Math.abs(arr[n - 3]), Math.abs(arr[8]), Math.abs(arr[n - 9])),
+      activeRatio: active / n,
+    };
+  });
+const waveA = await wavePeak();
+check(
+  '快速点触是局部行波（两端不动、只有一段弦在响）',
+  waveA.ends < 5 && waveA.activeRatio < 0.6 && waveA.amp > 40,
+  `两端 ${waveA.ends.toFixed(1)}px、活动弦长 ${(waveA.activeRatio * 100).toFixed(0)}%`,
+);
+await page.waitForTimeout(130);
+const waveB = await wavePeak();
+check(
+  '波包沿弦传播（两个时刻的波峰位置不同）',
+  Math.abs(waveA.x - waveB.x) > 50,
+  `波峰 x ${waveA.x.toFixed(0)} → ${waveB.x.toFixed(0)}`,
+);
+await page.screenshot({ path: 'artifacts/91-string-pluck.png' });
+
+const hash1 = await hash();
+await page.waitForTimeout(170);
+const hash2 = await hash();
+check('弦在逐帧运动', hash1 !== hash2, `${hash1} / ${hash2}`);
+
 await page.waitForTimeout(220);
-const bloomEarly = await inkPixels();
-check('点击空白处开始生长墨晕', Number(await bloomCanvas.getAttribute('data-blooms')) >= 1);
-check('墨晕计数递增', Number(await bloomCanvas.getAttribute('data-spawned')) > spawnedBefore);
-await page.waitForTimeout(520);
-const bloomPeak = await inkPixels();
-check('墨量在生长（220ms → 740ms 变多）', bloomPeak > bloomEarly, `${bloomEarly} → ${bloomPeak} 像素`);
-check('墨晕像素是灰度', await inkIsGrayscale());
-await page.waitForTimeout(260);
-const bloomBounds = await inkBounds();
+const stray = await strayInk();
+check('有运动模糊/黑色帧残留', stray > 500, `${stray} 个残余墨像素`);
+
+const arr = await u();
+let peakIndex = 0;
+let peakValue = 0;
+for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) > peakValue) { peakValue = Math.abs(arr[i]); peakIndex = i; }
+let flatIndex = -1;
+for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) < 2) { flatIndex = i; break; }
+const peakX = (peakIndex / (arr.length - 1)) * 1440;
+const flatX = flatIndex >= 0 ? (flatIndex / (arr.length - 1)) * 1440 : 40;
+const peakCol = await columnExtent(peakX);
+const flatCol = await columnExtent(flatX);
 check(
-  '墨晕沿水平方向扩散（宽 ≥ 2.5×高）',
-  bloomBounds !== null && bloomBounds.ratio >= 2.5,
-  bloomBounds === null ? '读取失败' : `${bloomBounds.w}×${bloomBounds.h}px，宽高比 ${bloomBounds.ratio.toFixed(2)}`,
+  '波峰位置更粗',
+  peakCol !== null && flatCol !== null && peakCol.span > Math.max(4, flatCol.span * 1.5),
+  `峰 ${peakCol?.span}px vs 平 ${flatCol?.span}px`,
 );
+check('墨是灰度（无彩色）', pluckStats !== null && pluckStats.colored === 0, `${pluckStats?.colored ?? '?'} 个彩色像素`);
+await page.screenshot({ path: 'artifacts/92-string-wave.png' });
+
+// ============ 3. 拉弦：像拉弓一样弯曲 ============
+await reset();
+await page.mouse.move(400, 450);
+await page.mouse.down();
+await page.mouse.move(400, 190, { steps: 10 });
+await page.waitForTimeout(180);
+check('按住拖动=正在拉弦', (await attr('data-pulling')) === 'true');
+const pullAmp = (await state()).amplitude;
+check('拉弦位移足够大', pullAmp > 140, String(pullAmp.toFixed(1)));
+const pulled = await page.evaluate(() => {
+  const canvas = document.querySelector('[data-testid="string-canvas"]');
+  const ctx = canvas.getContext('2d');
+  const x = Math.round((400 / 1440) * (canvas.width - 1));
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  for (let y = 100; y < 430; y++) {
+    if (data[(y * canvas.width + x) * 4 + 3] > 10) return y;
+  }
+  return -1;
+});
+check('弦在 x=400 处被拉起', pulled > 0, pulled > 0 ? `墨迹到 y=${pulled}` : '没有墨');
+await page.screenshot({ path: 'artifacts/93-string-pull.png' });
+const plucksBeforeRelease = Number(await attr('data-plucks'));
+await page.mouse.up();
+await page.waitForTimeout(160);
+check('松手=一次拨弦', Number(await attr('data-plucks')) === plucksBeforeRelease + 1);
+check('松手后开始振动', (await attr('data-pulling')) === 'false' && (await state()).amplitude > 60);
+await page.screenshot({ path: 'artifacts/94-string-release.png' });
+
+// ============ 4. 键盘映射：点击哪里 = 按下哪个键 ============
+await reset();
+await page.keyboard.press('a');
+await page.waitForTimeout(120);
+check('按 A 也会拨弦', (await attr('data-plucks')) === '1', String(await attr('data-plucks')));
+check('A 映射到 KeyA', (await attr('data-last-key')) === 'KeyA', String(await attr('data-last-key')));
+const touchA = await lastTouch();
+check('A 在弦下方 → 向下拨', (await attr('data-last-direction')) === 'down', String(await attr('data-last-direction')));
+await page.mouse.click(touchA.x, touchA.y);
+await page.waitForTimeout(80);
+const touchClick = await lastTouch();
 check(
-  '不是四面八方的扩散（横向带 ±130px 外 < 5%）',
-  bloomBounds !== null && bloomBounds.outsideRatio < 0.05,
-  bloomBounds === null ? '读取失败' : `带外 ${(bloomBounds.outsideRatio * 100).toFixed(1)}%`,
+  '鼠标点在键位中心与按 A 是同一个触点',
+  touchClick.keyCode === 'KeyA' && Math.abs(touchClick.x - touchA.x) <= 2 && Math.abs(touchClick.amplitude - touchA.amplitude) <= 2,
+  `键 (${touchA.x.toFixed(1)}, ${touchA.y.toFixed(1)}) vs 点 (${touchClick.x.toFixed(1)}, ${touchClick.y.toFixed(1)})`,
 );
-await page.screenshot({ path: 'artifacts/87-bloom-grow.png' });
+await reset();
+await page.keyboard.press('1');
+await page.waitForTimeout(100);
+const upTouch = await lastTouch();
+await page.keyboard.press('z');
+await page.waitForTimeout(100);
+const downTouch = await lastTouch();
+check('数字键在上两行 → 向上拨', upTouch.direction === -1, `y=${upTouch.y.toFixed(1)}`);
+check('底行字母键 → 向下拨', downTouch.direction === 1, `y=${downTouch.y.toFixed(1)}`);
+check('不同键位对应不同弦位置', Math.abs(upTouch.x - downTouch.x) > 5, `${upTouch.x.toFixed(1)} / ${downTouch.x.toFixed(1)}`);
 
-await page.waitForTimeout(2400);
-const bloomAfter = await inkPixels();
-check('约 3s 后墨晕消散', Number(await bloomCanvas.getAttribute('data-blooms')) === 0);
-check('画布恢复空白', bloomAfter < 40, `${bloomAfter} 个残留像素`);
-await page.screenshot({ path: 'artifacts/88-bloom-gone.png' });
+// ============ 5. Tab：8 类弦循环 ============
+await reset();
+const kindOrder = ['叙事', '视觉', '动画', '物理', '控制', '空间', '认知', '关系'];
+let kindOk = true;
+const seenKinds = [];
+const plucksBeforeTab = Number(await attr('data-plucks'));
+for (let i = 0; i < 8; i++) {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(140);
+  const kind = await attr('data-kind');
+  const index = Number(await attr('data-kind-index'));
+  seenKinds.push(kind);
+  if (kind !== kindOrder[(i + 1) % 8] || index !== (i + 1) % 8) kindOk = false;
+}
+check('Tab 依次切换 8 类弦', kindOk, seenKinds.join(' → '));
+check('Tab 每次都会演示一次拨弦', Number(await attr('data-plucks')) === plucksBeforeTab + 8, `${plucksBeforeTab} → ${await attr('data-plucks')}`);
+await page.screenshot({ path: 'artifacts/95-string-kind.png' });
 
-// ============ 7. 基准弦：点击塑形丝滑波形 + 发声 ============
-const wave = page.locator('[data-testid="ink-wave"]');
-check('有贯穿屏幕的基准弦', (await wave.count()) === 1);
-const waveWidth = await wave.evaluate((n) => Math.round(n.getBoundingClientRect().width));
-check('基准弦贯穿屏幕宽度', waveWidth >= 1400, `${waveWidth}px`);
-const waveHeight = () => page.locator('.ink-wave-line').evaluate((n) => Math.round(n.getBBox().height));
-const points0 = Number(await wave.getAttribute('data-wave-points'));
-const flat0 = await waveHeight();
-check('基准弦初始没有控制点', points0 === 0, String(points0));
-check('基准弦初始是直线', flat0 <= 6, `bbox 高 ${flat0}px`);
+// ============ 6. ESC：8 类弦总谱 ============
+await reset();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(320);
+check('ESC 进入总览', (await attr('data-mode')) === 'overview', String(await attr('data-mode')));
+check('总览有 8 行', (await attr('data-overview-rows')) === '8', String(await attr('data-overview-rows')));
+const overviewStats = await canvasStats();
+const bands = overviewStats ? countRowBands(overviewStats.rows) : [];
+check('画布上确实画出 8 条谱线', bands.length === 8, bands.length ? bands.map((b) => `${b.start}-${b.end}`).join(' | ') : '0 条');
+const overviewState = await state();
+const currentBand = bands[overviewState.kindIndex] ?? null;
+if (overviewStats && currentBand && bands.length === 8) {
+  // 当前类那一行应该最深：在 x=300..1200 的中间段比较平均墨量。
+  const bandInk = await page.evaluate(
+    ({ bands: all, kindIndex }) => {
+      const canvas = document.querySelector('[data-testid="string-canvas"]');
+      const ctx = canvas.getContext('2d');
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const measure = (band) => {
+        let total = 0;
+        for (let y = band.start; y <= band.end; y++) {
+          for (let x = 300; x < 1200; x++) total += data[(y * canvas.width + x) * 4 + 3];
+        }
+        return total / ((band.end - band.start + 1) * 900);
+      };
+      return { current: measure(all[kindIndex]), others: all.filter((_, i) => i !== kindIndex).map(measure) };
+    },
+    { bands, kindIndex: overviewState.kindIndex },
+  );
+  check(
+    '当前类在总览里最黑',
+    bandInk.current > Math.max(...bandInk.others) * 1.6,
+    `当前 ${bandInk.current.toFixed(1)} vs 其余最大 ${Math.max(...bandInk.others).toFixed(1)}`,
+  );
+} else {
+  check('当前类在总览里最黑', false, '谱带读取失败');
+}
+await page.screenshot({ path: 'artifacts/96-string-overview.png' });
 
-const plucks0 = Number(await wave.getAttribute('data-wave-plucks'));
-await page.mouse.click(320, 838);
-await page.waitForTimeout(260);
-await page.mouse.click(720, 788);
-await page.waitForTimeout(260);
-await page.mouse.click(1120, 812);
-await page.waitForTimeout(700);
-const points1 = Number(await wave.getAttribute('data-wave-points'));
-check('三次点击留下三个控制点', points1 === 3, String(points1));
-const shaped = await waveHeight();
-check('点击把弦塑造成丝滑波形', shaped >= 25, `bbox 高 ${shaped}px（直线为 ${flat0}px）`);
-check('每次点击都拨弦', Number(await wave.getAttribute('data-wave-plucks')) === plucks0 + 3);
-const audioState = await wave.getAttribute('data-wave-audio');
-check('音频引擎可用', audioState === 'running' || audioState === 'suspended', String(audioState));
-const rms = await page.evaluate(() => window.__neurouWave?.rms?.() ?? -1);
-check('拨弦后有声（rms > 0.001）', rms > 0.001, rms.toFixed(6));
-check('塑形时不叠墨晕', Number(await bloomCanvas.getAttribute('data-blooms')) === 0);
-await page.screenshot({ path: 'artifacts/89-wave-sculpt.png' });
+await page.keyboard.press('Tab');
+await page.waitForTimeout(160);
+check('总览里 Tab 仍切换当前类', Number(await attr('data-kind-index')) === (overviewState.kindIndex + 1) % 8, String(await attr('data-kind-index')));
 
 await page.keyboard.press('Escape');
-await page.waitForTimeout(600);
-const points2 = Number(await wave.getAttribute('data-wave-points'));
-const flat1 = await waveHeight();
-check('Escape 清空塑形控制点', points2 === 0, String(points2));
-check('Escape 后弦回到基准线', flat1 <= 6, `bbox 高 ${flat1}px`);
-await page.screenshot({ path: 'artifacts/90-wave-reset.png' });
+await page.waitForTimeout(300);
+check('再按 ESC 回到单弦', (await attr('data-mode')) === 'string');
+check('回到单弦后又是一根线', (await canvasStats())?.bbox.h <= 8, JSON.stringify((await canvasStats())?.bbox));
 
-await page.keyboard.press('Tab');
-await page.waitForTimeout(250);
-const waveFill = await page.locator('.ink-wave-line').evaluate((n) => getComputedStyle(n).fill);
-check('反色下基准弦仍无彩色', /^rgb\((\d+), (\d+), (\d+)\)$/.test(waveFill) && (() => {
-  const m = waveFill.match(/\d+/g).map(Number);
-  return Math.max(...m) - Math.min(...m) <= 1;
-})(), waveFill);
-await page.keyboard.press('Tab');
-await page.waitForTimeout(250);
+// ============ 7. 声音（本地合成，不验证听感，只验证非静音） ============
+const audioState = await attr('data-audio');
+check('音频引擎可用', audioState === 'running' || audioState === 'suspended', String(audioState));
+await page.mouse.click(900, 250);
+await page.waitForTimeout(120);
+const rmsValue = await rms();
+check('拨弦后 master 有真实信号（rms>0.001）', rmsValue > 0.001, rmsValue.toFixed(6));
+await reset();
 
-// ============ 8. 性能 ============
+// ============ 8. 性能与错误 ============
 const fps = await page.evaluate(
   () =>
     new Promise((resolve) => {
@@ -333,20 +408,18 @@ const fps = await page.evaluate(
 check('渲染帧率 ≥50fps', fps >= 50, `${fps}fps`);
 const heap = await page.evaluate(() => (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null));
 check('堆内存可用', heap !== null, heap === null ? '未暴露' : `${heap}MB`);
-check('没有页面级报错', consoleErrors.filter((e) => !e.includes('favicon')).length === 0, consoleErrors.join(' | '));
+check('没有页面级报错', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await browser.close();
 
 const summary = {
   when: new Date().toISOString(),
-  counts: { nodes: 3, strings: 4, loops: 2 },
-  flowBoxes,
-  widths,
-  durations,
-  flowHashes: hashes,
-  badColors,
-  bloom: { early: bloomEarly, peak: bloomPeak, after: bloomAfter, bounds: bloomBounds },
-  wave: { width: waveWidth, points: points1, shapedHeight: shaped, plucks: 3, audioState, rms },
+  default: { restInk: restStats?.ink ?? null, restBBox: restStats?.bbox ?? null },
+  pluck: { amplitude: pluckState.amplitude, peakSpan: peakCol?.span ?? null, flatSpan: flatCol?.span ?? null, stray },
+  keyboard: { keyCount: 46, touchA, upTouch, downTouch },
+  kinds: seenKinds,
+  overview: { bands: bands.length, kindIndex: overviewState.kindIndex },
+  audio: { state: audioState, rms: rmsValue },
   fps,
   heapMB: heap,
   consoleErrors,
@@ -354,6 +427,6 @@ const summary = {
   passed: results.filter((r) => r.ok).length,
   failed: results.filter((r) => !r.ok).length,
 };
-writeFileSync('artifacts/ink-test.json', JSON.stringify(summary, null, 2));
+writeFileSync('artifacts/string-test.json', JSON.stringify(summary, null, 2));
 console.log(`\n=== ${summary.passed} passed / ${summary.failed} failed ===`);
 if (summary.failed > 0) process.exitCode = 1;
