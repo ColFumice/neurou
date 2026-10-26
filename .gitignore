@@ -4,3 +4,4 @@ dist/
 .DS_Store
 .acl-repair/
 .dsh-write-test.txt
+artifacts/

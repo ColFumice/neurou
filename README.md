@@ -16,26 +16,30 @@ neurou 是一门用来写「世界如何运转」的语言，以及执行这些�
                  └─ 三级诊断：语法 · 语义 · 体验
 ```
 
-**当前状态：v0.1 内核可用。** 语言前端、弦网络 IR、确定性运行时、三种玩家模型的批量模拟、
-音准仪报告、命令行都已跑通；调律台 GUI 是下一步。
+**当前状态：v0.1 内核 + 最小 GUI 可用。** 语言前端、弦网络 IR、确定性运行时、
+三种玩家模型的批量模拟、音准仪、命令行，以及现象层 / 只读结构层 / 试玩 / 发布 /
+五个 L1 术语都已跑通。
+
+![现象层](docs/images/phenomenon.png)
 
 ## 快速开始
 
 ```bash
 pnpm install
-pnpm check                     # 类型检查 / 构建
-pnpm test                      # 31 个测试
+pnpm check          # 内核类型检查 / 构建
+pnpm test           # 31 个内核测试
 
-# 检查一个世界
-pnpm dev check examples/negotiation.nro
+# 最小 GUI（现象层 / 结构层 / 试玩 / 发布）
+pnpm gui            # http://127.0.0.1:5188/
+pnpm test:gui       # 51 项真实浏览器验收（需要本机 Edge）
+```
 
-# 跑 600 局模拟，看音准仪
-pnpm dev sim examples/negotiation.nro --runs 600
+命令行：
 
-# 亲自进入这个世界，逐拍游玩
-pnpm dev run examples/negotiation.nro
-
-# 导出弦网络图
+```bash
+pnpm dev check examples/negotiation.nro          # 编译一个世界
+pnpm dev sim examples/rain-slice.nro --runs 600  # 跑批量模拟，看音准仪
+pnpm dev run examples/negotiation.nro            # 逐拍游玩
 pnpm dev ir examples/rain-slice.nro --out world.json
 ```
 
@@ -45,6 +49,19 @@ pnpm dev ir examples/rain-slice.nro --out world.json
 |---|---|
 | `examples/negotiation.nro` | 最小叙事沙盒：五根弦、两条回路、四条结局。信任与筹码互相消耗 |
 | `examples/rain-slice.nro` | 首期品类切片：认知弦、关系弦、雨循环曲式、避难所与捕食 |
+
+## 最小 GUI
+
+| 层 | 能做什么 | 不能做什么 |
+|---|---|---|
+| 现象层 | 看世界自己跑；悬停角色读弦；拖两条调性滑块改变世界 | 不能编辑世界 |
+| 结构层（Tab） | 看声部线、阈值品丝、回路连线；拨一条回路看连锁 | 没有任何增删改 |
+| 试玩 | 两分钟逐拍介入，随时返回 | 不改变作品本身 |
+| 发布 | Worker 里跑 600 局，出音准仪与文字诊断 | 不做裂缝式诊断 |
+| 术语 | 弦 / 回路 / 调性 / 力迫 / 和弦，操作时浮现三次 | 不弹教程、不强制点击 |
+
+滑块不是难度参数：它们被编译成两根真实的弦、四条力迫、四条信号，再交给同一个运行时去跑。
+详见 [最小 GUI](docs/03-最小GUI.md)。
 
 ## 这不是什么
 
@@ -59,10 +76,13 @@ pnpm dev ir examples/rain-slice.nro --out world.json
 packages/core       语言前端：词法 / 语法 / 名字解析 / 类型检查 / 结构分析 / 弦网络图
 packages/runtime    运行时：逐拍状态机、快照分叉、批量模拟、音准仪
 packages/cli        命令行：check / sim / run / ir / init
+packages/gui        最小 GUI：现象层 / 结构层 / 试玩 / 发布 / L1 术语
 examples/           两个可运行的世界
-docs/               总览、语言规范、架构
+docs/               总览、语言规范、架构、GUI、用户测试包
 ```
 
 - [构想总览](docs/00-总览.md)
 - [语言规范 v0.1](docs/01-语言规范.md)
 - [架构与路线](docs/02-架构.md)
+- [最小 GUI](docs/03-最小GUI.md)
+- [用户测试包](docs/04-用户测试包.md)

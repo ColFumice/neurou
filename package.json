@@ -6,16 +6,20 @@
   "description": "neurou（雨若）— 世界弦语言与调律运行时",
   "scripts": {
     "check": "tsc -b --pretty false",
+    "check:gui": "tsc -p packages/gui/tsconfig.json --noEmit --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:gui": "node scripts/gui-test.mjs",
+    "gui": "pnpm --filter @neurou/gui dev",
     "dev": "tsx packages/cli/src/index.ts",
     "sim": "tsx packages/cli/src/index.ts sim",
-    "build": "tsc -b"
+    "build": "tsc -b && pnpm --filter @neurou/gui build"
   },
   "devDependencies": {
     "@neurou/core": "workspace:*",
     "@neurou/runtime": "workspace:*",
     "@types/node": "^22.10.0",
+    "playwright": "^1.64.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
