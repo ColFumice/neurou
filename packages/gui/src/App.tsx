@@ -5,11 +5,14 @@ import { WORLD_ORDER, WORLDS, type WorldKey } from './worlds.js';
 import { DEFAULT_TUNING, tuneWorld, type Tuning } from './tuning.js';
 import { registerExposure, type TermId } from './terms.js';
 import { Scene } from './Scene.js';
-import { Structure } from './Structure.js';
+import { TuningDesk } from './TuningDesk.js';
+import { Network } from './Network.js';
+import { ForcingLayer } from './ForcingLayer.js';
 import { Play } from './Play.js';
 import { Publish } from './Publish.js';
 import { Hairlines } from './Hairlines.js';
 import { Term, TermCardView, TermPopupView } from './Term.js';
+import { formatEffect, formatExpr } from './format.js';
 import {
   snapshotOf,
   type DisplayCue,
@@ -24,7 +27,7 @@ interface Runtime {
   universe: Universe;
 }
 
-type Mode = 'phenomenon' | 'structure' | 'play';
+type Mode = 'desk' | 'phenomenon' | 'structure' | 'forcing' | 'play';
 
 interface PublishState {
   open: boolean;
@@ -39,41 +42,33 @@ const PLAY_SECONDS = 120;
 export function App() {
   const [worldKey, setWorldKey] = useState<WorldKey>('rain');
   const [runtime, setRuntime] = useState<Runtime | null>(null);
-  const [mode, setMode] = useState<Mode>('phenomenon');
+  const [mode, setMode] = useState<Mode>('desk');
+  const [paused, setPaused] = useState(false);
   const [tuning, setTuning] = useState<Tuning>(DEFAULT_TUNING);
+  const [focused, setFocused] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [cues, setCues] = useState<DisplayCue[]>([]);
   const [visuals, setVisuals] = useState<Record<string, number>>({});
   const [flash, setFlash] = useState<{ name: string; at: number } | null>(null);
   const [hover, setHover] = useState<{ entity: string; rect: DOMRect } | null>(null);
-  const [loopHover, setLoopHover] = useState<{ id: string; rect: DOMRect } | null>(null);
-  const [activeLoop, setActiveLoop] = useState<string | null>(null);
-  const [pulse, setPulse] = useState<{ strings: string[]; index: number } | null>(null);
+  const [hoverString, setHoverString] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
   const [termCard, setTermCard] = useState<TermCardState | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [pulse, setPulse] = useState<{ strings: string[]; index: number } | null>(null);
+  const [forcingPopup, setForcingPopup] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [playSnapshot, setPlaySnapshot] = useState<WorldState | null>(null);
   const [remaining, setRemaining] = useState(PLAY_SECONDS);
   const [playOver, setPlayOver] = useState<string | null>(null);
   const [publish, setPublish] = useState<PublishState>({ open: false, status: 'idle' });
-  const [immersive, setImmersive] = useState(false);
-  const [topReveal, setTopReveal] = useState(false);
-  const [worldFlash, setWorldFlash] = useState(false);
-  const [thumbFor, setThumbFor] = useState<'pressure' | 'cruelty' | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const pulseTimers = useRef<number[]>([]);
   const hoverEntity = useRef<string | null>(null);
   const forceTermShown = useRef(false);
   const termClose = useRef<number | null>(null);
-  const loopClose = useRef<number | null>(null);
   const hairlineClose = useRef<number | null>(null);
-  const immersiveRef = useRef(false);
-  const revealTimer = useRef<number | null>(null);
-  const worldFlashTimer = useRef<number | null>(null);
-  const thumbTimer = useRef<number | null>(null);
-  const sliderDragging = useRef(false);
   const seenForcings = useRef<Set<string>>(new Set());
+  const playReturn = useRef<Mode>('desk');
 
   const world = WORLDS[worldKey];
 
@@ -88,17 +83,14 @@ export function App() {
     setVisuals({});
     setFlash(null);
     setHover(null);
-    setLoopHover(null);
+    setHoverString(null);
+    setFocused(null);
     setPulse(null);
-    setActiveLoop(null);
+    setPaused(false);
     setPlaySnapshot(null);
     setPlayOver(null);
     setPublish({ open: false, status: 'idle' });
-    setMode('phenomenon');
-    setImmersive(false);
-    immersiveRef.current = false;
-    setTopReveal(false);
-    setThumbFor(null);
+    setMode('desk');
     seenForcings.current = new Set();
     forceTermShown.current = false;
     setVersion((v) => v + 1);
@@ -109,9 +101,13 @@ export function App() {
     [runtime, version],
   );
 
+  useEffect(() => {
+    setHoverString(null);
+    setForcingPopup(null);
+  }, [mode]);
+
   // —— 术语浮现 ——
   const exposeTerm = useCallback((id: TermId, x: number, y: number) => {
-    if (immersiveRef.current) return;
     if (!registerExposure(id)) return;
     setTermPopup({ id, x, y, nonce: Date.now() });
   }, []);
@@ -136,7 +132,6 @@ export function App() {
         const left = rect.right + 312 > window.innerWidth ? Math.max(16, rect.left - 312) : rect.right + 12;
         setTermCard({ id, left, top: rect.top - 6 });
       } else {
-        // 留一点时间把鼠标移进卡片；卡片自己的 onMouseEnter 会取消这次关闭。
         termClose.current = window.setTimeout(() => {
           setTermCard((c) => (c && c.id === id ? null : c));
         }, 260);
@@ -145,7 +140,6 @@ export function App() {
     [cancelTermClose],
   );
 
-  // —— 提示条与 cue 的生命周期 ——
   useEffect(() => {
     const timer = window.setInterval(() => {
       setCues((prev) => prev.filter((c) => Date.now() - c.at < 6200));
@@ -192,7 +186,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!runtime || mode === 'play') return;
+    if (!runtime || mode === 'play' || paused) return;
     if (publish.open && publish.status === 'running') return;
     const timer = window.setInterval(() => {
       const u = runtime.universe;
@@ -206,44 +200,13 @@ export function App() {
         setFlash({ name, at: Date.now() });
         if (!forceTermShown.current) {
           forceTermShown.current = true;
-          exposeTerm('力迫', window.innerWidth - 96, 132);
+          exposeTerm('力迫', window.innerWidth / 2, 120);
         }
       }
       setVersion((v) => v + 1);
     }, TICK_MS);
     return () => window.clearInterval(timer);
-  }, [runtime, mode, publish.open, publish.status, ingest, exposeTerm]);
-
-  // —— Tab：现象 / 结构 ——
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
-      if (mode === 'play' || publish.open || immersiveRef.current) return;
-      e.preventDefault();
-      setMode((m) => (m === 'structure' ? 'phenomenon' : 'structure'));
-      setHover(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [mode, publish.open]);
-
-  // —— ← →：切换示例世界；右下角 1/2 只浮现 1.2 秒 ——
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      if (mode === 'play' || publish.open || immersiveRef.current) return;
-      if (e.target instanceof HTMLInputElement) return;
-      e.preventDefault();
-      const i = WORLD_ORDER.indexOf(worldKey);
-      const next = e.key === 'ArrowRight' ? (i + 1) % WORLD_ORDER.length : (i - 1 + WORLD_ORDER.length) % WORLD_ORDER.length;
-      if (worldFlashTimer.current !== null) window.clearTimeout(worldFlashTimer.current);
-      setWorldFlash(true);
-      worldFlashTimer.current = window.setTimeout(() => setWorldFlash(false), 1200);
-      setWorldKey(WORLD_ORDER[next]!);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [worldKey, mode, publish.open]);
+  }, [runtime, mode, paused, publish.open, publish.status, ingest, exposeTerm]);
 
   // —— 试玩计时 ——
   useEffect(() => {
@@ -256,14 +219,6 @@ export function App() {
     if (mode === 'play' && remaining <= 0) setPlayOver('时间到');
   }, [mode, remaining]);
 
-  // —— 清理 ——
-  useEffect(() => {
-    return () => {
-      workerRef.current?.terminate();
-      for (const t of pulseTimers.current) window.clearTimeout(t);
-    };
-  }, []);
-
   // —— 操作 ——
   const changeTuning = (next: Tuning) => {
     setTuning(next);
@@ -275,19 +230,11 @@ export function App() {
     setVersion((v) => v + 1);
   };
 
-  const cancelHairlineClose = useCallback(() => {
-    if (hairlineClose.current !== null) {
-      window.clearTimeout(hairlineClose.current);
-      hairlineClose.current = null;
-    }
-  }, []);
-
   const handleCharacterHover = useCallback(
     (entity: string | null, rect: DOMRect | null) => {
-      cancelHairlineClose();
-      if (immersiveRef.current) {
-        setHover(null);
-        return;
+      if (hairlineClose.current !== null) {
+        window.clearTimeout(hairlineClose.current);
+        hairlineClose.current = null;
       }
       if (entity && rect) {
         setHover({ entity, rect });
@@ -296,13 +243,23 @@ export function App() {
           exposeTerm('弦', rect.right + 12, rect.top);
         }
       } else {
-        // 给鼠标一点时间移到细线面板上；面板自己的 onMouseEnter 会取消这次关闭。
         hairlineClose.current = window.setTimeout(() => setHover(null), 240);
         hoverEntity.current = null;
       }
     },
-    [exposeTerm, cancelHairlineClose],
+    [exposeTerm],
   );
+
+  const adjustString = (id: string, value: number) => {
+    const u = runtime?.universe;
+    if (!u) return;
+    const s = u.ir.strings.find((x) => x.id === id);
+    if (!s || s.domain.type !== 'number') return;
+    const min = s.domain.min ?? -Infinity;
+    const max = s.domain.max ?? Infinity;
+    u.state.values[id] = Math.min(max, Math.max(min, value));
+    setVersion((v) => v + 1);
+  };
 
   const pluckLoop = (loopId: string) => {
     if (!runtime) return;
@@ -322,56 +279,30 @@ export function App() {
     }
     for (const t of pulseTimers.current) window.clearTimeout(t);
     pulseTimers.current = [];
-    setActiveLoop(loopId);
     seq.forEach((_, i) => {
       pulseTimers.current.push(window.setTimeout(() => setPulse({ strings: seq, index: i }), i * 300));
     });
-    pulseTimers.current.push(
-      window.setTimeout(() => {
-        setPulse(null);
-        setActiveLoop(null);
-      }, seq.length * 300 + 1100),
-    );
+    pulseTimers.current.push(window.setTimeout(() => setPulse(null), seq.length * 300 + 900));
     exposeTerm('回路', window.innerWidth / 2, 120);
   };
 
-  const cancelLoopClose = useCallback(() => {
-    if (loopClose.current !== null) {
-      window.clearTimeout(loopClose.current);
-      loopClose.current = null;
-    }
-  }, []);
-
-  const handleLoopHover = useCallback(
-    (id: string | null, rect: DOMRect | null) => {
-      cancelLoopClose();
-      if (id && rect) {
-        setLoopHover({ id, rect });
-        setHover(null);
-      } else {
-        loopClose.current = window.setTimeout(() => setLoopHover(null), 240);
-      }
-    },
-    [cancelLoopClose],
-  );
-
   const enterPlay = () => {
     if (!runtime) return;
-    immersiveRef.current = false;
-    setImmersive(false);
+    playReturn.current = mode === 'play' ? 'desk' : mode;
     setPlaySnapshot(runtime.universe.snapshot());
     setRemaining(PLAY_SECONDS);
     setPlayOver(null);
     setTermCard(null);
     setTermPopup(null);
     setHover(null);
+    setHoverString(null);
     setMode('play');
   };
 
   const exitPlay = () => {
     if (runtime && playSnapshot) runtime.universe.restore(playSnapshot);
     setPlaySnapshot(null);
-    setMode('phenomenon');
+    setMode(playReturn.current);
     setVersion((v) => v + 1);
   };
 
@@ -393,7 +324,6 @@ export function App() {
   const startWorker = () => {
     if (!runtime) return;
     workerRef.current?.terminate();
-    // 发布的是作品本身：调性旋钮是这一次现场调音，不写回 .nro，也不进入模拟。
     const ir = WORLDS[worldKey].ir;
     const worker = new Worker(new URL('./simWorker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (e: MessageEvent<PublishSummary | { error: string }>) => {
@@ -415,65 +345,62 @@ export function App() {
     startWorker();
   };
 
-  // —— 隐形化：角落按钮、滑块头、沉浸模式 ——
-  const revealTop = () => {
-    if (revealTimer.current !== null) {
-      window.clearTimeout(revealTimer.current);
-      revealTimer.current = null;
-    }
-    setTopReveal(true);
-  };
-
-  const scheduleHideTop = () => {
-    if (revealTimer.current !== null) window.clearTimeout(revealTimer.current);
-    revealTimer.current = window.setTimeout(() => setTopReveal(false), 1500);
-  };
-
-  const showThumbFor = (id: 'pressure' | 'cruelty') => {
-    if (thumbTimer.current !== null) {
-      window.clearTimeout(thumbTimer.current);
-      thumbTimer.current = null;
-    }
-    setThumbFor(id);
-  };
-
-  const hideThumbAfter = (ms: number) => {
-    if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
-    thumbTimer.current = window.setTimeout(() => setThumbFor(null), ms);
-  };
-
-  const toggleImmersive = () => {
-    const next = !immersiveRef.current;
-    immersiveRef.current = next;
-    setImmersive(next);
-    if (next) {
-      setTopReveal(false);
-      setThumbFor(null);
-      setTermPopup(null);
-      setTermCard(null);
-      setHover(null);
-      setLoopHover(null);
-      setFlash(null);
-    }
-  };
-
+  // —— 快捷键：默认调律台 / 空格现象 / Tab 结构 / F 力迫 ——
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-      const key = e.key.toLowerCase();
-      if (key === 'f') {
-        if (mode !== 'phenomenon' || publish.open) return;
-        e.preventDefault();
-        toggleImmersive();
+      if (e.key === 'Escape') {
+        if (publish.open) {
+          setPublish((p) => ({ ...p, open: false }));
+          return;
+        }
+        if (mode === 'play') {
+          exitPlay();
+          return;
+        }
+        setMode('desk');
+        setForcingPopup(null);
         return;
       }
-      if (mode === 'play' || publish.open || immersiveRef.current) return;
-      if (key === 'p') {
+      if (publish.open) return;
+
+      if (e.key === ' ') {
+        if (mode === 'play') return;
+        e.preventDefault();
+        setMode((m) => (m === 'phenomenon' ? 'desk' : 'phenomenon'));
+        return;
+      }
+      if (e.key === 'Tab') {
+        if (mode === 'play') return;
+        e.preventDefault();
+        setMode((m) => (m === 'structure' ? 'desk' : 'structure'));
+        return;
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        if (mode === 'play') return;
+        e.preventDefault();
+        setMode((m) => (m === 'forcing' ? 'desk' : 'forcing'));
+        return;
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        if (mode === 'play') return;
         e.preventDefault();
         enterPlay();
-      } else if (key === 'r') {
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        if (mode === 'play') return;
         e.preventDefault();
         openPublish();
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (mode === 'play') return;
+        e.preventDefault();
+        const i = WORLD_ORDER.indexOf(worldKey);
+        const next = e.key === 'ArrowRight' ? (i + 1) % WORLD_ORDER.length : (i - 1 + WORLD_ORDER.length) % WORLD_ORDER.length;
+        setWorldKey(WORLD_ORDER[next]!);
+        setMode('desk');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -481,43 +408,118 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, publish.open, runtime, tuning, worldKey]);
 
+  // —— 清理 ——
+  useEffect(() => {
+    return () => {
+      workerRef.current?.terminate();
+      for (const t of pulseTimers.current) window.clearTimeout(t);
+    };
+  }, []);
+
   const hasChord = (rule: IRRule) => rule.effects.some((e) => e.k === 'apply');
 
   if (!snap) return <div className="fatal">正在装载世界…</div>;
 
-  const hoverStrings = hover ? world.ir.strings.filter((s) => s.owner === hover.entity && !s.id.startsWith('调性.')) : [];
-  const loopInfo = loopHover ? runtime?.ir.loops.find((l) => l.id === loopHover.id) : undefined;
+  const hoverStrings = hover ? (runtime?.ir ?? world.ir).strings.filter((s) => s.owner === hover.entity && !s.id.startsWith('调性.')) : [];
+  const pulseEntity = pulse ? (runtime?.ir ?? world.ir).strings.find((s) => s.id === pulse.strings[pulse.index])?.owner ?? null : null;
+  const forcingRule = forcingPopup ? (runtime?.ir ?? world.ir).rules.find((r) => r.id === forcingPopup.id) : undefined;
+
+  const networkProps = {
+    world: runtime?.ir ?? world.ir,
+    snap,
+    focused,
+    pulse,
+    onHoverString: (id: string | null, rect: DOMRect | null) => {
+      setHoverString(id && rect ? { id, rect } : null);
+    },
+    onAdjustString: adjustString,
+    onPluckLoop: pluckLoop,
+    onForcing: (id: string, rect: DOMRect | null) => {
+      setForcingPopup(rect ? { id, rect } : null);
+      exposeTerm('力迫', rect?.right ?? window.innerWidth / 2, rect?.top ?? 120);
+    },
+    onOpenTerm: openTerm,
+  };
 
   return (
-    <div
-      className={`studio ${immersive ? 'is-immersive' : ''}`}
-      data-testid="studio"
-      data-mode={mode}
-      data-immersive={immersive}
-    >
+    <div className="studio" data-testid="studio" data-mode={mode}>
+      {mode === 'desk' && (
+        <TuningDesk
+          world={runtime?.ir ?? world.ir}
+          snap={snap}
+          tuning={tuning}
+          visuals={visuals}
+          paused={paused}
+          focused={focused}
+          cues={cues}
+          pulse={pulse}
+          pulseEntity={pulseEntity}
+          onFocus={(entity) => setFocused((cur) => (cur === entity ? null : entity))}
+          onTuning={changeTuning}
+          onTogglePause={() => setPaused((p) => !p)}
+          onPublish={openPublish}
+          onExpandPreview={() => setMode('phenomenon')}
+          onHoverString={networkProps.onHoverString}
+          onAdjustString={adjustString}
+          onPluckLoop={pluckLoop}
+          onForcing={networkProps.onForcing}
+          onOpenTerm={openTerm}
+        />
+      )}
+
       {mode === 'phenomenon' && (
-        <div className="layer layer--phenomenon">
+        <div className="phenomenon" data-testid="phenomenon">
           <Scene
             world={runtime?.ir ?? world.ir}
             snap={snap}
             tuning={tuning}
             visuals={visuals}
+            pulseEntity={pulseEntity}
             onCharacterHover={(entity, rect) => handleCharacterHover(entity, rect)}
           />
+          <div className="phenomenon__hint">空格 / Esc 返回调律台 · P 试玩</div>
+          <div className="cues">
+            {cues.slice(-2).map((c) => (
+              <div key={c.id} className={`cue cue--${c.kind}`}>
+                {c.text}
+              </div>
+            ))}
+          </div>
+          {hover && (
+            <Hairlines
+              entity={hover.entity}
+              strings={hoverStrings}
+              snap={snap}
+              rect={hover.rect}
+              onOpenTerm={openTerm}
+              onEnter={() => {
+                if (hairlineClose.current !== null) window.clearTimeout(hairlineClose.current);
+              }}
+              onLeave={() => setHover(null)}
+            />
+          )}
         </div>
       )}
 
-      {mode === 'structure' && runtime && (
-        <Structure
-          world={runtime.ir}
-          snap={snap}
-          tuning={tuning}
-          visuals={visuals}
-          activeLoop={activeLoop}
-          pulse={pulse}
-          onHoverLoop={handleLoopHover}
-          onPluck={pluckLoop}
-        />
+      {mode === 'structure' && (
+        <div className="structure-full" data-testid="structure">
+          <div className="structure-full__head">
+            <span className="structure-full__title">{world.title}</span>
+            <span className="structure-full__terms">
+              <Term id="弦" onOpen={openTerm} />
+              <Term id="回路" onOpen={openTerm} />
+              <Term id="力迫" onOpen={openTerm} />
+            </span>
+            <span className="structure-full__hint">Tab 返回调律台 · F 力迫层</span>
+          </div>
+          <Network {...networkProps} full />
+        </div>
+      )}
+
+      {mode === 'forcing' && (
+        <div className="forcing-full">
+          <ForcingLayer world={runtime?.ir ?? world.ir} onOpenTerm={openTerm} />
+        </div>
       )}
 
       {mode === 'play' && runtime && (
@@ -545,186 +547,30 @@ export function App() {
         />
       )}
 
-      {mode !== 'play' && (
-        <header className="hud hud--top">
-          <div
-            className="reveal-zone"
-            data-testid="reveal-zone"
-            onMouseEnter={revealTop}
-            onMouseLeave={scheduleHideTop}
-          />
-          <div className="hud__left">
-            <span className="brand" data-ui="brand">
-              neurou
-            </span>
-          </div>
-
-          <div className={`hud__right ${topReveal ? 'is-revealed' : ''}`}>
-            <button
-              className="icon-btn"
-              data-ui="play-btn"
-              onClick={enterPlay}
-              onMouseEnter={revealTop}
-              data-testid="enter-play"
-              aria-label="试玩"
-              title="试玩（P）"
-            >
-              ▶
-            </button>
-            <button
-              className="icon-btn"
-              data-ui="publish-btn"
-              onClick={openPublish}
-              onMouseEnter={revealTop}
-              data-testid="open-publish"
-              aria-label="发布"
-              title="发布（R）"
-            >
-              ↑
-            </button>
-          </div>
-        </header>
-      )}
-
-      {mode === 'phenomenon' && (
-        <footer className="hud hud--bottom">
-          <div className="mixer" data-ui="tuner">
-            <label
-              className={`slider ${thumbFor === 'pressure' ? 'is-thumb' : ''}`}
-              data-testid="slider-block-pressure"
-              onPointerEnter={() => showThumbFor('pressure')}
-              onPointerLeave={() => {
-                if (sliderDragging.current) return;
-                if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
-                setThumbFor(null);
-              }}
-            >
-              <span className="slider__name">压力</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={tuning.pressure}
-                aria-label="压力"
-                data-testid="slider-pressure"
-                onPointerDown={(e) => {
-                  sliderDragging.current = true;
-                  showThumbFor('pressure');
-                  setDragging(true);
-                  exposeTerm('调性', e.clientX + 12, e.clientY - 30);
-                }}
-                onPointerUp={() => {
-                  sliderDragging.current = false;
-                  setDragging(false);
-                  hideThumbAfter(1000);
-                }}
-                onPointerCancel={() => {
-                  sliderDragging.current = false;
-                  setDragging(false);
-                  hideThumbAfter(1000);
-                }}
-                onChange={(e) => changeTuning({ ...tuning, pressure: Number(e.target.value) })}
-              />
-            </label>
-            <label
-              className={`slider ${thumbFor === 'cruelty' ? 'is-thumb' : ''}`}
-              data-testid="slider-block-cruelty"
-              onPointerEnter={() => showThumbFor('cruelty')}
-              onPointerLeave={() => {
-                if (sliderDragging.current) return;
-                if (thumbTimer.current !== null) window.clearTimeout(thumbTimer.current);
-                setThumbFor(null);
-              }}
-            >
-              <span className="slider__name">残酷</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={tuning.cruelty}
-                aria-label="残酷"
-                data-testid="slider-cruelty"
-                onPointerDown={(e) => {
-                  sliderDragging.current = true;
-                  showThumbFor('cruelty');
-                  setDragging(true);
-                  exposeTerm('调性', e.clientX + 12, e.clientY - 30);
-                }}
-                onPointerUp={() => {
-                  sliderDragging.current = false;
-                  setDragging(false);
-                  hideThumbAfter(1000);
-                }}
-                onPointerCancel={() => {
-                  sliderDragging.current = false;
-                  setDragging(false);
-                  hideThumbAfter(1000);
-                }}
-                onChange={(e) => changeTuning({ ...tuning, cruelty: Number(e.target.value) })}
-              />
-            </label>
-          </div>
-        </footer>
-      )}
-
-      {mode !== 'play' && worldFlash && (
-        <div className="world-index" data-ui="world-index" data-testid="world-index">
-          {WORLD_ORDER.indexOf(worldKey) + 1} / {WORLD_ORDER.length}
-        </div>
-      )}
-
-      {mode === 'phenomenon' && (
-        <div className="cues" data-testid="cues">
-          {cues.slice(-2).map((c) => (
-            <div key={c.id} className={`cue cue--${c.kind}`}>
-              {c.text}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {hover && (
-        <Hairlines
-          entity={hover.entity}
-          strings={hoverStrings}
+      {hoverString && (
+        <StringTip
+          world={runtime?.ir ?? world.ir}
           snap={snap}
-          rect={hover.rect}
+          id={hoverString.id}
+          rect={hoverString.rect}
           onOpenTerm={openTerm}
-          onEnter={cancelHairlineClose}
-          onLeave={() => setHover(null)}
         />
       )}
 
-      {loopHover && loopInfo && (
-        <div
-          className="loop-tip"
-          data-testid="loop-tip"
-          onMouseEnter={cancelLoopClose}
-          onMouseLeave={() => setLoopHover(null)}
-          style={{
-            left: Math.min(window.innerWidth - 250, loopHover.rect.right + 12),
-            top: Math.max(70, loopHover.rect.top - 104),
-          }}
-        >
-          <div className="loop-tip__head">
-            <Term id="回路" onOpen={openTerm} />
-            <span>· {loopInfo.name}</span>
-          </div>
-          <div className="loop-tip__kind">{loopInfo.polarity === 1 ? '自我强化' : '自我校正'}</div>
-          <div className="muted">按住拨一下，看连锁</div>
-        </div>
+      {forcingPopup && forcingRule && (
+        <ForcingPopup
+          world={runtime?.ir ?? world.ir}
+          rule={forcingRule}
+          rect={forcingPopup.rect}
+          onClose={() => setForcingPopup(null)}
+        />
       )}
 
       {flash && mode !== 'play' && (
-        <div className="ticker" data-testid="forcing-ticker">
-          <Term id="力迫" onOpen={openTerm} />
-          <span>· {flash.name.replace(/^调性\./, '调性 · ')}</span>
+        <div className="desk__flash" data-testid="forcing-flash">
+          力迫 · {flash.name.replace(/^调性\./, '')}
         </div>
       )}
-
-      <div className={`tab-hint ${dragging ? 'is-on' : ''}`} aria-hidden="true">
-        Tab
-      </div>
 
       <TermPopupView popup={termPopup} />
       <TermCardView card={termCard} onEnter={cancelTermClose} onClose={() => setTermCard(null)} />
@@ -738,17 +584,84 @@ export function App() {
           onClose={() => setPublish((p) => ({ ...p, open: false }))}
         />
       )}
+    </div>
+  );
+}
 
-      {!world.ok && (
-        <div className="fatal">
-          <div>{world.title} 编译不过去</div>
-          {world.diagnostics.slice(0, 3).map((d, i) => (
-            <div key={i} className="muted">
-              {d.message}
-            </div>
+// —— 弦的悬停读数：类型、当前值（用位置表示）、可拖动提示 ——
+function StringTip({
+  world,
+  snap,
+  id,
+  rect,
+  onOpenTerm,
+}: {
+  world: WorldIR;
+  snap: ViewSnapshot;
+  id: string;
+  rect: DOMRect;
+  onOpenTerm: (id: TermId, rect: DOMRect | null) => void;
+}) {
+  const s = world.strings.find((x) => x.id === id);
+  if (!s) return null;
+  const raw = snap.values[id];
+  const numeric = s.domain.type === 'number' && typeof raw === 'number';
+  const min = numeric && s.domain.type === 'number' ? (s.domain.min ?? 0) : 0;
+  const max = numeric && s.domain.type === 'number' ? (s.domain.max ?? 100) : 100;
+  const t = numeric ? Math.min(1, Math.max(0, (raw as number - min) / (max - min || 1))) : 0;
+  const left = Math.min(window.innerWidth - 190, rect.right + 12);
+  const top = Math.min(window.innerHeight - 150, Math.max(70, rect.top - 20));
+  return (
+    <div className="string-tip" style={{ left, top }} data-testid="string-tip" data-string-tip={id}>
+      <div className="string-tip__head">
+        <Term id="弦" onOpen={onOpenTerm} />
+        <span>{s.kind}弦</span>
+      </div>
+      {numeric ? (
+        <div className="string-tip__rail">
+          <i style={{ bottom: `${t * 100}%` }} />
+        </div>
+      ) : (
+        <div className="string-tip__text">这根弦不是数值</div>
+      )}
+      <div className="string-tip__hint">{numeric ? '按住拖动可调' : '不可拖动'}</div>
+    </div>
+  );
+}
+
+function ForcingPopup({
+  world,
+  rule,
+  rect,
+  onClose,
+}: {
+  world: WorldIR;
+  rule: IRRule;
+  rect: DOMRect;
+  onClose: () => void;
+}) {
+  const left = Math.min(window.innerWidth - 340, Math.max(16, rect.right + 14));
+  const top = Math.min(window.innerHeight - 260, Math.max(70, rect.top - 20));
+  return (
+    <>
+      <div className="popup-veil" onClick={onClose} />
+      <div className="forcing-pop" style={{ left, top }} data-testid="forcing-pop">
+        <div className="forcing-pop__head">
+          <span>力迫 · {rule.name}</span>
+          <button onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <div className="forcing-pop__label">当</div>
+        <div className="forcing-pop__code">{rule.guard ? formatExpr(world, rule.guard) : '真'}</div>
+        <div className="forcing-pop__label">效果</div>
+        <div className="forcing-pop__code">
+          {rule.effects.map((e, i) => (
+            <div key={i}>{formatEffect(world, e)}</div>
           ))}
         </div>
-      )}
-    </div>
+        {rule.before.length > 0 && <div className="forcing-pop__order">先于：{rule.before.join('、')}</div>}
+      </div>
+    </>
   );
 }

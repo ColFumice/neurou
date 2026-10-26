@@ -24,9 +24,19 @@ interface SceneProps {
  */
 export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onCharacterHover }: SceneProps) {
   const isRain = world.strings.some((s) => s.id === '蛞蝓猫.体力');
-  const rain = Math.max(numeric(snap, '降雨强度'), (visuals['雨幕'] ?? 0) * 100);
+  const has = (id: string) => world.strings.some((s) => s.id === id);
+  const rainValue = has('雨.雨量') ? numeric(snap, '雨.雨量') : numeric(snap, '降雨强度');
+  const darkValue = has('雨.暗度') ? numeric(snap, '雨.暗度') : null;
+  const toneValue = has('雨.色调') ? numeric(snap, '雨.色调') : null;
+  const vignetteValue = has('蛞蝓猫.边缘光晕') ? numeric(snap, '蛞蝓猫.边缘光晕') : null;
+  const stamina = has('蛞蝓猫.体力') ? numeric(snap, '蛞蝓猫.体力') : 100;
+  const threat = has('蜥蜴.威胁色') ? numeric(snap, '蜥蜴.威胁色') : 0;
+  const rain = Math.max(rainValue, (visuals['雨幕'] ?? 0) * 100);
   const palette = paletteOf(tuning, rain);
   const intensity = palette.rain;
+  const toneShift = (toneValue !== null ? (toneValue - 50) / 50 : 0) + (visuals['色调'] ?? 0);
+  const darkness = Math.min(0.75, Math.max(0.04, (darkValue !== null ? 0.06 + (darkValue / 100) * 0.5 : palette.darkness) + Math.abs(visuals['暗角'] ?? 0) * 0.2));
+  const vignette = Math.min(0.7, (vignetteValue !== null ? (vignetteValue / 100) * 0.7 : 0) + Math.abs(visuals['暗角'] ?? 0) * 0.8);
   const sheltered = booleanOf(snap, '蛞蝓猫.在避难所');
   const phase = snap.phase;
   const warmth = Math.max(0, (visuals['烛光'] ?? 0) + 0.4);
@@ -66,10 +76,15 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
 
   const style = {
     '--tint': palette.tint,
-    '--darkness': palette.darkness,
+    '--darkness': darkness,
     '--rain': intensity,
     '--warmth': warmth,
   } as CSSProperties;
+
+  const threatT = Math.min(1, Math.max(0, threat / 100));
+  const lizardBody = threatT > 0.55 ? '#8a6b4f' : '#6f8f61';
+  const lizardHead = threatT > 0.55 ? '#97775a' : '#789a69';
+  const slugOpacity = Math.max(0.35, Math.min(1, 0.55 + (stamina / 100) * 0.45)) * (sheltered ? 0.9 : 1);
 
   const hover = (entity: string) => (e: React.MouseEvent<SVGGElement>) => {
     onCharacterHover?.(entity, e.currentTarget.getBoundingClientRect());
@@ -143,7 +158,7 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
             <g
               className={`actor ${pulseEntity === '蛞蝓猫' ? 'actor--pulse' : ''}`}
               transform={sheltered ? 'translate(880, 455) scale(0.72)' : 'translate(318, 455)'}
-              opacity={sheltered ? 0.85 : 1}
+              opacity={slugOpacity}
               onMouseEnter={hover('蛞蝓猫')}
               onMouseMove={hover('蛞蝓猫')}
               onMouseLeave={leave}
@@ -172,8 +187,8 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
             >
               <ellipse cx="0" cy="28" rx="86" ry="12" fill="#000" opacity="0.3" />
               <path d="M-70 6 Q-130 -2 -170 26" stroke="#5c7a55" strokeWidth="12" fill="none" strokeLinecap="round" />
-              <ellipse cx="-10" cy="0" rx="78" ry="26" fill="#6f8f61" transform="rotate(-6)" />
-              <ellipse cx="62" cy="-14" rx="34" ry="22" fill="#789a69" />
+              <ellipse cx="-10" cy="0" rx="78" ry="26" fill={lizardBody} transform="rotate(-6)" />
+              <ellipse cx="62" cy="-14" rx="34" ry="22" fill={lizardHead} />
               <circle cx="72" cy="-20" r="4" fill="#131a16" />
               <path d="M-40 22 L-44 40 M-6 24 L-8 42 M30 20 L28 38" stroke="#4f6a49" strokeWidth="6" strokeLinecap="round" />
               <path d="M86 -6 L104 8 L92 4 Z" fill="#4f6a49" />
@@ -263,14 +278,11 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
       <div
         className="scene__tone"
         style={{
-          opacity: Math.min(0.6, Math.abs(visuals['色调'] ?? 0) + Math.abs(visuals['烛光'] ?? 0) * 0.5),
-          background:
-            (visuals['色调'] ?? 0) + (visuals['烛光'] ?? 0) >= 0
-              ? 'rgba(224, 163, 122, 0.35)'
-              : 'rgba(70, 110, 140, 0.35)',
+          opacity: Math.min(0.6, Math.abs(toneShift) * 0.45),
+          background: toneShift >= 0 ? 'rgba(224, 163, 122, 0.35)' : 'rgba(70, 110, 140, 0.35)',
         }}
       />
-      <div className="scene__vignette" style={{ opacity: Math.min(0.6, Math.abs(visuals['暗角'] ?? 0) * 0.8) }} />
+      <div className="scene__vignette" style={{ opacity: vignette }} />
       <div className="scene__grain" />
 
       {!ghost && phaseFlash && (

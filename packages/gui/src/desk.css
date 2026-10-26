@@ -1,0 +1,810 @@
+/* ============================================================
+   调律台：弦网络是主界面，现象层只是右下角的残影窗
+   ============================================================ */
+
+.desk {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) 330px;
+  grid-template-rows: minmax(0, 1fr) 76px;
+  background: #070b0d;
+  color: var(--ink);
+}
+
+.desk__entities {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 22px 10px;
+  border-right: 1px solid rgba(234, 228, 216, 0.07);
+  z-index: 6;
+}
+
+.desk__side-label {
+  margin: 0 0 14px 8px;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.entity-btn {
+  padding: 7px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  opacity: 0.38;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.entity-btn:hover {
+  opacity: 0.9;
+}
+
+.entity-btn.is-on {
+  opacity: 1;
+  background: rgba(159, 224, 200, 0.08);
+}
+
+.desk__main {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+}
+
+.desk__terms {
+  position: absolute;
+  top: 16px;
+  left: 26px;
+  z-index: 7;
+  display: flex;
+  gap: 20px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.desk__terms .term,
+.structure-full__terms .term,
+.desk__tuning .term,
+.desk__transport .term,
+.forcing-layer__head .term {
+  opacity: 0.4;
+  font-size: 10px;
+}
+
+.desk__terms .term:hover,
+.structure-full__terms .term:hover,
+.desk__tuning .term:hover,
+.desk__transport .term:hover,
+.forcing-layer__head .term:hover {
+  opacity: 0.9;
+}
+
+.desk__side {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 18px;
+  z-index: 5;
+}
+
+.desk__preview {
+  position: relative;
+  width: 100%;
+  height: 252px;
+  overflow: hidden;
+  border: 1px solid rgba(234, 228, 216, 0.12);
+  border-radius: 8px;
+  background: #0a1113;
+  cursor: pointer;
+  transition: border-color 0.25s ease;
+}
+
+.desk__preview:hover {
+  border-color: rgba(234, 228, 216, 0.28);
+}
+
+.desk__preview .scene {
+  position: absolute;
+  inset: 0;
+}
+
+.desk__preview-label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 3;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.desk__preview-cue {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  left: 12px;
+  z-index: 3;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 11px;
+  line-height: 1.5;
+  text-shadow: 0 2px 10px #000;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.desk__toolbar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 0 24px;
+  border-top: 1px solid rgba(234, 228, 216, 0.08);
+  background: #080d0f;
+  z-index: 7;
+}
+
+.desk__world {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desk__world-name {
+  font-family: var(--serif);
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+.desk__world-meta {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  opacity: 0.55;
+}
+
+.desk__tuning {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.desk__transport {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.desk-btn {
+  padding: 6px 7px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 12px;
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.desk-btn:hover {
+  opacity: 1;
+}
+
+.desk__flash {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 40;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  opacity: 0.5;
+  pointer-events: none;
+  animation: deskFlash 1.2s ease forwards;
+}
+
+@keyframes deskFlash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.5;
+  }
+  70% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* —— 弦网络 —— */
+
+.network {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.network__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.voice__spine {
+  stroke: rgba(234, 228, 216, 0.08);
+  stroke-width: 1;
+}
+
+.voice__label {
+  fill: var(--ink);
+  fill-opacity: 0.42;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+
+.voice.is-dim {
+  opacity: 0.2;
+}
+
+.coupling {
+  fill: none;
+  stroke-width: 0.7;
+  opacity: 0.13;
+  transition: opacity 0.25s ease;
+}
+
+.coupling--pos {
+  color: rgba(224, 163, 122, 0.75);
+  stroke: currentColor;
+}
+
+.coupling--neg {
+  color: rgba(127, 201, 216, 0.75);
+  stroke: currentColor;
+}
+
+.coupling.is-hot {
+  opacity: 0.32;
+}
+
+.coupling.is-dim {
+  opacity: 0.03;
+}
+
+.loop {
+  cursor: pointer;
+}
+
+.loop--reinforce {
+  color: var(--rose);
+}
+
+.loop--balance {
+  color: var(--cyan);
+}
+
+.loop__halo {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 14;
+  opacity: 0.05;
+  stroke-linejoin: round;
+  transition: opacity 0.25s ease;
+}
+
+.loop__line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.3;
+  stroke-linejoin: round;
+  transition: opacity 0.25s ease;
+}
+
+.loop__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+}
+
+.loop__name {
+  fill: currentColor;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  opacity: 0.38;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.loop:hover .loop__halo {
+  opacity: 0.14;
+}
+
+.loop:hover .loop__line {
+  opacity: 0.9;
+}
+
+.loop:hover .loop__name {
+  opacity: 1;
+}
+
+.loop.is-dim {
+  opacity: 0.18;
+}
+
+.string {
+  cursor: ns-resize;
+}
+
+.string__hit {
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+}
+
+.string__hit-area {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.string__line {
+  stroke: currentColor;
+  stroke-linecap: round;
+  opacity: 0.62;
+  transition: opacity 0.2s ease, stroke-width 0.12s ease;
+}
+
+.string__name {
+  fill: currentColor;
+  font-size: 9px;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.string__fret {
+  stroke-width: 1;
+}
+
+.string__fret--verge {
+  stroke: rgba(224, 163, 122, 0.8);
+}
+
+.string__fret--safe {
+  stroke: rgba(159, 224, 200, 0.8);
+}
+
+.string__marker {
+  stroke: rgba(234, 228, 216, 0.9);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.string--narr {
+  color: var(--warm);
+}
+
+.string--vis {
+  color: var(--cyan);
+}
+
+.string--phys {
+  color: #9aa3a6;
+}
+
+.string--cog {
+  color: #b59bd8;
+}
+
+.string--space {
+  color: var(--accent);
+}
+
+.string--rel {
+  color: var(--rose);
+}
+
+.string:hover .string__line {
+  opacity: 1;
+}
+
+.string:hover .string__name {
+  fill: var(--ink);
+}
+
+.string.is-pulse .string__line {
+  opacity: 1;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+.string.is-pulse-active .string__marker {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.force {
+  cursor: pointer;
+}
+
+.force rect {
+  fill: var(--warm);
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.force:hover rect {
+  opacity: 1;
+}
+
+.network__loop-tip {
+  position: fixed;
+  z-index: 70;
+  width: 250px;
+  padding: 10px 12px;
+  border: 1px solid rgba(234, 228, 216, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 12, 14, 0.94);
+  pointer-events: none;
+}
+
+.network__loop-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--serif);
+  font-size: 12px;
+}
+
+.network__loop-chain {
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
+.network__loop-kind {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+/* —— 弦的悬停读数 —— */
+
+.string-tip {
+  position: fixed;
+  z-index: 80;
+  width: 172px;
+  padding: 10px 12px;
+  border: 1px solid rgba(234, 228, 216, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 12, 14, 0.94);
+  pointer-events: none;
+}
+
+.string-tip__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--serif);
+  font-size: 12px;
+}
+
+.string-tip__rail {
+  position: relative;
+  width: 1px;
+  height: 64px;
+  margin: 10px 0 8px 4px;
+  background: rgba(234, 228, 216, 0.16);
+}
+
+.string-tip__rail i {
+  position: absolute;
+  left: -3px;
+  width: 7px;
+  height: 1px;
+  background: var(--ink);
+}
+
+.string-tip__text {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.string-tip__hint {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+/* —— 全屏现象层 —— */
+
+.phenomenon {
+  position: absolute;
+  inset: 0;
+  background: #05090a;
+}
+
+.phenomenon__hint {
+  position: absolute;
+  top: 18px;
+  left: 24px;
+  z-index: 6;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  opacity: 0.4;
+}
+
+.phenomenon .cues {
+  position: absolute;
+  right: 0;
+  bottom: 54px;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.phenomenon .cue {
+  max-width: 680px;
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.7;
+  text-align: center;
+  text-shadow: 0 2px 14px #000;
+}
+
+/* —— 结构层全屏：同一张弦网络，放大 —— */
+
+.structure-full {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+
+.structure-full__head {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  left: 24px;
+  z-index: 7;
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.structure-full__title {
+  font-family: var(--serif);
+  font-size: 13px;
+  opacity: 0.55;
+}
+
+.structure-full__terms {
+  display: flex;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.structure-full__hint {
+  opacity: 0.4;
+}
+
+.structure-full .network {
+  position: absolute;
+  inset: 0;
+}
+
+/* —— 力迫层 —— */
+
+.forcing-full {
+  position: absolute;
+  inset: 0;
+  background: #000;
+}
+
+.forcing-layer {
+  position: absolute;
+  inset: 0;
+  color: var(--ink);
+}
+
+.forcing-layer__head {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  left: 24px;
+  z-index: 7;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.forcing-layer__hint {
+  margin-left: auto;
+  opacity: 0.4;
+}
+
+.forcing-layer__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.force-edge {
+  fill: none;
+  stroke: rgba(234, 228, 216, 0.18);
+  stroke-width: 0.8;
+}
+
+.force-node {
+  cursor: pointer;
+}
+
+.force-node rect {
+  fill: rgba(224, 163, 122, 0.08);
+  stroke: var(--warm);
+  stroke-width: 1;
+  opacity: 0.65;
+  transition: opacity 0.2s ease;
+}
+
+.force-node__name {
+  fill: var(--ink);
+  font-family: var(--serif);
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.force-node:hover rect,
+.force-node.is-on rect {
+  fill: rgba(224, 163, 122, 0.18);
+  opacity: 1;
+}
+
+.force-node.is-on .force-node__name {
+  opacity: 1;
+}
+
+.force-node__irreversible {
+  fill: var(--rose);
+  opacity: 0.8;
+}
+
+.forcing-panel {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 8;
+  width: 360px;
+  max-height: 72vh;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(234, 228, 216, 0.12);
+  border-radius: 10px;
+  background: rgba(7, 12, 14, 0.95);
+  font-size: 11px;
+}
+
+.forcing-panel__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-family: var(--serif);
+  font-size: 15px;
+}
+
+.forcing-panel__head span {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.forcing-panel__label,
+.forcing-pop__label {
+  margin: 10px 0 3px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+}
+
+.forcing-panel__code,
+.forcing-pop__code {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.8;
+  opacity: 0.85;
+  word-break: break-all;
+}
+
+.forcing-panel__effects {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.8;
+  opacity: 0.85;
+}
+
+.forcing-panel__order,
+.forcing-pop__order {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+/* —— 力迫弹层 —— */
+
+.popup-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+.forcing-pop {
+  position: fixed;
+  z-index: 61;
+  width: 320px;
+  padding: 14px;
+  border: 1px solid rgba(234, 228, 216, 0.14);
+  border-radius: 10px;
+  background: rgba(7, 12, 14, 0.96);
+  font-size: 10px;
+}
+
+.forcing-pop__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--serif);
+  font-size: 13px;
+}
+
+.forcing-pop__head button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.forcing-pop__head button:hover {
+  opacity: 1;
+}
