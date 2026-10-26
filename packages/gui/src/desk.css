@@ -6,7 +6,7 @@
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: 118px minmax(0, 1fr) 330px;
+  grid-template-columns: 96px minmax(0, 1fr) 500px;
   grid-template-rows: minmax(0, 1fr) 76px;
   background: #070b0d;
   color: var(--ink);
@@ -95,14 +95,14 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 18px;
+  padding: 10px;
   z-index: 5;
 }
 
 .desk__preview {
   position: relative;
   width: 100%;
-  height: 252px;
+  height: 380px;
   overflow: hidden;
   border: 1px solid rgba(234, 228, 216, 0.12);
   border-radius: 8px;
@@ -218,6 +218,20 @@
   opacity: 0.5;
   pointer-events: none;
   animation: deskFlash 1.2s ease forwards;
+}
+
+/* 左下角的排练记号：只提示存在，不挡任何交互 */
+.desk__keys {
+  position: absolute;
+  bottom: 88px;
+  left: 24px;
+  z-index: 8;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.2;
+  pointer-events: none;
+  user-select: none;
 }
 
 @keyframes deskFlash {
@@ -376,6 +390,49 @@
   transition: opacity 0.2s ease, stroke-width 0.12s ease;
 }
 
+/* 极微弱的持续流动：高张力快，低张力慢 */
+.string__flow {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1.4 8.6;
+  opacity: 0.55;
+  pointer-events: none;
+  animation-name: stringFlow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes stringFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* 颜色在流动里微微呼吸；幅度极小 */
+.string__glow {
+  stroke: currentColor;
+  stroke-width: 5;
+  opacity: 0;
+  pointer-events: none;
+  animation-name: stringBreath;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes stringBreath {
+  0%,
+  100% {
+    opacity: 0.01;
+  }
+  50% {
+    opacity: 0.1;
+  }
+}
+
 .string__name {
   fill: currentColor;
   font-size: 9px;
@@ -441,6 +498,86 @@
 .string.is-pulse-active .string__marker {
   stroke: var(--accent);
   stroke-width: 3;
+}
+
+/* —— 拖弦时的因果波 —— */
+
+.coupling-wave {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 0.16 0.84;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 0 5px rgba(159, 224, 200, 0.7));
+  animation-name: waveTravel;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes waveTravel {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 1;
+  }
+  10% {
+    opacity: 0.95;
+  }
+  70% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+}
+
+.node-wave {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  opacity: 0;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-name: nodeWave;
+  animation-duration: 900ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}
+
+@keyframes nodeWave {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .string__flow,
+  .string__glow,
+  .coupling-wave,
+  .node-wave {
+    animation: none;
+  }
+  .string__flow {
+    stroke-dasharray: none;
+    opacity: 0.2;
+  }
+  .string__glow,
+  .coupling-wave,
+  .node-wave {
+    display: none;
+  }
 }
 
 .force {

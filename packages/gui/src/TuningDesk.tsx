@@ -187,6 +187,8 @@ export function TuningDesk({
           <Term id="和弦" onOpen={onOpenTerm} />
         </div>
       </footer>
+
+      <div className="desk__keys">空格 现象 · Tab 结构 · F 力迫</div>
     </div>
   );
 }

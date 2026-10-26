@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import type { IRString, LExpr, WorldIR } from '@neurou/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { IRCoupling, IRString, LExpr, WorldIR } from '@neurou/core';
 import { tensionOf, type ViewSnapshot } from './types.js';
 import { Term } from './Term.js';
 import type { TermId } from './terms.js';
@@ -42,6 +42,24 @@ interface Node {
   min: number;
   max: number;
   frets: { y: number; kind: 'verge' | 'safe' }[];
+}
+
+interface WaveEdge {
+  id: string;
+  start: number;
+  dur: number;
+}
+
+interface WaveNode {
+  id: string;
+  at: number;
+  source: boolean;
+}
+
+interface Wave {
+  key: number;
+  edges: WaveEdge[];
+  nodes: WaveNode[];
 }
 
 function shortName(s: IRString): string {
@@ -100,12 +118,22 @@ export function Network({
   onOpenTerm,
 }: NetworkProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const drag = useRef<{ id: string; startY: number; startX: number; startValue: number; range: number; screenH: number } | null>(null);
+  const drag = useRef<{ id: string; startY: number; startX: number; startValue: number; range: number; screenH: number; dx: number } | null>(null);
+  const reboundFrame = useRef<number | null>(null);
+  const waveTimer = useRef<number | null>(null);
   const [dragState, setDragState] = useState<{ id: string; dx: number } | null>(null);
+  const [wave, setWave] = useState<Wave | null>(null);
   const [hoverLoop, setHoverLoop] = useState<{ id: string; x: number; y: number } | null>(null);
 
-  const W = 1200;
+  const W = full ? 1300 : 1000;
   const H = full ? 800 : 720;
+
+  useEffect(() => {
+    return () => {
+      if (waveTimer.current !== null) window.clearTimeout(waveTimer.current);
+      if (reboundFrame.current !== null) cancelAnimationFrame(reboundFrame.current);
+    };
+  }, []);
 
   const layout = useMemo(() => {
     const strings = world.strings.filter((s) => !s.id.startsWith('调性.'));
@@ -179,6 +207,58 @@ export function Network({
     }
     const dx = (to.x - from.x) * 0.42;
     return `M ${from.x} ${from.vpos} C ${from.x + dx} ${from.vpos}, ${to.x - dx} ${to.vpos}, ${to.x} ${to.vpos}`;
+  };
+
+  /**
+   * 拖弦时的因果波：从源弦出发，沿耦合走三跳。
+   * 每条边的传播时间由耦合强度与延迟决定：越强越快，延迟越大越慢。
+   */
+  const startWave = (sourceId: string) => {
+    const adj = new Map<string, IRCoupling[]>();
+    for (const c of world.couplings) {
+      const list = adj.get(c.from) ?? [];
+      list.push(c);
+      adj.set(c.from, list);
+    }
+    const arrival = new Map<string, number>([[sourceId, 0]]);
+    const hops = new Map<string, number>([[sourceId, 0]]);
+    const nodeMap = new Map<string, WaveNode>([[sourceId, { id: sourceId, at: 0, source: true }]]);
+    const edges: WaveEdge[] = [];
+    const seenEdges = new Set<string>();
+    const queue: string[] = [sourceId];
+
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const t = arrival.get(cur)!;
+      const hop = hops.get(cur)!;
+      if (hop >= 3) continue;
+      for (const c of adj.get(cur) ?? []) {
+        if (seenEdges.has(c.id)) continue;
+        seenEdges.add(c.id);
+        const strength = Math.min(1, Math.max(0, Number(c.strength) || 0));
+        const delay = Math.max(0, Number(c.delay) || 0);
+        const dur = 220 + delay * 200 + (1 - strength) * 140;
+        const at = t + dur;
+        edges.push({ id: c.id, start: t, dur });
+        const known = arrival.get(c.to);
+        if (known === undefined || at < known) {
+          arrival.set(c.to, at);
+          hops.set(c.to, hop + 1);
+          queue.push(c.to);
+          const existing = nodeMap.get(c.to);
+          if (!existing || at < existing.at) nodeMap.set(c.to, { id: c.to, at, source: false });
+        }
+      }
+    }
+
+    const maxAt = Math.max(
+      0,
+      ...edges.map((e) => e.start + e.dur),
+      ...[...nodeMap.values()].map((n) => n.at),
+    );
+    if (waveTimer.current !== null) window.clearTimeout(waveTimer.current);
+    setWave({ key: Date.now(), edges, nodes: [...nodeMap.values()] });
+    waveTimer.current = window.setTimeout(() => setWave(null), maxAt + 900);
   };
 
   return (
@@ -266,10 +346,12 @@ export function Network({
                   key={s.id}
                   className={`string string--${KIND_CLASS[s.kind] ?? 'narr'} ${pulseSet.has(s.id) ? 'is-pulse' : ''} ${pulseActive ? 'is-pulse-active' : ''}`}
                   data-string={s.id}
+                  data-tension={n.tension.toFixed(2)}
                   onMouseEnter={(e) => onHoverString(s.id, e.currentTarget.getBoundingClientRect())}
                   onMouseLeave={() => onHoverString(null, null)}
                   onPointerDown={(e) => {
                     if (!n.numeric || n.value === null) return;
+                    if (reboundFrame.current !== null) cancelAnimationFrame(reboundFrame.current);
                     const svg = svgRef.current;
                     const rect = svg?.getBoundingClientRect();
                     const scale = rect ? Math.min(rect.width / W, rect.height / H) : 1;
@@ -280,8 +362,11 @@ export function Network({
                       startValue: n.value,
                       range: n.max - n.min,
                       screenH: Math.max(1, n.h * scale),
+                      dx: 0,
                     };
                     setDragState({ id: s.id, dx: 0 });
+                    onHoverString(null, null);
+                    startWave(s.id);
                     (e.currentTarget as SVGGElement).setPointerCapture(e.pointerId);
                     e.preventDefault();
                   }}
@@ -291,18 +376,33 @@ export function Network({
                     const dy = (d.startY - e.clientY) / d.screenH;
                     const next = d.startValue + dy * d.range * 0.65;
                     onAdjustString(d.id, next);
-                    setDragState({ id: d.id, dx: Math.max(-6, Math.min(6, (e.clientX - d.startX) * 0.18)) });
+                    d.dx = Math.max(-6, Math.min(6, (e.clientX - d.startX) * 0.18));
+                    setDragState({ id: d.id, dx: d.dx });
                   }}
                   onPointerUp={(e) => {
-                    if (drag.current) {
-                      try {
-                        (e.currentTarget as SVGGElement).releasePointerCapture(e.pointerId);
-                      } catch {
-                        /* ignore */
-                      }
-                      drag.current = null;
-                      setDragState(null);
+                    const d = drag.current;
+                    if (!d) return;
+                    try {
+                      (e.currentTarget as SVGGElement).releasePointerCapture(e.pointerId);
+                    } catch {
+                      /* ignore */
                     }
+                    drag.current = null;
+                    // 回弹：松开后弦从弯曲处以阻尼振荡回到直线。
+                    const dx0 = d.dx;
+                    const id = d.id;
+                    const started = performance.now();
+                    const step = (now: number) => {
+                      const p = Math.min(1, (now - started) / 420);
+                      if (p >= 1) {
+                        setDragState(null);
+                        reboundFrame.current = null;
+                        return;
+                      }
+                      setDragState({ id, dx: dx0 * (1 - p) * Math.cos(p * Math.PI * 3) });
+                      reboundFrame.current = requestAnimationFrame(step);
+                    };
+                    reboundFrame.current = requestAnimationFrame(step);
                   }}
                   onPointerCancel={() => {
                     drag.current = null;
@@ -311,6 +411,14 @@ export function Network({
                 >
                   <line x1={n.x} y1={n.y0 - 4} x2={n.x} y2={n.y0 + n.h + 4} className="string__hit" />
                   <rect x={n.x - 13} y={n.y0 - 4} width={26} height={n.h + 8} className="string__hit-area" />
+                  <line
+                    x1={n.x}
+                    y1={n.y0}
+                    x2={n.x}
+                    y2={n.y0 + n.h}
+                    className="string__glow"
+                    style={{ animationDuration: `${Math.max(2.2, 4.8 - n.tension * 2.2)}s` }}
+                  />
                   {dragState?.id === s.id ? (
                     <path
                       d={`M ${n.x} ${n.y0} Q ${n.x + dragState.dx} ${n.y0 + n.h / 2} ${n.x} ${n.y0 + n.h}`}
@@ -321,6 +429,14 @@ export function Network({
                   ) : (
                     <line x1={n.x} y1={n.y0} x2={n.x} y2={n.y0 + n.h} className="string__line" strokeWidth={1 + n.tension * 2.4} />
                   )}
+                  <line
+                    x1={n.x}
+                    y1={n.y0}
+                    x2={n.x}
+                    y2={n.y0 + n.h}
+                    className="string__flow"
+                    style={{ animationDuration: `${Math.max(1.1, 3.4 - n.tension * 2.4)}s` }}
+                  />
                   {n.frets.map((f, i) => (
                     <line key={i} x1={n.x - 5} y1={f.y} x2={n.x + 5} y2={f.y} className={`string__fret string__fret--${f.kind}`} />
                   ))}
@@ -358,6 +474,44 @@ export function Network({
               </g>
             );
           })}
+        {/* 因果波：源弦 → 耦合线脉冲 → 相邻弦 → 继续 */}
+        {wave && (
+          <g className="wave-layer" pointerEvents="none">
+            {wave.edges.map((w) => {
+              const c = world.couplings.find((x) => x.id === w.id);
+              if (!c) return null;
+              const a = nodeFor(c.from);
+              const b = nodeFor(c.to);
+              if (!a || !b) return null;
+              return (
+                <path
+                  key={`${wave.key}-${w.id}`}
+                  d={couplingPath(a, b)}
+                  pathLength={1}
+                  className="coupling-wave"
+                  data-wave-edge={w.id}
+                  style={{ animationDelay: `${Math.round(w.start)}ms`, animationDuration: `${Math.round(w.dur)}ms` }}
+                />
+              );
+            })}
+            {wave.nodes.map((w) => {
+              const n = nodeFor(w.id);
+              if (!n) return null;
+              return (
+                <circle
+                  key={`${wave.key}-${w.id}`}
+                  cx={n.x}
+                  cy={n.vpos}
+                  r={5}
+                  className="node-wave"
+                  data-wave-node={w.id}
+                  data-wave-source={w.source ? 'true' : undefined}
+                  style={{ animationDelay: `${Math.round(w.at)}ms` }}
+                />
+              );
+            })}
+          </g>
+        )}
       </svg>
 
       {hoverLoop && (

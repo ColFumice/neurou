@@ -5,6 +5,7 @@
  * 结果：artifacts/desk-test.json + artifacts/2x-*.png
  */
 import { chromium } from 'playwright';
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 mkdirSync('artifacts', { recursive: true });
@@ -56,7 +57,51 @@ check('世界自己开始跑了', Number(await page.locator('[data-testid="previ
 
 const deskText = await page.locator('[data-testid="desk"]').innerText();
 check('首屏没有数字读数', !/\d/.test(deskText), deskText.replace(/\n/g, ' / ').slice(0, 120));
+
+// 预览窗放大 + 左下角极淡视图提示
+const previewBox = await page.locator('[data-testid="preview"]').boundingBox();
+const previewRatio = previewBox ? (previewBox.width * previewBox.height) / (1440 * 900) : 0;
+check('预览窗 ≥420×320', Boolean(previewBox && previewBox.width >= 420 && previewBox.height >= 320), previewBox ? `${Math.round(previewBox.width)}×${Math.round(previewBox.height)}` : '无');
+check('预览窗面积 ≥14%', previewRatio >= 0.14, `${(previewRatio * 100).toFixed(1)}%`);
+const hint = page.locator('.desk__keys');
+check('左下角视图提示存在', (await hint.count()) === 1, await hint.innerText());
+const hintStyle = await hint.evaluate((n) => ({ opacity: Number(getComputedStyle(n).opacity), pe: getComputedStyle(n).pointerEvents }));
+check('提示 opacity ≤0.25', hintStyle.opacity <= 0.25, String(hintStyle.opacity));
+check('提示不挡交互', hintStyle.pe === 'none', hintStyle.pe);
+const hintBlocks = await page.evaluate(() => {
+  const el = document.querySelector('.desk__keys');
+  if (!el) return true;
+  const r = el.getBoundingClientRect();
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return top === el || el.contains(top);
+});
+check('提示下方仍可点到弦网络', !hintBlocks, hintBlocks ? '被提示遮挡' : '未遮挡');
+
+// 每根弦都有流动与呼吸
+const flowCount = await page.locator('.string__flow').count();
+const glowCount = await page.locator('.string__glow').count();
+check('每根弦都有流动层', flowCount === stringCount, `${flowCount}/${stringCount}`);
+check('每根弦都有呼吸层', glowCount === stringCount, `${glowCount}/${stringCount}`);
+const flowDurations = await page.locator('.string__flow').evaluateAll((ns) => [...new Set(ns.map((n) => getComputedStyle(n).animationDuration))]);
+check('流动速度随张力分档', flowDurations.length >= 2, flowDurations.join(' / '));
 await page.screenshot({ path: 'artifacts/20-desk.png' });
+
+// 暂停后连拍三帧：数值不动，只有弦在流动
+await page.locator('[data-testid="toggle-pause"]').click();
+await page.waitForTimeout(350);
+const frameHashes = [];
+const flowOffsets = [];
+for (let i = 0; i < 3; i++) {
+  const buf = await page.locator('[data-testid="network"]').screenshot({ path: `artifacts/30-frame-${i}.png` });
+  frameHashes.push(createHash('sha256').update(buf).digest('hex').slice(0, 12));
+  flowOffsets.push(await page.locator('[data-string="蛞蝓猫.体力"] .string__flow').evaluate((n) => getComputedStyle(n).strokeDashoffset));
+  if (i < 2) await page.waitForTimeout(520);
+}
+check('静止态连续三帧不完全相同', new Set(frameHashes).size === 3, frameHashes.join(' / '));
+check('弦的流动偏移在三帧间变化', new Set(flowOffsets).size >= 2, flowOffsets.join(' / '));
+await page.screenshot({ path: 'artifacts/31-static.png' });
+await page.locator('[data-testid="toggle-pause"]').click();
+await page.waitForTimeout(400);
 
 // ============ 2. 实体聚焦 ============
 await page.locator('[data-testid="entity-蜥蜴"]').click();
@@ -89,6 +134,24 @@ const actorBefore = await page.locator('[data-testid="preview"] [data-actor="蛞
 await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
 await page.mouse.down();
 await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2 - 30, { steps: 10 });
+await page.waitForTimeout(520);
+const waveInfo = await page.evaluate(() => {
+  const edges = [...document.querySelectorAll('[data-wave-edge]')];
+  const nodes = [...document.querySelectorAll('[data-wave-node]')];
+  return {
+    edges: edges.length,
+    litEdges: edges.filter((n) => Number(getComputedStyle(n).opacity) > 0.05).length,
+    nodes: nodes.length,
+    litNodes: nodes.filter((n) => Number(getComputedStyle(n).opacity) > 0.05).length,
+    source: nodes.filter((n) => n.getAttribute('data-wave-source') === 'true').length,
+    litNeighbors: nodes.filter((n) => n.getAttribute('data-wave-source') !== 'true' && Number(getComputedStyle(n).opacity) > 0.05).length,
+  };
+});
+check('拖动时至少 2 条耦合线出现脉冲', waveInfo.litEdges >= 2, JSON.stringify(waveInfo));
+check('拖动时至少 2 根相邻弦亮起', waveInfo.litNeighbors >= 2, JSON.stringify(waveInfo));
+check('传播从被拖的源弦出发', waveInfo.source === 1, String(waveInfo.source));
+await page.screenshot({ path: 'artifacts/32-wave-0.5s.png' });
+await page.locator('[data-testid="network"]').screenshot({ path: 'artifacts/32-wave-network.png' });
 await page.mouse.up();
 await page.waitForTimeout(350);
 const markerAfter = Number(await page.locator('[data-string="蛞蝓猫.体力"] .string__marker').getAttribute('y1'));
