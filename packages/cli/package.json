@@ -1,0 +1,16 @@
+{
+  "name": "@neurou/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "neurou": "./src/index.ts"
+  },
+  "dependencies": {
+    "@neurou/core": "workspace:*",
+    "@neurou/runtime": "workspace:*"
+  },
+  "scripts": {
+    "check": "tsc -b --pretty false"
+  }
+}

@@ -1,0 +1,124 @@
+import type { LExpr } from '@neurou/core';
+import type { RuntimeValue, WorldState } from './state.js';
+
+/** 求值：把图上的表达式还原成一次具体的判断或数值。 */
+export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
+  switch (e.k) {
+    case 'const':
+      return Array.isArray(e.v) ? new Set(e.v) : e.v;
+    case 'read':
+      return state.values[e.id] ?? null;
+    case 'un': {
+      if (e.op === '非') return !truthy(evalExpr(e.e, state));
+      const v = asNumber(evalExpr(e.e, state));
+      return e.op === '-' ? -v : v;
+    }
+    case 'bin': {
+      if (e.op === '且') return truthy(evalExpr(e.l, state)) && truthy(evalExpr(e.r, state));
+      if (e.op === '或') return truthy(evalExpr(e.l, state)) || truthy(evalExpr(e.r, state));
+      const l = evalExpr(e.l, state);
+      const r = evalExpr(e.r, state);
+      return binary(e.op, l, r);
+    }
+    case 'call': {
+      const args = e.args.map((a: LExpr) => evalExpr(a, state));
+      switch (e.fn) {
+        case '数量': {
+          const v = args[0];
+          if (v instanceof Set) return v.size;
+          if (typeof v === 'string') return [...v].length;
+          return 0;
+        }
+        case '包含': {
+          const set = args[0];
+          const item = args[1];
+          if (set instanceof Set) return set.has(String(item));
+          if (typeof set === 'string') return set.includes(String(item));
+          return false;
+        }
+        case '空': {
+          const v = args[0];
+          if (v instanceof Set) return v.size === 0;
+          if (typeof v === 'string') return v.length === 0;
+          return v === null;
+        }
+        case '最小':
+          return Math.min(asNumber(args[0] ?? null), asNumber(args[1] ?? null));
+        case '最大':
+          return Math.max(asNumber(args[0] ?? null), asNumber(args[1] ?? null));
+        case '绝对值':
+          return Math.abs(asNumber(args[0] ?? null));
+        case '存在':
+          return args[0] !== null && args[0] !== undefined;
+        default:
+          return null;
+      }
+    }
+    default:
+      return null;
+  }
+}
+
+export function binary(op: string, l: RuntimeValue, r: RuntimeValue): RuntimeValue {
+  switch (op) {
+    case '+':
+      return asNumber(l) + asNumber(r);
+    case '-':
+      return asNumber(l) - asNumber(r);
+    case '*':
+      return asNumber(l) * asNumber(r);
+    case '/': {
+      const d = asNumber(r);
+      return d === 0 ? 0 : asNumber(l) / d;
+    }
+    case '%': {
+      const d = asNumber(r);
+      return d === 0 ? 0 : asNumber(l) % d;
+    }
+    case '==':
+      return equalValues(l, r);
+    case '!=':
+      return !equalValues(l, r);
+    case '<':
+    case '<=':
+    case '>':
+    case '>=': {
+      const c = compareValues(l, r);
+      if (c === undefined) return false;
+      if (op === '<') return c < 0;
+      if (op === '<=') return c <= 0;
+      if (op === '>') return c > 0;
+      return c >= 0;
+    }
+    default:
+      return null;
+  }
+}
+
+export function asNumber(v: RuntimeValue): number {
+  return typeof v === 'number' ? v : typeof v === 'boolean' ? (v ? 1 : 0) : 0;
+}
+
+export function truthy(v: RuntimeValue): boolean {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') return v.length > 0;
+  if (v instanceof Set) return v.size > 0;
+  return false;
+}
+
+export function equalValues(l: RuntimeValue, r: RuntimeValue): boolean {
+  if (l instanceof Set && r instanceof Set) {
+    if (l.size !== r.size) return false;
+    for (const x of l) if (!r.has(x)) return false;
+    return true;
+  }
+  return l === r;
+}
+
+export function compareValues(l: RuntimeValue, r: RuntimeValue): number | undefined {
+  if (typeof l === 'number' && typeof r === 'number') return l === r ? 0 : l < r ? -1 : 1;
+  if (typeof l === 'string' && typeof r === 'string') return l === r ? 0 : l < r ? -1 : 1;
+  if (typeof l === 'boolean' && typeof r === 'boolean') return l === r ? 0 : l ? 1 : -1;
+  return undefined;
+}

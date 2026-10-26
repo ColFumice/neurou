@@ -1,0 +1,1353 @@
+import type {
+  ActionDecl,
+  AxiomDecl,
+  ChordDecl,
+  CouplingDecl,
+  CueAst,
+  Decl,
+  EffectAst,
+  EndingDecl,
+  EntityDecl,
+  Expr,
+  ForcingDecl,
+  FormDecl,
+  LoopDecl,
+  Program,
+  ResponseCurve,
+  SignalDecl,
+  StringDecl,
+  StringKind,
+  WorldDecl,
+} from './ast.js';
+import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
+import type {
+  IRAxiom,
+  IRCoupling,
+  IRCue,
+  IREffect,
+  IREntity,
+  IREnding,
+  IRLoop,
+  IRPhase,
+  IRRule,
+  IRSignal,
+  IRString,
+  LExpr,
+  Value,
+  WorldIR,
+} from './ir.js';
+import { SourceFile, type Span } from './source.js';
+import { parse } from './parser.js';
+
+export interface CompileResult {
+  source: SourceFile;
+  program: Program;
+  diagnostics: DiagnosticBag;
+  /** 即使有错误也尽量产出图，供 GUI 部分预览与引擎盖诊断 */
+  ir: WorldIR;
+  ok: boolean;
+}
+
+type TypeName = 'number' | 'boolean' | 'text' | 'enum' | 'set' | 'ref' | 'any';
+
+interface Scope {
+  owner?: string;
+}
+
+const KIND_SOLVER: Record<StringKind, string> = {
+  叙事: '状态机',
+  视觉: '渲染管线',
+  动画: '动画求解器',
+  物理: '物理积分器',
+  控制: '输入映射',
+  空间: '区域图',
+  认知: '知识图谱更新器',
+  关系: '事件驱动更新器',
+};
+
+export function kindSolver(kind: StringKind): string {
+  return KIND_SOLVER[kind];
+}
+
+class Compiler {
+  private readonly diagnostics = new DiagnosticBag();
+  private program: Program = { decls: [], span: { start: { line: 0, column: 0, offset: 0 }, end: { line: 0, column: 0, offset: 0 } } };
+  private world: WorldDecl | undefined;
+
+  private readonly entities = new Map<string, IREntity>();
+  private readonly entityDecls = new Map<string, EntityDecl>();
+  private readonly strings = new Map<string, IRString>();
+  private readonly stringDecls = new Map<string, StringDecl>();
+  private readonly shortNames = new Map<string, string[]>();
+
+  private readonly chordDecls = new Map<string, ChordDecl>();
+  private readonly forcingDecls = new Map<string, ForcingDecl>();
+  private readonly actionDecls = new Map<string, ActionDecl>();
+  private readonly signalDecls: SignalDecl[] = [];
+  private readonly endingDecls: EndingDecl[] = [];
+  private readonly axiomDecls: AxiomDecl[] = [];
+  private readonly loopDecls: LoopDecl[] = [];
+  private readonly couplingDecls: CouplingDecl[] = [];
+  private formDecl: FormDecl | undefined;
+
+  private readonly couplings: IRCoupling[] = [];
+  private readonly loops: IRLoop[] = [];
+  private readonly rules: IRRule[] = [];
+  private readonly signals: IRSignal[] = [];
+  private readonly endings: IREnding[] = [];
+  private readonly axioms: IRAxiom[] = [];
+  private readonly phases: IRPhase[] = [];
+
+  private readonly readBy = new Map<string, Set<string>>();
+  private readonly writtenBy = new Map<string, Set<string>>();
+  private couplingSeq = 0;
+
+  constructor(private readonly source: SourceFile) {}
+
+  compile(): CompileResult {
+    this.program = parse(this.source, this.diagnostics);
+    this.collect(this.program.decls);
+    this.buildCouplings();
+    this.buildLoops();
+    this.buildRules();
+    this.buildAxioms();
+    this.buildSignals();
+    this.buildEndings();
+    this.buildPhases();
+    this.analyze();
+
+    const ir = this.assemble();
+    return {
+      source: this.source,
+      program: this.program,
+      diagnostics: this.diagnostics,
+      ir,
+      ok: !this.diagnostics.hasErrors,
+    };
+  }
+
+  // ---------- 收集 ----------
+
+  private collect(decls: Decl[]): void {
+    for (const d of decls) {
+      switch (d.k) {
+        case 'world':
+          if (this.world) {
+            this.error('NRO2004', `已经有一个世界「${this.world.name}」了，不能再声明第二个世界。`, d.span, {
+              hint: '一个 .nro 文件只描述一个宇宙；要并行可以有多个文件。',
+            });
+          } else {
+            this.world = d;
+          }
+          break;
+        case 'entity':
+          if (this.entityDecls.has(d.name)) {
+            this.error('NRO2004', `实体「${d.name}」重复声明。`, d.span, { hint: '改个名字，或者删掉其中一个。' });
+          } else {
+            this.entityDecls.set(d.name, d);
+            const fields: Record<string, string> = {};
+            for (const f of d.fields) fields[f.key] = f.value;
+            this.entities.set(d.name, {
+              id: d.name,
+              name: d.name,
+              typeName: d.typeName ?? fields['种类'],
+              fields,
+            });
+          }
+          break;
+        case 'string':
+          this.declareString(d, undefined);
+          break;
+        case 'coupling':
+          this.couplingDecls.push(d);
+          break;
+        case 'loop':
+          if (this.loopDecls.some((l) => l.name === d.name)) {
+            this.error('NRO2004', `回路「${d.name}」重复声明。`, d.span);
+          }
+          this.loopDecls.push(d);
+          break;
+        case 'forcing':
+          if (this.forcingDecls.has(d.name)) this.error('NRO2004', `力迫「${d.name}」重复声明。`, d.span);
+          this.forcingDecls.set(d.name, d);
+          break;
+        case 'chord':
+          if (this.chordDecls.has(d.name)) this.error('NRO2004', `和弦「${d.name}」重复声明。`, d.span);
+          this.chordDecls.set(d.name, d);
+          break;
+        case 'action':
+          if (this.actionDecls.has(d.name)) this.error('NRO2004', `动作「${d.name}」重复声明。`, d.span);
+          this.actionDecls.set(d.name, d);
+          break;
+        case 'signal':
+          this.signalDecls.push(d);
+          break;
+        case 'ending':
+          this.endingDecls.push(d);
+          break;
+        case 'axiom':
+          this.axiomDecls.push(d);
+          break;
+        case 'form':
+          if (this.formDecl) this.warn('NRO3305', '一个世界只演奏一个曲式，后面的曲式被忽略了。', d.span);
+          else this.formDecl = d;
+          break;
+      }
+    }
+
+    // 实体内部嵌套的弦
+    for (const d of decls) {
+      if (d.k !== 'entity') continue;
+      for (const s of d.strings) this.declareString(s, d.name);
+    }
+  }
+
+  private declareString(d: StringDecl, owner: string | undefined): void {
+    const id = owner ? `${owner}.${d.name}` : d.name;
+    if (this.strings.has(id)) {
+      this.error('NRO2004', `弦「${id}」重复声明。`, d.span, { hint: '同一个实体下不能有两根同名的弦。' });
+      return;
+    }
+    if (d.stringKind === '关系' && !d.target) {
+      this.error('NRO2106', `关系弦「${id}」没有声明「对象」。`, d.span, {
+        hint: '关系弦必须说明它是对谁的关系，例如「对象 秃鹫」。',
+      });
+    }
+    if (d.stringKind !== '关系' && owner === undefined && d.target) {
+      this.error('NRO2106', `只有关系弦需要「对象」，「${id}」多写了。`, d.span);
+    }
+    const explicitBaseline = this.baselineOf(d, id);
+    const domain = this.domainOf(d, id, explicitBaseline);
+    const baseline = explicitBaseline ?? defaultForDomain(domain);
+    if (typeof baseline === 'number' && domain.type === 'number') {
+      if (domain.min !== undefined && baseline < domain.min) {
+        this.error('NRO2005', `弦「${id}」的基线 ${baseline} 小于取值范围的下界 ${domain.min}。`, d.span);
+      }
+      if (domain.max !== undefined && baseline > domain.max) {
+        this.error('NRO2005', `弦「${id}」的基线 ${baseline} 大于取值范围的上界 ${domain.max}。`, d.span);
+      }
+    }
+    const verge = this.constNumber(d.verge, `${id}.悬崖`, d.span);
+    const safe = this.constNumber(d.safe, `${id}.安全`, d.span);
+
+    if (d.verge || d.safe) {
+      if (domain.type !== 'number') {
+        this.error('NRO2005', `「${id}」不是数值弦，不能有悬崖线/安全线。`, d.span, {
+          hint: '阈值只对数值弦有意义；布尔或集合弦请用「当」条件表达。',
+        });
+      } else if (verge !== undefined && safe !== undefined && verge === safe) {
+        this.error('NRO2005', `「${id}」的悬崖线和安全线重合成了一条。`, d.span, {
+          hint: '两条线之间要有区间，否则世界没有「紧张」这一档。',
+        });
+      } else {
+        for (const [label, v] of [
+          ['悬崖', verge],
+          ['安全', safe],
+        ] as const) {
+          if (v === undefined) continue;
+          if (domain.min !== undefined && v < domain.min) {
+            this.error('NRO2005', `「${id}」的${label}线 ${v} 落在取值范围之外（最小 ${domain.min}）。`, d.span, {
+              hint: '这条线永远不会被越过——改到范围内。',
+            });
+          }
+          if (domain.max !== undefined && v > domain.max) {
+            this.error('NRO2005', `「${id}」的${label}线 ${v} 落在取值范围之外（最大 ${domain.max}）。`, d.span, {
+              hint: '这条线永远不会被越过——改到范围内。',
+            });
+          }
+        }
+      }
+    }
+
+    const ir: IRString = {
+      id,
+      name: d.name,
+      kind: d.stringKind,
+      domain,
+      baseline,
+      response: d.response ?? '线性',
+      owner,
+      target: d.target,
+      note: d.note,
+      span: d.span,
+    };
+    if (verge !== undefined) ir.verge = verge;
+    if (safe !== undefined) ir.safe = safe;
+
+    this.strings.set(id, ir);
+    this.stringDecls.set(id, d);
+    const short = d.name;
+    const arr = this.shortNames.get(short) ?? [];
+    arr.push(id);
+    this.shortNames.set(short, arr);
+  }
+
+  private baselineOf(d: StringDecl, id: string): Value | undefined {
+    if (!d.baseline) return undefined;
+    const lowered = this.lower(d.baseline, {});
+    if (lowered.type === 'any') return undefined;
+    const v = evalConst(lowered.expr);
+    if (v === undefined) {
+      this.error('NRO2006', `弦「${id}」的基线必须是一个确定的常数。`, d.baseline.span, {
+        hint: '基线是世界的初始值，不能引用别的弦。',
+      });
+      return undefined;
+    }
+    return v;
+  }
+
+  private domainOf(d: StringDecl, id: string, baseline: Value | undefined): IRString['domain'] {
+    if (d.domain) {
+      const dom = d.domain;
+      if (dom.type === 'enum' && dom.values.length === 0) {
+        this.error('NRO2005', `枚举类型「${id}」没有列出任何取值。`, d.span);
+      }
+      if (typeof baseline === 'number' && dom.type !== 'number') {
+        this.error('NRO2003', `「${id}」的基线和类型对不上：类型是 ${describeDomain(dom)}，基线却是数字。`, d.span);
+      }
+      if (typeof baseline === 'boolean' && dom.type !== 'boolean') {
+        this.error('NRO2003', `「${id}」的基线和类型对不上：类型是 ${describeDomain(dom)}，基线却是真/假。`, d.span);
+      }
+      if (typeof baseline === 'string' && dom.type === 'enum' && !dom.values.includes(baseline)) {
+        this.error('NRO2003', `「${id}」的基线「${baseline}」不在枚举取值里（${dom.values.join('、')}）。`, d.span);
+      }
+      return dom as IRString['domain'];
+    }
+    // 推断
+    if (baseline === undefined) {
+      this.error('NRO2008', `无法确定弦「${id}」的类型。`, d.span, {
+        hint: '给它写一个「类型」，或者写一个数字/真假的「基线」，让编译器自己推断。',
+      });
+      return { type: 'number' };
+    }
+    if (typeof baseline === 'number') return { type: 'number' };
+    if (typeof baseline === 'boolean') return { type: 'boolean' };
+    if (typeof baseline === 'string') return { type: 'text' };
+    return { type: 'set' };
+  }
+
+  private constNumber(e: Expr | undefined, what: string, fallbackSpan: Span): number | undefined {
+    if (!e) return undefined;
+    const lowered = this.lower(e, {});
+    const v = evalConst(lowered.expr);
+    if (typeof v !== 'number') {
+      this.error('NRO2006', `${what} 必须是一个数字常数。`, e.span);
+      void fallbackSpan;
+      return undefined;
+    }
+    return v;
+  }
+
+  // ---------- 名字解析 ----------
+
+  private resolve(parts: string[], span: Span, scope: Scope): string | undefined {
+    const joined = parts.join('.');
+    if (this.strings.has(joined)) {
+      this.markRead(joined, 'reference');
+      return joined;
+    }
+    if (parts.length === 1) {
+      const short = parts[0]!;
+      const cands = this.shortNames.get(short);
+      if (cands && cands.length > 0) {
+        if (cands.length === 1) {
+          this.markRead(cands[0]!, 'reference');
+          return cands[0]!;
+        }
+        const ownerCand = scope.owner ? `${scope.owner}.${short}` : undefined;
+        if (ownerCand && this.strings.has(ownerCand)) {
+          this.markRead(ownerCand, 'reference');
+          return ownerCand;
+        }
+        this.error('NRO2002', `「${short}」这个名字有歧义：${cands.join('、')} 都叫这个。`, span, {
+          hint: '用「实体.弦名」写全，例如「李严.信任」。',
+        });
+        return undefined;
+      }
+      // 全局弦 + 当前实体的短名
+      if (scope.owner) {
+        const cand = `${scope.owner}.${short}`;
+        if (this.strings.has(cand)) {
+          this.markRead(cand, 'reference');
+          return cand;
+        }
+      }
+    }
+    const suggestion = suggestName(joined, [...this.strings.keys()]);
+    this.error('NRO2001', `找不到叫「${joined}」的弦。`, span, suggestion ? { hint: `你是不是想写「${suggestion}」？` } : undefined);
+    return undefined;
+  }
+
+  private markRead(id: string, who: string): void {
+    const set = this.readBy.get(id) ?? new Set<string>();
+    set.add(who);
+    this.readBy.set(id, set);
+  }
+
+  private markWritten(id: string, who: string): void {
+    const set = this.writtenBy.get(id) ?? new Set<string>();
+    set.add(who);
+    this.writtenBy.set(id, set);
+  }
+
+  // ---------- 表达式 ----------
+
+  private lower(e: Expr, scope: Scope): { expr: LExpr; type: TypeName } {
+    switch (e.k) {
+      case 'num':
+        return { expr: { k: 'const', v: e.v }, type: 'number' };
+      case 'bool':
+        return { expr: { k: 'const', v: e.v }, type: 'boolean' };
+      case 'str':
+        return { expr: { k: 'const', v: e.v }, type: 'text' };
+      case 'set':
+        return { expr: { k: 'const', v: e.items }, type: 'set' };
+      case 'path': {
+        const joined = e.parts.join('.');
+        // 实体名可以直接当作引用值使用（例如集合里的「管道」）。
+        if (e.parts.length === 1 && !this.strings.has(joined) && this.entities.has(joined)) {
+          return { expr: { k: 'const', v: joined }, type: 'ref' };
+        }
+        const id = this.resolve(e.parts, e.span, scope);
+        if (!id) return { expr: { k: 'const', v: 0 }, type: 'any' };
+        const s = this.strings.get(id)!;
+        return { expr: { k: 'read', id }, type: typeOfDomain(s.domain) };
+      }
+      case 'un': {
+        const inner = this.lower(e.operand, scope);
+        if (e.op === '非') {
+          if (inner.type !== 'boolean' && inner.type !== 'any') {
+            this.error('NRO2003', `「非」只能作用于真/假，但这里是一个${typeLabel(inner.type)}。`, e.span);
+          }
+          return { expr: { k: 'un', op: '非', e: inner.expr }, type: 'boolean' };
+        }
+        if (inner.type !== 'number' && inner.type !== 'any') {
+          this.error('NRO2003', `负号只能作用于数字，但这里是一个${typeLabel(inner.type)}。`, e.span);
+        }
+        return { expr: { k: 'un', op: e.op, e: inner.expr }, type: 'number' };
+      }
+      case 'bin': {
+        const l = this.lower(e.left, scope);
+        const r = this.lower(e.right, scope);
+        if (e.op === '且' || e.op === '或') {
+          if (l.type !== 'boolean' && l.type !== 'any') this.error('NRO2003', `「${e.op}」的左边应该是一个真假判断。`, e.left.span);
+          if (r.type !== 'boolean' && r.type !== 'any') this.error('NRO2003', `「${e.op}」的右边应该是一个真假判断。`, e.right.span);
+          return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'boolean' };
+        }
+        if (['==', '!='].includes(e.op)) {
+          if (!comparable(l.type, r.type)) {
+            this.error('NRO2003', `不能拿一个${typeLabel(l.type)}和一个${typeLabel(r.type)}做比较。`, e.span);
+          }
+          return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'boolean' };
+        }
+        if (['<', '<=', '>', '>='].includes(e.op)) {
+          const ok = l.type === 'number' && r.type === 'number';
+          if (!ok && l.type !== 'any' && r.type !== 'any') {
+            this.error('NRO2003', `大小比较只支持数字，这里是${typeLabel(l.type)}和${typeLabel(r.type)}。`, e.span);
+          }
+          return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'boolean' };
+        }
+        if (l.type !== 'number' && l.type !== 'any') this.error('NRO2003', `「${e.op}」的左边应该是数字。`, e.left.span);
+        if (r.type !== 'number' && r.type !== 'any') this.error('NRO2003', `「${e.op}」的右边应该是数字。`, e.right.span);
+        return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'number' };
+      }
+      case 'call': {
+        const args = e.args.map((a) => this.lower(a, scope));
+        const argTypes = args.map((a) => a.type);
+        const fail = (want: string): { expr: LExpr; type: TypeName } => {
+          this.error('NRO2003', `函数「${e.name}」需要${want}。`, e.span);
+          return { expr: { k: 'const', v: null }, type: 'any' };
+        };
+        const l = args.map((a) => a.expr);
+        switch (e.name) {
+          case '数量':
+            if (argTypes[0] !== 'set' && argTypes[0] !== 'any') return fail('一个集合');
+            return { expr: { k: 'call', fn: '数量', args: l }, type: 'number' };
+          case '包含':
+            if ((argTypes[0] !== 'set' && argTypes[0] !== 'any') || args.length !== 2) return fail('一个集合和一个元素');
+            return { expr: { k: 'call', fn: '包含', args: l }, type: 'boolean' };
+          case '空':
+            if (argTypes[0] !== 'set' && argTypes[0] !== 'text' && argTypes[0] !== 'any') return fail('一个集合或文本');
+            return { expr: { k: 'call', fn: '空', args: l }, type: 'boolean' };
+          case '最小':
+          case '最大':
+            if (args.length !== 2 || argTypes.some((t) => t !== 'number' && t !== 'any')) return fail('两个数字');
+            return { expr: { k: 'call', fn: e.name, args: l }, type: 'number' };
+          case '绝对值':
+            if (args.length !== 1 || (argTypes[0] !== 'number' && argTypes[0] !== 'any')) return fail('一个数字');
+            return { expr: { k: 'call', fn: '绝对值', args: l }, type: 'number' };
+          case '存在':
+            if (argTypes[0] !== 'ref' && argTypes[0] !== 'any') return fail('一个引用');
+            return { expr: { k: 'call', fn: '存在', args: l }, type: 'boolean' };
+          default: {
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在']);
+            this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
+            return { expr: { k: 'const', v: null }, type: 'any' };
+          }
+        }
+      }
+    }
+  }
+
+  private lowerGuard(e: Expr | undefined, scope: Scope, what: string): LExpr | undefined {
+    if (!e) return undefined;
+    const lowered = this.lower(e, scope);
+    if (lowered.type !== 'boolean' && lowered.type !== 'any') {
+      this.error('NRO2003', `${what}的「当」应该是一个真假判断，但这里是一个${typeLabel(lowered.type)}。`, e.span, {
+        hint: '用比较写成判断，例如「信任 < 30」。',
+      });
+    }
+    return lowered.expr;
+  }
+
+  // ---------- 耦合 ----------
+
+  private buildCouplings(): void {
+    for (const d of this.couplingDecls) {
+      const from = this.resolve(d.from, d.span, {});
+      const to = this.resolve(d.to, d.span, {});
+      if (!from || !to) continue;
+      this.requireNumeric(from, d.span, '耦合的起点');
+      this.requireNumeric(to, d.span, '耦合的终点');
+      if (from === to) {
+        this.error('NRO2107', `「${from}」不能耦合到自己。`, d.span, { hint: '自我的变化请用「回路」表达，回路至少要两根弦。' });
+        continue;
+      }
+      const strength = d.strength ? this.constNumber(d.strength, '耦合强度', d.span) : 0.2;
+      const delay = d.delay ? this.constNumber(d.delay, '耦合延迟', d.span) : 0;
+      if (delay !== undefined && delay < 0) this.error('NRO2107', '耦合延迟不能是负数。', d.span);
+      const guard = this.lowerGuard(d.guard, {}, '耦合');
+      const c: IRCoupling = {
+        id: `c:${from}->${to}:${this.couplingSeq++}`,
+        from,
+        to,
+        polarity: d.polarity,
+        strength: strength ?? 0.2,
+        delay: Math.max(0, delay ?? 0),
+        curve: d.curve ?? '线性',
+        span: d.span,
+      };
+      if (guard) c.guard = guard;
+      this.couplings.push(c);
+      this.markWritten(to, `耦合 ${from}→${to}`);
+      this.markRead(from, `耦合 ${from}→${to}`);
+      this.checkCurve(d.curve, d.span);
+    }
+  }
+
+  private checkCurve(curve: ResponseCurve | undefined, span: Span): void {
+    if (curve === '阶跃' || curve === '缓入' || curve === '缓出') {
+      // 这些曲线在运行时是连续的吗？阶跃会让信号有一跳，属于体验级提示
+      void curve;
+      void span;
+    }
+  }
+
+  private requireNumeric(id: string, span: Span, what: string): void {
+    const s = this.strings.get(id);
+    if (!s) return;
+    if (s.domain.type !== 'number') {
+      this.error('NRO2003', `${what}「${id}」必须是一根数值弦。`, span, {
+        hint: `它是${describeDomain(s.domain)}，不能参与数值耦合。`,
+      });
+    }
+  }
+
+  // ---------- 回路 ----------
+
+  private buildLoops(): void {
+    for (const d of this.loopDecls) {
+      const edges: IRCoupling[] = [];
+      for (const e of d.edges) {
+        const from = this.resolve(e.from, e.span, {});
+        const to = this.resolve(e.to, e.span, {});
+        if (!from || !to) continue;
+        this.requireNumeric(from, e.span, '回路的起点');
+        this.requireNumeric(to, e.span, '回路的终点');
+        const c: IRCoupling = {
+          id: `c:${from}->${to}:${this.couplingSeq++}`,
+          from,
+          to,
+          polarity: e.polarity,
+          strength: e.strength ?? 0.2,
+          delay: Math.max(0, e.delay ?? 0),
+          curve: '线性',
+          loop: d.name,
+          span: e.span,
+        };
+        edges.push(c);
+        this.couplings.push(c);
+        this.markWritten(to, `回路 ${d.name}`);
+        this.markRead(from, `回路 ${d.name}`);
+      }
+      if (edges.length < 2) {
+        this.error('NRO2101', `回路「${d.name}」至少要两条边。`, d.span);
+        continue;
+      }
+      const cycleError = validateCycle(edges);
+      if (cycleError) {
+        this.error('NRO2101', `回路「${d.name}」不闭合：${cycleError}。`, d.span, {
+          hint: '回路的每根弦要有且只有一条出边、一条入边，并且走一圈能回到起点。',
+        });
+        continue;
+      }
+      let polarity: 1 | -1 = 1;
+      for (const e of edges) if (e.polarity === -1) polarity = polarity === 1 ? -1 : 1;
+      this.loops.push({ id: `loop:${d.name}`, name: d.name, edges: edges.map((e) => e.id), polarity, span: d.span });
+    }
+  }
+
+  // ---------- 规则 ----------
+
+  private buildRules(): void {
+    for (const d of this.forcingDecls.values()) {
+      const rule: IRRule = {
+        id: `forcing:${d.name}`,
+        kind: 'forcing',
+        name: d.name,
+        effects: this.lowerEffects(d.effects, {}),
+        irreversible: d.irreversible,
+        priority: d.priority,
+        before: d.before,
+        repeat: d.repeat,
+        cooldown: d.cooldown ?? 0,
+        cost: 0,
+        note: d.note,
+        span: d.span,
+      };
+      const guard = this.lowerGuard(d.guard, {}, `力迫「${d.name}」`);
+      if (guard) rule.guard = guard;
+      if (d.cooldown !== undefined && !d.repeat) {
+        this.warn('NRO3306', `力迫「${d.name}」写了「每 N 拍」但没有写「可重复」，这条冷却不会生效。`, d.span, {
+          hint: '想让它反复触发，加一句「可重复」。',
+        });
+      }
+      if (rule.cooldown < 0) this.error('NRO2107', `力迫「${d.name}」的冷却不能是负数。`, d.span);
+      this.rules.push(rule);
+    }
+
+    for (const d of this.chordDecls.values()) {
+      const rule: IRRule = {
+        id: `chord:${d.name}`,
+        kind: 'chord',
+        name: d.name,
+        effects: this.lowerEffects(d.effects, {}),
+        irreversible: false,
+        priority: 0,
+        before: [],
+        repeat: d.repeat,
+        cooldown: 0,
+        cost: 0,
+        note: d.note,
+        span: d.span,
+      };
+      const guard = this.lowerGuard(d.guard, {}, `和弦「${d.name}」`);
+      if (guard) rule.guard = guard;
+      this.rules.push(rule);
+    }
+
+    for (const d of this.actionDecls.values()) {
+      const rule: IRRule = {
+        id: `action:${d.name}`,
+        kind: 'action',
+        name: d.name,
+        effects: this.lowerEffects(d.effects, {}),
+        irreversible: false,
+        priority: 0,
+        before: [],
+        repeat: true,
+        cooldown: 0,
+        cost: d.cost,
+        note: d.note,
+        span: d.span,
+      };
+      const guard = this.lowerGuard(d.guard, {}, `动作「${d.name}」`);
+      if (guard) rule.guard = guard;
+      if (d.cost < 0) this.error('NRO2107', `动作「${d.name}」的耗时不能是负数。`, d.span);
+      this.rules.push(rule);
+    }
+
+    this.checkChordRecursion();
+    this.checkPrecedence();
+  }
+
+  private lowerEffects(effects: EffectAst[], scope: Scope): IREffect[] {
+    const out: IREffect[] = [];
+    for (const e of effects) {
+      if (e.k === 'apply') {
+        if (!e.chord) continue;
+        if (!this.chordDecls.has(e.chord)) {
+          const hint = suggestName(e.chord, [...this.chordDecls.keys()]);
+          this.error('NRO2001', `找不到叫「${e.chord}」的和弦。`, e.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+          continue;
+        }
+        out.push({ k: 'apply', chord: `chord:${e.chord}` });
+        continue;
+      }
+      if (!e.target) continue;
+      const id = this.resolve(e.target, e.span, scope);
+      if (!id) continue;
+      const s = this.strings.get(id)!;
+      const value = e.value ? this.lower(e.value, scope) : { expr: { k: 'const', v: null } as LExpr, type: 'any' as TypeName };
+
+      if (e.k === 'set') {
+        if (!assignable(value.type, typeOfDomain(s.domain))) {
+          this.error('NRO2003', `不能把${typeLabel(value.type)}赋给${describeDomain(s.domain)}的「${id}」。`, e.span);
+        }
+      } else {
+        // += / -=：数字做加减，集合做增删
+        if (s.domain.type === 'number') {
+          if (value.type !== 'number' && value.type !== 'any') {
+            this.error('NRO2003', `「${id}」是数值弦，只能加减数字，不能加减${typeLabel(value.type)}。`, e.span);
+          }
+        } else if (s.domain.type === 'set') {
+          if (value.type !== 'text' && value.type !== 'enum' && value.type !== 'ref' && value.type !== 'any') {
+            this.error('NRO2003', `「${id}」是集合，只能往里加/删元素，不能加一个${typeLabel(value.type)}。`, e.span);
+          }
+        } else {
+          this.error('NRO2003', `「${id}」是${describeDomain(s.domain)}，不能用 ${e.k === 'add' ? '+=' : '-='} 修改。`, e.span, {
+            hint: '布尔或文本弦请用「=」直接赋值。',
+          });
+        }
+      }
+      out.push({ k: e.k, id, value: value.expr });
+      this.markWritten(id, '规则');
+    }
+    return out;
+  }
+
+  private checkChordRecursion(): void {
+    const graph = new Map<string, string[]>();
+    for (const r of this.rules) {
+      if (r.kind !== 'chord') continue;
+      const targets = r.effects.filter((e): e is { k: 'apply'; chord: string } => e.k === 'apply').map((e) => e.chord);
+      graph.set(r.id, targets);
+    }
+    const state = new Map<string, 0 | 1 | 2>();
+    const stack: string[] = [];
+    const visit = (id: string): boolean => {
+      const st = state.get(id) ?? 0;
+      if (st === 1) {
+        const cycle = [...stack.slice(stack.indexOf(id)), id].join(' → ');
+        const span = this.rules.find((r) => r.id === id)?.span;
+        this.error('NRO2105', `和弦套和弦形成了死循环：${cycle}。`, span ?? { start: { line: 0, column: 0, offset: 0 }, end: { line: 0, column: 0, offset: 0 } }, {
+          hint: '让其中一个和弦直接写效果，而不是再去「施加」另一个。',
+        });
+        return true;
+      }
+      if (st === 2) return false;
+      state.set(id, 1);
+      stack.push(id);
+      for (const next of graph.get(id) ?? []) {
+        if (graph.has(next) && visit(next)) return true;
+      }
+      stack.pop();
+      state.set(id, 2);
+      return false;
+    };
+    for (const id of graph.keys()) {
+      if (!state.has(id)) visit(id);
+    }
+  }
+
+  private checkPrecedence(): void {
+    const forcings = this.rules.filter((r) => r.kind === 'forcing');
+    const byName = new Map(forcings.map((r) => [r.name, r]));
+    const edges = new Map<string, string[]>();
+    for (const r of forcings) {
+      const outs: string[] = [];
+      for (const b of r.before) {
+        const target = byName.get(b);
+        if (!target) {
+          const hint = suggestName(b, [...byName.keys()]);
+          this.error('NRO2001', `「${r.name}」想先于「${b}」，但没有这个力迫。`, r.span ?? zeroSpan(), hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+          continue;
+        }
+        outs.push(target.id);
+      }
+      edges.set(r.id, outs);
+    }
+    const state = new Map<string, 0 | 1 | 2>();
+    const visit = (id: string, stack: string[]): boolean => {
+      const st = state.get(id) ?? 0;
+      if (st === 1) {
+        const names = [...stack.slice(stack.indexOf(id)), id].map((x) => x.replace(/^forcing:/, ''));
+        this.error('NRO2103', `力迫的「先于」关系绕成了一个环：${names.join(' → ')}。`, zeroSpan(), {
+          hint: '偏序必须能排出先后；去掉其中一条「先于」。',
+        });
+        return true;
+      }
+      if (st === 2) return false;
+      state.set(id, 1);
+      stack.push(id);
+      for (const next of edges.get(id) ?? []) if (visit(next, stack)) return true;
+      stack.pop();
+      state.set(id, 2);
+      return false;
+    };
+    for (const r of forcings) if (!state.has(r.id)) visit(r.id, []);
+  }
+
+  // ---------- 公理 / 信号 / 结局 / 曲式 ----------
+
+  private buildAxioms(): void {
+    for (const d of this.axiomDecls) {
+      const lowered = this.lower(d.expr, {});
+      if (lowered.type !== 'boolean' && lowered.type !== 'any') {
+        this.error('NRO2003', `公理「${d.name}」必须是一个永远为真的判断。`, d.expr.span);
+      }
+      const v = evalConst(lowered.expr);
+      if (v === false) {
+        this.error('NRO2104', `公理「${d.name}」从一开始就是假的。`, d.span, { hint: '它约束的初值自相矛盾，这个世界不可能存在。' });
+      }
+      this.axioms.push({ id: `axiom:${d.name}`, name: d.name, expr: lowered.expr, span: d.span });
+      this.markAxiomReads(lowered.expr);
+      this.checkAxiomAgainstEffects(d.name, lowered.expr, d.span);
+    }
+  }
+
+  private markAxiomReads(e: LExpr): void {
+    if (e.k === 'read') this.markRead(e.id, '公理');
+    else if (e.k === 'bin') {
+      this.markAxiomReads(e.l);
+      this.markAxiomReads(e.r);
+    } else if (e.k === 'un') this.markAxiomReads(e.e);
+    else if (e.k === 'call') e.args.forEach((a) => this.markAxiomReads(a));
+  }
+
+  private checkAxiomAgainstEffects(name: string, expr: LExpr, span: Span): void {
+    // 只做「简单等式公理 vs 直接赋值」的静态对撞，覆盖最常见的一类矛盾。
+    let id: string | undefined;
+    let expected: Value | undefined;
+    let equality = true;
+    if (expr.k === 'bin' && (expr.op === '==' || expr.op === '!=')) {
+      equality = expr.op === '==';
+      if (expr.l.k === 'read' && expr.r.k === 'const') {
+        id = expr.l.id;
+        expected = expr.r.v;
+      } else if (expr.r.k === 'read' && expr.l.k === 'const') {
+        id = expr.r.id;
+        expected = expr.l.v;
+      }
+    }
+    if (!id || expected === undefined) return;
+    for (const r of this.rules) {
+      for (const e of r.effects) {
+        if (e.k !== 'set' || e.id !== id) continue;
+        const v = evalConst(e.value);
+        if (v === undefined) continue;
+        const same = JSON.stringify(v) === JSON.stringify(expected);
+        if (equality ? !same : same) {
+          this.error(
+            'NRO2104',
+            `「${r.name}」会把「${id}」改成 ${formatValue(v)}，这会破坏公理「${name}」（${formatValue(expected)} ${equality ? '==' : '!='} ${id}）。`,
+            r.span ?? span,
+            { hint: '要么改掉这条效果，要么放松公理——两者不能同时成立。' },
+          );
+        }
+      }
+    }
+  }
+
+  private buildSignals(): void {
+    for (const d of this.signalDecls) {
+      const guard = this.lowerGuard(d.guard, {}, `信号「${d.name}」`);
+      const cues: IRCue[] = d.cues.map((c) => this.cueOf(c));
+      this.signals.push({ id: `signal:${d.name}`, name: d.name, guard: guard ?? { k: 'const', v: false }, cues, span: d.span });
+      if (guard) this.markSignalReads(guard);
+      if (cues.length === 0) {
+        this.error('NRO2108', `信号「${d.name}」没有呈现方式，玩家什么也感知不到。`, d.span);
+      }
+    }
+  }
+
+  private markSignalReads(e: LExpr): void {
+    if (e.k === 'read') this.markRead(e.id, '信号');
+    else if (e.k === 'bin') {
+      this.markSignalReads(e.l);
+      this.markSignalReads(e.r);
+    } else if (e.k === 'un') this.markSignalReads(e.e);
+    else if (e.k === 'call') e.args.forEach((a) => this.markSignalReads(a));
+  }
+
+  private cueOf(c: CueAst): IRCue {
+    switch (c.k) {
+      case '台词':
+        return { k: '台词', speaker: c.speaker, text: c.text };
+      case '视觉':
+      case '音频':
+        return { k: c.k, param: c.param, value: c.value };
+      default:
+        return { k: c.k, text: c.text };
+    }
+  }
+
+  private buildEndings(): void {
+    for (const d of this.endingDecls) {
+      const lowered = this.lower(d.guard, {});
+      if (lowered.type !== 'boolean' && lowered.type !== 'any') {
+        this.error('NRO2003', `结局「${d.name}」的触发条件必须是真假判断。`, d.guard.span);
+      }
+      this.endings.push({ id: `ending:${d.name}`, name: d.name, guard: lowered.expr, span: d.span });
+      this.markEndingReads(lowered.expr);
+    }
+  }
+
+  private markEndingReads(e: LExpr): void {
+    if (e.k === 'read') this.markRead(e.id, '结局');
+    else if (e.k === 'bin') {
+      this.markEndingReads(e.l);
+      this.markEndingReads(e.r);
+    } else if (e.k === 'un') this.markEndingReads(e.e);
+    else if (e.k === 'call') e.args.forEach((a) => this.markEndingReads(a));
+  }
+
+  private buildPhases(): void {
+    if (!this.formDecl) return;
+    for (const p of this.formDecl.phases) {
+      if (p.duration <= 0) {
+        this.error('NRO2107', `段落「${p.name}」的时长必须大于 0。`, p.span);
+        continue;
+      }
+      this.phases.push({ id: `phase:${p.name}`, name: p.name, duration: p.duration });
+    }
+  }
+
+  // ---------- 分析 ----------
+
+  private analyze(): void {
+    this.analyzeLoops();
+    this.analyzeSilence();
+    this.analyzeDeadStrings();
+    this.analyzeEndings();
+    this.analyzeUniverse();
+  }
+
+  private analyzeLoops(): void {
+    for (const loop of this.loops) {
+      const edges = loop.edges.map((id) => this.couplings.find((c) => c.id === id)).filter((c): c is IRCoupling => !!c);
+      const ids = new Set<string>();
+      for (const e of edges) {
+        ids.add(e.from);
+        ids.add(e.to);
+      }
+      const clamp = [...ids].some((id) => {
+        const s = this.strings.get(id);
+        if (!s || s.domain.type !== 'number') return false;
+        return s.verge !== undefined || s.safe !== undefined || s.domain.min !== undefined || s.domain.max !== undefined;
+      });
+      const referencedByEnding = this.endings.some((en) => exprReads(en.guard, ids));
+      const span = loop.span ?? zeroSpan();
+
+      if (loop.polarity === 1) {
+        if (!clamp && !referencedByEnding) {
+          this.error(
+            'NRO2102',
+            `回路「${loop.name}」是自我强化的，但环上没有任何闸门，也没有结局接住它——这个世界会一路冲向无穷。`,
+            span,
+            {
+              hint: '给环上至少一根弦加「悬崖」/「安全」线，或者写一个引用这些弦的「结局」。',
+            },
+          );
+        } else if (!clamp) {
+          this.warn('NRO3307', `回路「${loop.name}」是自我强化的，靠结局直接截断，环本身没有闸门。`, span, {
+            hint: '加一条阈值会让压力在体验层更可读。',
+          });
+        }
+      } else if (!clamp) {
+        this.warn('NRO3106', `回路「${loop.name}」是自我校正的，但没有阈值——它可能收敛到一个静止点，故事会「死水化」。`, span, {
+          hint: '给环上某根弦加一条悬崖线，让收敛点之前有可感知的压力。',
+        });
+      }
+    }
+  }
+
+  private analyzeSilence(): void {
+    for (const s of this.strings.values()) {
+      if (s.domain.type !== 'number') continue;
+      if (s.verge === undefined && s.safe === undefined) continue;
+      const readers = this.readBy.get(s.id);
+      const hasSignal = [...(readers ?? [])].some((r) => r === '信号');
+      if (!hasSignal) {
+        this.warn(
+          'NRO3101',
+          `「${s.id}」会越过悬崖，但没有任何「信号」让玩家看见/听见——这属于静默失败。`,
+          s.span ?? zeroSpan(),
+          { hint: `写一条「信号」，在「当 ${s.id} ${s.verge !== undefined ? (s.verge < (s.safe ?? Infinity) ? '<' : '>') : '<'} ${s.verge ?? s.safe}」时给出台词、视觉或音频。` },
+        );
+      }
+    }
+  }
+
+  private analyzeDeadStrings(): void {
+    for (const s of this.strings.values()) {
+      const read = this.readBy.get(s.id);
+      if (!read || read.size === 0) {
+        const written = this.writtenBy.get(s.id);
+        if (written && written.size > 0) {
+          this.warn('NRO3102', `「${s.id}」有人改，但没有任何规则、信号或结局读取它——它是一根死弦。`, s.span ?? zeroSpan(), {
+            hint: '把它接到一条耦合、一个信号或一个结局上，否则它不影响任何事。',
+          });
+        } else {
+          this.warn('NRO3102', `「${s.id}」既没有人读，也没有人写——它从开局到结束都是基线值。`, s.span ?? zeroSpan());
+        }
+      }
+    }
+  }
+
+  private analyzeEndings(): void {
+    if (this.endings.length === 0) {
+      this.warn('NRO3104', '这个世界没有「结局」——模拟会一直跑到拍数上限。', this.world?.span ?? zeroSpan(), {
+        hint: '至少写一个「结局 崩坏: 当 …」，让世界有落点。',
+      });
+      return;
+    }
+    const written = new Set(this.writtenBy.keys());
+    for (const en of this.endings) {
+      const ids = new Set<string>();
+      collectReads(en.guard, ids);
+      const reachable = [...ids].some((id) => written.has(id));
+      if (!reachable) {
+        this.warn('NRO3103', `结局「${en.name}」依赖的弦从来不会被改变，所以它可能永远不会发生。`, en.span ?? zeroSpan(), {
+          hint: '检查是否有力迫、动作或耦合真的会推动这些弦。',
+        });
+      }
+    }
+  }
+
+  private analyzeUniverse(): void {
+    if (!this.world) {
+      this.error('NRO2009', '这个文件没有「世界」声明。', zeroSpan(), {
+        hint: '第一行写「世界 你的世界名」。',
+      });
+    }
+    if (this.rules.filter((r) => r.kind === 'action').length === 0) {
+      this.warn('NRO3105', '这个世界没有任何「动作」——玩家无法介入，只能看它自己演化。', this.world?.span ?? zeroSpan(), {
+        hint: '如果这是有意的（纯演化世界），可以忽略；否则写几个「动作」。',
+      });
+    }
+    for (const s of this.strings.values()) {
+      if (s.kind === '关系' && s.target && !this.entities.has(s.target)) {
+        this.error('NRO2001', `关系弦「${s.id}」的对象「${s.target}」不是已声明的实体。`, s.span ?? zeroSpan());
+      }
+      const dom = s.domain;
+      if (dom.type === 'ref' && dom.entityKind) {
+        const kind = dom.entityKind;
+        if (![...this.entities.values()].some((e) => e.typeName === kind)) {
+          this.warn('NRO3308', `引用类型「${s.id}」指向的种类「${kind}」不存在任何实体。`, s.span ?? zeroSpan());
+        }
+      }
+    }
+    if (this.strings.size === 0) {
+      this.error('NRO2009', '这个世界一根弦都没有。', this.world?.span ?? zeroSpan(), {
+        hint: '从「叙事弦 信任」这样的声明开始。',
+      });
+    }
+  }
+
+  // ---------- 组装 ----------
+
+  private assemble(): WorldIR {
+    const meta: Record<string, string | number> = {};
+    if (this.world) for (const m of this.world.meta) meta[m.key] = m.value;
+    if (!meta['调性']) meta['调性'] = '未定';
+    return {
+      format: 'neurou/ir-0.1',
+      name: this.world?.name ?? '未命名世界',
+      meta,
+      entities: [...this.entities.values()],
+      strings: [...this.strings.values()],
+      couplings: this.couplings,
+      loops: this.loops,
+      rules: this.rules,
+      axioms: this.axioms,
+      signals: this.signals,
+      phases: this.phases,
+      endings: this.endings,
+      stats: {
+        strings: this.strings.size,
+        couplings: this.couplings.length,
+        loops: this.loops.length,
+        rules: this.rules.length,
+        signals: this.signals.length,
+        endings: this.endings.length,
+      },
+    };
+  }
+
+  // ---------- 诊断快捷方式 ----------
+
+  private error(code: string, message: string, span: Span, opts?: { hint?: string; related?: string[] }): void {
+    this.diagnostics.error(code, 'semantic', message, { span, file: this.source.path, ...opts });
+  }
+
+  private warn(code: string, message: string, span: Span, opts?: { hint?: string; related?: string[] }): void {
+    const tier = code.startsWith('NRO3') ? 'experience' : 'semantic';
+    this.diagnostics.warn(code, tier, message, { span, file: this.source.path, ...opts });
+  }
+}
+
+// ---------- 纯函数工具 ----------
+
+function zeroSpan(): Span {
+  const p = { line: 0, column: 0, offset: 0 };
+  return { start: p, end: p };
+}
+
+function defaultForDomain(d: IRString['domain']): Value {
+  switch (d.type) {
+    case 'number':
+      return d.min ?? 0;
+    case 'boolean':
+      return false;
+    case 'enum':
+      return d.values[0] ?? '';
+    case 'set':
+      return [];
+    case 'text':
+      return '';
+    case 'ref':
+      return null;
+  }
+}
+
+function typeOfDomain(d: IRString['domain']): TypeName {
+  switch (d.type) {
+    case 'number':
+      return 'number';
+    case 'boolean':
+      return 'boolean';
+    case 'enum':
+      return 'enum';
+    case 'set':
+      return 'set';
+    case 'text':
+      return 'text';
+    case 'ref':
+      return 'ref';
+  }
+}
+
+function typeLabel(t: TypeName): string {
+  const map: Record<TypeName, string> = {
+    number: '数字',
+    boolean: '真假值',
+    text: '文本',
+    enum: '枚举值',
+    set: '集合',
+    ref: '引用',
+    any: '未知类型',
+  };
+  return map[t];
+}
+
+function describeDomain(d: IRString['domain']): string {
+  switch (d.type) {
+    case 'number':
+      return d.min !== undefined && d.max !== undefined ? `数值(${d.min}..${d.max})` : '数值';
+    case 'boolean':
+      return '布尔';
+    case 'enum':
+      return `枚举(${d.values.join('、')})`;
+    case 'set':
+      return d.elementKind ? `集合(${d.elementKind})` : '集合';
+    case 'text':
+      return '文本';
+    case 'ref':
+      return d.entityKind ? `引用(${d.entityKind})` : '引用';
+  }
+}
+
+function comparable(a: TypeName, b: TypeName): boolean {
+  if (a === 'any' || b === 'any') return true;
+  if (a === b) return true;
+  const textish: TypeName[] = ['text', 'enum', 'ref'];
+  return textish.includes(a) && textish.includes(b);
+}
+
+function assignable(from: TypeName, to: TypeName): boolean {
+  if (from === 'any' || to === 'any') return true;
+  if (from === to) return true;
+  const textish: TypeName[] = ['text', 'enum', 'ref'];
+  return textish.includes(from) && textish.includes(to);
+}
+
+function evalConst(e: LExpr): Value | undefined {
+  switch (e.k) {
+    case 'const':
+      return e.v;
+    case 'read':
+      return undefined;
+    case 'un': {
+      const v = evalConst(e.e);
+      if (e.op === '非') return typeof v === 'boolean' ? !v : undefined;
+      if (typeof v !== 'number') return undefined;
+      return e.op === '-' ? -v : v;
+    }
+    case 'bin': {
+      const l = evalConst(e.l);
+      const r = evalConst(e.r);
+      if (l === undefined || r === undefined) return undefined;
+      switch (e.op) {
+        case '+':
+          return typeof l === 'number' && typeof r === 'number' ? l + r : undefined;
+        case '-':
+          return typeof l === 'number' && typeof r === 'number' ? l - r : undefined;
+        case '*':
+          return typeof l === 'number' && typeof r === 'number' ? l * r : undefined;
+        case '/':
+          return typeof l === 'number' && typeof r === 'number' ? (r === 0 ? undefined : l / r) : undefined;
+        case '%':
+          return typeof l === 'number' && typeof r === 'number' ? (r === 0 ? undefined : l % r) : undefined;
+        case '==':
+          return JSON.stringify(l) === JSON.stringify(r);
+        case '!=':
+          return JSON.stringify(l) !== JSON.stringify(r);
+        case '<':
+          return typeof l === 'number' && typeof r === 'number' ? l < r : undefined;
+        case '<=':
+          return typeof l === 'number' && typeof r === 'number' ? l <= r : undefined;
+        case '>':
+          return typeof l === 'number' && typeof r === 'number' ? l > r : undefined;
+        case '>=':
+          return typeof l === 'number' && typeof r === 'number' ? l >= r : undefined;
+        case '且':
+          return typeof l === 'boolean' && typeof r === 'boolean' ? l && r : undefined;
+        case '或':
+          return typeof l === 'boolean' && typeof r === 'boolean' ? l || r : undefined;
+        default:
+          return undefined;
+      }
+    }
+    case 'call': {
+      const args = e.args.map(evalConst);
+      if (args.some((a) => a === undefined)) return undefined;
+      switch (e.fn) {
+        case '数量':
+          return Array.isArray(args[0]) ? args[0].length : undefined;
+        case '包含':
+          return Array.isArray(args[0]) ? args[0].includes(String(args[1])) : undefined;
+        case '空':
+          if (Array.isArray(args[0])) return args[0].length === 0;
+          if (typeof args[0] === 'string') return args[0].length === 0;
+          return undefined;
+        case '最小':
+          return typeof args[0] === 'number' && typeof args[1] === 'number' ? Math.min(args[0], args[1]) : undefined;
+        case '最大':
+          return typeof args[0] === 'number' && typeof args[1] === 'number' ? Math.max(args[0], args[1]) : undefined;
+        case '绝对值':
+          return typeof args[0] === 'number' ? Math.abs(args[0]) : undefined;
+        case '存在':
+          return args[0] !== null;
+        default:
+          return undefined;
+      }
+    }
+  }
+}
+
+function exprReads(e: LExpr, ids: Set<string>): boolean {
+  switch (e.k) {
+    case 'read':
+      return ids.has(e.id);
+    case 'bin':
+      return exprReads(e.l, ids) || exprReads(e.r, ids);
+    case 'un':
+      return exprReads(e.e, ids);
+    case 'call':
+      return e.args.some((a) => exprReads(a, ids));
+    default:
+      return false;
+  }
+}
+
+function collectReads(e: LExpr, out: Set<string>): void {
+  switch (e.k) {
+    case 'read':
+      out.add(e.id);
+      break;
+    case 'bin':
+      collectReads(e.l, out);
+      collectReads(e.r, out);
+      break;
+    case 'un':
+      collectReads(e.e, out);
+      break;
+    case 'call':
+      for (const a of e.args) collectReads(a, out);
+      break;
+    default:
+      break;
+  }
+}
+
+function validateCycle(edges: IRCoupling[]): string | undefined {
+  const outDeg = new Map<string, number>();
+  const inDeg = new Map<string, number>();
+  for (const e of edges) {
+    outDeg.set(e.from, (outDeg.get(e.from) ?? 0) + 1);
+    inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1);
+  }
+  for (const [n, d] of outDeg) if (d > 1) return `「${n}」有多条出边`;
+  for (const [n, d] of inDeg) if (d > 1) return `「${n}」有多条入边`;
+  const nodes = [...new Set(edges.flatMap((e) => [e.from, e.to]))];
+  if (nodes.length !== edges.length) return '节点数和边数对不上，说明它不是一条单环';
+  const next = new Map(edges.map((e) => [e.from, e.to]));
+  const start = nodes[0]!;
+  let cur = start;
+  const seen = new Set<string>();
+  for (let i = 0; i < nodes.length; i++) {
+    if (seen.has(cur)) return `在「${cur}」处提前回到了已经走过的弦`;
+    seen.add(cur);
+    const nxt = next.get(cur);
+    if (!nxt) return `「${cur}」没有出边`;
+    cur = nxt;
+  }
+  if (cur !== start) return `走完一圈停在「${cur}」，没有回到起点「${start}」`;
+  return undefined;
+}
+
+export function suggestName(word: string, candidates: readonly string[]): string | undefined {
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = levenshtein(word, c);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  return best && bestDist <= Math.max(1, Math.floor(word.length / 2)) ? best : undefined;
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0]!;
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j]!;
+      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[n]!;
+}
+
+function formatValue(v: Value): string {
+  if (Array.isArray(v)) return `{${v.join(', ')}}`;
+  if (v === null) return '空';
+  return String(v);
+}
+
+export function compile(source: SourceFile): CompileResult {
+  return new Compiler(source).compile();
+}
+
+export function compileText(text: string, path = '<inline>.nro'): CompileResult {
+  return compile(new SourceFile(path, text));
+}
+
+export type { Diagnostic };

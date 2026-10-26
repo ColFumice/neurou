@@ -1,0 +1,27 @@
+{
+  "name": "neurou",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "neurou（雨若）— 世界弦语言与调律运行时",
+  "scripts": {
+    "check": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx packages/cli/src/index.ts",
+    "sim": "tsx packages/cli/src/index.ts sim",
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@neurou/core": "workspace:*",
+    "@neurou/runtime": "workspace:*",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22"
+  }
+}
