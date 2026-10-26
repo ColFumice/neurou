@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { IRString, WorldIR } from '@neurou/core';
 import { tensionOf, type ViewSnapshot } from './types.js';
+import { InkBloom, type InkBloomHandle } from './InkBloom.js';
+import { WaveString } from './WaveString.js';
 
 const W = 1440;
 const H = 900;
@@ -71,7 +73,28 @@ function bezier(p0: { x: number; y: number }, c1: { x: number; y: number }, c2: 
   };
 }
 
-function sampleString(nodeY: number, lineY: number, bend: number): Sample[] {
+/** 静止时弦的呼吸。time 单位 ms；scale=0 时完全静止（降级模式）。 */
+interface Motion {
+  readonly time: number;
+  readonly scale: number;
+}
+
+/**
+ * 沿弦传播的慢波：三个不同波长叠加，两端收束为 0，所以弦不会「整根平移」，
+ * 而是像被水推着的一段墨丝。振幅只有 1–3px，远看是活的，近看不是动画。
+ */
+function idleWave(u: number, time: number, seed: number): number {
+  const envelope = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, u))), 0.85);
+  const phase = time * 0.00055;
+  return (
+    envelope *
+    (1.5 * Math.sin(u * 5.1 + phase * 1.7 + seed * 0.7) +
+      0.9 * Math.sin(u * 10.7 - phase * 2.3 + seed * 1.9) +
+      0.5 * Math.sin(u * 18.2 + phase * 3.1 + seed * 2.7))
+  );
+}
+
+function sampleString(nodeY: number, lineY: number, bend: number, seed: number, motion: Motion): Sample[] {
   const vineP0 = { x: NODE_X, y: nodeY };
   const vineC1 = { x: 178, y: nodeY };
   const vineC2 = { x: 206, y: lineY };
@@ -82,7 +105,7 @@ function sampleString(nodeY: number, lineY: number, bend: number): Sample[] {
   const hP1 = { x: LINE_END, y: lineY };
   const points: Sample[] = [];
   const N1 = 26;
-  const N2 = 64;
+  const N2 = 72;
   for (let i = 0; i < N1; i++) {
     const t = i / (N1 - 1);
     const p = bezier(vineP0, vineC1, vineC2, vineP1, t);
@@ -91,9 +114,29 @@ function sampleString(nodeY: number, lineY: number, bend: number): Sample[] {
   for (let i = 0; i < N2; i++) {
     const t = i / (N2 - 1);
     const p = bezier(hP0, hC1, hC2, hP1, t);
-    points.push({ ...p, t: 0.27 + 0.73 * t });
+    const wave = idleWave(t, motion.time, seed) * motion.scale;
+    points.push({ x: p.x, y: p.y + wave, t: 0.27 + 0.73 * t });
   }
   return points;
+}
+
+/** 把采样点连成没有折角的中心线（Catmull-Rom → 三次贝塞尔）。 */
+function samplesPath(points: Sample[]): string {
+  if (points.length === 0) return '';
+  const n = points.length;
+  let d = `M ${points[0]!.x} ${points[0]!.y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)]!;
+    const p1 = points[i]!;
+    const p2 = points[i + 1]!;
+    const p3 = points[Math.min(n - 1, i + 2)]!;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  }
+  return d;
 }
 
 function centerlinePath(nodeY: number, lineY: number, bend: number): string {
@@ -170,14 +213,37 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ id: string; bend: number } | null>(null);
   const [release, setRelease] = useState<{ id: string; bend: number } | null>(null);
+  const [motionTime, setMotionTime] = useState(0);
   const dragRef = useRef<{ id: string; startY: number; startValue: number; range: number } | null>(null);
   const springFrame = useRef<number | null>(null);
+  const bloomRef = useRef<InkBloomHandle | null>(null);
+  const clickRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
 
   useEffect(() => {
     return () => {
       if (springFrame.current !== null) cancelAnimationFrame(springFrame.current);
     };
   }, []);
+
+  // 纸上的弦要自己呼吸：~22fps 的慢波足够，不跟主线程抢帧；
+  // 系统要求减少动态时彻底静止。
+  useEffect(() => {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    if (reduced) return;
+    let raf = 0;
+    let last = 0;
+    const step = (now: number) => {
+      if (now - last > 45) {
+        last = now;
+        setMotionTime(now);
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const motion: Motion = { time: motionTime, scale: motionTime === 0 ? 0 : 1 };
 
   const nodes: NodeInfo[] = world.entities.map((e, i) => ({ id: e.id, y: NODE_Y[e.id] ?? 220 + i * 190 }));
 
@@ -197,8 +263,11 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
     const max = s.domain.type === 'number' ? (s.domain.max ?? 100) : 100;
     const norm = Math.min(1, Math.max(0, (value - min) / (max - min || 1)));
     const tension = tensionOf(s, raw)?.tension ?? 0;
-    const bend = bendFor(s.id);
-    const samples = sampleString(nodeY, layout.y, bend);
+    // 静止时整体也在极慢地起伏（每根弦相位不同），所以永远不会是一条死线。
+    const breath =
+      motion.scale * (2.1 * Math.sin(motion.time * 0.00042 + layout.seed * 2.1) + 0.7 * Math.sin(motion.time * 0.00073 + layout.seed));
+    const bend = bendFor(s.id) + breath;
+    const samples = sampleString(nodeY, layout.y, bend, layout.seed, motion);
     const markerX = LINE_START + norm * (LINE_END - LINE_START);
     const marker = pointAtX(samples, markerX);
     const frets: Fret[] = [];
@@ -222,7 +291,7 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
       norm,
       tension,
       bend,
-      center: centerlinePath(nodeY, layout.y, bend),
+      center: samplesPath(samples),
       hitCenter: centerlinePath(nodeY, layout.y, 0),
       samples,
       ribbon: ribbonPath(samples, 3.2 + tension * 5.8, layout.seed),
@@ -326,6 +395,30 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
     setRelease(null);
   };
 
+  /**
+   * 点击 = 生长一簇墨。用捕获阶段统一记一次「短按」：
+   * 拖动改值、拖拽塑形都不应该再爆墨，所以按位移 < 8px 判定；
+   * 基准弦自己会发声与塑形，不再叠墨晕。
+   */
+  const onLayerPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    clickRef.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+  };
+
+  const onLayerPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const start = clickRef.current;
+    clickRef.current = null;
+    if (!start || start.pointerId !== e.pointerId) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) return;
+    const target = e.target as Element | null;
+    if (target?.closest?.('[data-testid="ink-wave"]')) return;
+    bloomRef.current?.spawn(start.x, start.y);
+  };
+
+  const onLayerPointerCancel = () => {
+    clickRef.current = null;
+  };
+
   const stringNode = (s: IRString) => (
     <g
       key={s.id}
@@ -346,7 +439,14 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
   );
 
   return (
-    <div className="ink-net" data-testid="ink-network" data-inverted={inverted}>
+    <div
+      className="ink-net"
+      data-testid="ink-network"
+      data-inverted={inverted}
+      onPointerDownCapture={onLayerPointerDown}
+      onPointerUpCapture={onLayerPointerUp}
+      onPointerCancelCapture={onLayerPointerCancel}
+    >
       <svg
         className="ink-base"
         viewBox={`0 0 ${W} ${H}`}
@@ -405,6 +505,9 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
         ))}
       </svg>
 
+      {/* 基准弦：贯穿全屏的横向墨弦，点击塑形 + 发声 */}
+      <WaveString />
+
       {inverted && focus && (
         <svg className="ink-focus" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
           {focus.type === 'string' && geoById.get(focus.id) && (
@@ -439,6 +542,9 @@ export function CoreNetwork({ world, snap, inverted, onAdjust }: CoreNetworkProp
           )}
         </svg>
       )}
+
+      {/* 点击处生长的墨晕，浮在最上层、不挡指针 */}
+      <InkBloom ref={bloomRef} inverted={inverted} />
     </div>
   );
 }
