@@ -49,7 +49,6 @@ export function App() {
   const [version, setVersion] = useState(0);
   const [cues, setCues] = useState<DisplayCue[]>([]);
   const [visuals, setVisuals] = useState<Record<string, number>>({});
-  const [flash, setFlash] = useState<{ name: string; at: number } | null>(null);
   const [hover, setHover] = useState<{ entity: string; rect: DOMRect } | null>(null);
   const [hoverString, setHoverString] = useState<{ id: string; rect: DOMRect } | null>(null);
   const [termPopup, setTermPopup] = useState<TermPopup | null>(null);
@@ -64,10 +63,8 @@ export function App() {
   const workerRef = useRef<Worker | null>(null);
   const pulseTimers = useRef<number[]>([]);
   const hoverEntity = useRef<string | null>(null);
-  const forceTermShown = useRef(false);
   const termClose = useRef<number | null>(null);
   const hairlineClose = useRef<number | null>(null);
-  const seenForcings = useRef<Set<string>>(new Set());
   const playReturn = useRef<Mode>('desk');
 
   const world = WORLDS[worldKey];
@@ -81,7 +78,6 @@ export function App() {
     setTuning(DEFAULT_TUNING);
     setCues([]);
     setVisuals({});
-    setFlash(null);
     setHover(null);
     setHoverString(null);
     setFocused(null);
@@ -91,8 +87,6 @@ export function App() {
     setPlayOver(null);
     setPublish({ open: false, status: 'idle' });
     setMode('desk');
-    seenForcings.current = new Set();
-    forceTermShown.current = false;
     setVersion((v) => v + 1);
   }, [worldKey]);
 
@@ -147,12 +141,6 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!flash) return;
-    const timer = window.setTimeout(() => setFlash(null), 1200);
-    return () => window.clearTimeout(timer);
-  }, [flash]);
-
   // —— 世界自己走 ——
   const ingest = useCallback((items: EmittedCue[]) => {
     if (items.length === 0) return;
@@ -193,20 +181,10 @@ export function App() {
       if (u.state.ended) return;
       const result = u.tick();
       ingest(result.cues);
-      const authored = result.fired.filter((name) => !name.startsWith('调性.') && !seenForcings.current.has(name));
-      if (authored.length > 0) {
-        const name = authored[authored.length - 1]!;
-        seenForcings.current.add(name);
-        setFlash({ name, at: Date.now() });
-        if (!forceTermShown.current) {
-          forceTermShown.current = true;
-          exposeTerm('力迫', window.innerWidth / 2, 120);
-        }
-      }
       setVersion((v) => v + 1);
     }, TICK_MS);
     return () => window.clearInterval(timer);
-  }, [runtime, mode, paused, publish.open, publish.status, ingest, exposeTerm]);
+  }, [runtime, mode, paused, publish.open, publish.status, ingest]);
 
   // —— 试玩计时 ——
   useEffect(() => {
@@ -283,7 +261,6 @@ export function App() {
       pulseTimers.current.push(window.setTimeout(() => setPulse({ strings: seq, index: i }), i * 300));
     });
     pulseTimers.current.push(window.setTimeout(() => setPulse(null), seq.length * 300 + 900));
-    exposeTerm('回路', window.innerWidth / 2, 120);
   };
 
   const enterPlay = () => {
@@ -348,7 +325,13 @@ export function App() {
   // —— 快捷键：默认调律台 / 空格现象 / Tab 结构 / F 力迫 ——
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      const target = e.target;
+      if (target instanceof HTMLTextAreaElement) return;
+      if (target instanceof HTMLInputElement) {
+        // 滑块里按左右键是调值；其他键仍然交给全局视图切换。
+        if (target.type === 'range' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        if (target.type !== 'range') return;
+      }
       if (e.key === 'Escape') {
         if (publish.open) {
           setPublish((p) => ({ ...p, open: false }));
@@ -436,7 +419,9 @@ export function App() {
     onPluckLoop: pluckLoop,
     onForcing: (id: string, rect: DOMRect | null) => {
       setForcingPopup(rect ? { id, rect } : null);
-      exposeTerm('力迫', rect?.right ?? window.innerWidth / 2, rect?.top ?? 120);
+    },
+    onFocusEntity: (entity: string) => {
+      setFocused((cur) => (cur === entity ? null : entity));
     },
     onOpenTerm: openTerm,
   };
@@ -448,17 +433,13 @@ export function App() {
           world={runtime?.ir ?? world.ir}
           snap={snap}
           tuning={tuning}
-          visuals={visuals}
           paused={paused}
           focused={focused}
-          cues={cues}
           pulse={pulse}
-          pulseEntity={pulseEntity}
           onFocus={(entity) => setFocused((cur) => (cur === entity ? null : entity))}
           onTuning={changeTuning}
           onTogglePause={() => setPaused((p) => !p)}
           onPublish={openPublish}
-          onExpandPreview={() => setMode('phenomenon')}
           onHoverString={networkProps.onHoverString}
           onAdjustString={adjustString}
           onPluckLoop={pluckLoop}
@@ -564,12 +545,6 @@ export function App() {
           rect={forcingPopup.rect}
           onClose={() => setForcingPopup(null)}
         />
-      )}
-
-      {flash && mode !== 'play' && (
-        <div className="desk__flash" data-testid="forcing-flash">
-          力迫 · {flash.name.replace(/^调性\./, '')}
-        </div>
       )}
 
       <TermPopupView popup={termPopup} />

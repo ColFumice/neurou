@@ -9,24 +9,49 @@ page.on('console', (m) => {
 });
 await page.goto('http://127.0.0.1:5189/', { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="desk"]', { timeout: 10000 });
+
 const hasDesk = (await page.locator('[data-testid="desk"]').count()) === 1;
+const bg = await page.locator('[data-testid="desk"]').evaluate((n) => getComputedStyle(n).backgroundColor);
+const network = await page.locator('[data-testid="network"]').boundingBox();
 const strings = await page.locator('[data-string]').count();
 const flows = await page.locator('.string__flow').count();
 const loops = await page.locator('[data-loop]').count();
 const forcings = await page.locator('[data-forcing]').count();
-const preview = await page.locator('[data-testid="preview"]').boundingBox();
-const previewRatio = preview ? (preview.width * preview.height) / (1440 * 900) : 0;
+const labels = await page.locator('.voice__label').count();
+const sidebars = await page.locator('.desk__entities, .desk__preview, .desk__toolbar').count();
 const hint = await page.locator('.desk__keys').evaluate((n) => ({
   opacity: Number(getComputedStyle(n).opacity),
   pe: getComputedStyle(n).pointerEvents,
 }));
+const controls = await page.locator('[data-testid="desk-controls"]').evaluate((n) => {
+  const r = n.getBoundingClientRect();
+  return { x: r.left, y: r.top, bg: getComputedStyle(n).backgroundColor, opacity: Number(getComputedStyle(n).opacity) };
+});
+await page.screenshot({ path: 'artifacts/60-prod.png' });
+
 await page.keyboard.press('r');
 await page.waitForSelector('[data-testid="publish-result"]', { timeout: 15000 });
 const lines = await page.locator('[data-publish-line]').allInnerTexts();
 const score = Number(lines[0]?.trim() ?? -1);
+
 console.log(
   JSON.stringify(
-    { hasDesk, strings, flows, loops, forcings, preview: preview ? `${Math.round(preview.width)}×${Math.round(preview.height)}` : 'none', previewRatio: Number(previewRatio.toFixed(3)), hint, score, lines, errors },
+    {
+      hasDesk,
+      bg,
+      network: network ? `${Math.round(network.width)}×${Math.round(network.height)}` : 'none',
+      strings,
+      flows,
+      loops,
+      forcings,
+      labels,
+      sidebars,
+      hint,
+      controls,
+      score,
+      lines,
+      errors,
+    },
     null,
     2,
   ),
@@ -34,14 +59,21 @@ console.log(
 await browser.close();
 process.exitCode =
   hasDesk &&
-  strings >= 15 &&
+  bg === 'rgb(250, 250, 250)' &&
+  network?.width === 1440 &&
+  network?.height === 900 &&
+  strings === 23 &&
   flows === strings &&
-  loops >= 5 &&
-  forcings >= 3 &&
-  previewRatio >= 0.14 &&
+  loops === 6 &&
+  forcings === 6 &&
+  labels === 7 &&
+  sidebars === 0 &&
   hint.opacity <= 0.25 &&
   hint.pe === 'none' &&
-  score > 0 &&
+  controls.bg === 'rgba(0, 0, 0, 0)' &&
+  controls.opacity <= 0.5 &&
+  score === 58 &&
+  lines.length <= 2 &&
   errors.length === 0
     ? 0
     : 1;

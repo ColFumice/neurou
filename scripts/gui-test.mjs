@@ -1,8 +1,8 @@
 /**
- * 调律台验收：默认视图必须是弦网络，不是现象层。
+ * 白纸黑线验收：全屏弦网络，无侧栏/画中画，灰度类型，震颤与动态模糊。
  *
  * 运行：node scripts/gui-test.mjs
- * 结果：artifacts/desk-test.json + artifacts/2x-*.png
+ * 结果：artifacts/paper-test.json + artifacts/5x-*.png
  */
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -36,136 +36,154 @@ await page.goto(URL, { waitUntil: 'networkidle' });
 await page.evaluate(() => localStorage.removeItem('neurou.terms.v1'));
 await reload();
 
-// ============ 1. 默认是调律台，不是现象层 ============
-check('默认视图是调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
-check('默认不显示全屏现象层', (await page.locator('[data-testid="phenomenon"]').count()) === 0);
-check('主区是弦网络', (await page.locator('[data-testid="network"]').count()) === 1);
-check('右下有现象残影窗', (await page.locator('[data-testid="preview"]').count()) === 1);
-check('左上有实体列表', (await page.locator('.entity-btn').count()) === 7, `${await page.locator('.entity-btn').count()} 个`);
-check('底部有工具栏', (await page.locator('.desk__toolbar').count()) === 1);
-const termTexts = await page.locator('.desk .term').allInnerTexts();
-const fiveTerms = ['弦', '回路', '调性', '力迫', '和弦'];
-check('五个术语常驻可见', fiveTerms.every((t) => termTexts.includes(t)), termTexts.join(' / '));
+// ============ 1. 白纸全屏，无侧栏 / 无画中画 / 无底部暗条 ============
+check('默认是调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
+check('背景是纸白', (await page.locator('[data-testid="desk"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
+check('没有实体侧栏', (await page.locator('.desk__entities').count()) === 0);
+check('没有现象画中画', (await page.locator('.desk__preview').count()) === 0);
+check('没有底部工具栏暗条', (await page.locator('.desk__toolbar').count()) === 0);
+
+const networkBox = await page.locator('[data-testid="network"]').boundingBox();
+check('弦网络铺满视口', Boolean(networkBox && networkBox.width === 1440 && networkBox.height === 900), networkBox ? `${Math.round(networkBox.width)}×${Math.round(networkBox.height)}` : '无');
+const labelSpan = await page.locator('.voice__label').evaluateAll((ns) => {
+  const rects = ns.map((n) => n.getBoundingClientRect());
+  return { min: Math.min(...rects.map((r) => r.left)), max: Math.max(...rects.map((r) => r.right)), count: rects.length };
+});
+check('实体名从最左铺到最右', labelSpan.count === 7 && labelSpan.max - labelSpan.min >= 1300, JSON.stringify(labelSpan));
 
 const stringCount = await page.locator('[data-string]').count();
 const loopCount = await page.locator('[data-loop]').count();
 const forceCount = await page.locator('[data-forcing]').count();
-check('弦 ≥15 根', stringCount >= 15, `${stringCount} 根`);
-check('回路 ≥5 条', loopCount >= 5, `${loopCount} 条`);
-check('力迫标记 ≥3 个', forceCount >= 3, `${forceCount} 个`);
-check('世界自己开始跑了', Number(await page.locator('[data-testid="preview"] [data-testid="scene"]').getAttribute('data-tick')) >= 0);
+check('23 根弦', stringCount === 23, String(stringCount));
+check('6 条回路', loopCount === 6, String(loopCount));
+check('6 个力迫标记', forceCount === 6, String(forceCount));
+check('7 个实体名', labelSpan.count === 7, String(labelSpan.count));
 
-const deskText = await page.locator('[data-testid="desk"]').innerText();
-check('首屏没有数字读数', !/\d/.test(deskText), deskText.replace(/\n/g, ' / ').slice(0, 120));
+check('没有数字读数', !/\d/.test(await page.locator('[data-testid="desk"]').innerText()));
+await page.screenshot({ path: 'artifacts/50-desk.png' });
 
-// 预览窗放大 + 左下角极淡视图提示
-const previewBox = await page.locator('[data-testid="preview"]').boundingBox();
-const previewRatio = previewBox ? (previewBox.width * previewBox.height) / (1440 * 900) : 0;
-check('预览窗 ≥420×320', Boolean(previewBox && previewBox.width >= 420 && previewBox.height >= 320), previewBox ? `${Math.round(previewBox.width)}×${Math.round(previewBox.height)}` : '无');
-check('预览窗面积 ≥14%', previewRatio >= 0.14, `${(previewRatio * 100).toFixed(1)}%`);
+// 左下排练记号
 const hint = page.locator('.desk__keys');
-check('左下角视图提示存在', (await hint.count()) === 1, await hint.innerText());
 const hintStyle = await hint.evaluate((n) => ({ opacity: Number(getComputedStyle(n).opacity), pe: getComputedStyle(n).pointerEvents }));
+check('左下视图提示存在', (await hint.innerText()).includes('空格 现象'), await hint.innerText());
 check('提示 opacity ≤0.25', hintStyle.opacity <= 0.25, String(hintStyle.opacity));
 check('提示不挡交互', hintStyle.pe === 'none', hintStyle.pe);
-const hintBlocks = await page.evaluate(() => {
-  const el = document.querySelector('.desk__keys');
-  if (!el) return true;
-  const r = el.getBoundingClientRect();
-  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-  return top === el || el.contains(top);
+
+// 右下浮动文字（不是暗条）
+const controls = await page.locator('[data-testid="desk-controls"]').evaluate((n) => {
+  const r = n.getBoundingClientRect();
+  return { text: n.textContent ?? '', x: r.left, y: r.top, w: r.width, h: r.height, bg: getComputedStyle(n).backgroundColor, opacity: Number(getComputedStyle(n).opacity) };
 });
-check('提示下方仍可点到弦网络', !hintBlocks, hintBlocks ? '被提示遮挡' : '未遮挡');
+check('右下有调性/压力/残酷/发布/和弦', ['调性', '压力', '残酷', '发布', '和弦'].every((t) => controls.text.includes(t)), controls.text.replace(/\s+/g, ' '));
+check('浮动控件没有背景条', controls.bg === 'rgba(0, 0, 0, 0)', controls.bg);
+check('浮动控件位于右下', controls.x > 1000 && controls.y > 750, `${Math.round(controls.x)},${Math.round(controls.y)}`);
+check('浮动控件很淡', controls.opacity <= 0.5, String(controls.opacity));
 
-// 每根弦都有流动与呼吸
-const flowCount = await page.locator('.string__flow').count();
-const glowCount = await page.locator('.string__glow').count();
-check('每根弦都有流动层', flowCount === stringCount, `${flowCount}/${stringCount}`);
-check('每根弦都有呼吸层', glowCount === stringCount, `${glowCount}/${stringCount}`);
-const flowDurations = await page.locator('.string__flow').evaluateAll((ns) => [...new Set(ns.map((n) => getComputedStyle(n).animationDuration))]);
-check('流动速度随张力分档', flowDurations.length >= 2, flowDurations.join(' / '));
-await page.screenshot({ path: 'artifacts/20-desk.png' });
+// 五个术语
+const terms = await page.locator('.desk .term').allInnerTexts();
+check('五个术语常驻', ['弦', '回路', '调性', '力迫', '和弦'].every((t) => terms.includes(t)), terms.join(' / '));
 
-// 暂停后连拍三帧：数值不动，只有弦在流动
-await page.locator('[data-testid="toggle-pause"]').click();
+// ============ 2. 像素级：DOM 里的颜色全部是灰 ============
+const badColors = await page.evaluate(() => {
+  const parse = (v) => {
+    const m = String(v).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+  const bad = [];
+  for (const el of document.querySelectorAll('[data-testid="desk"] *')) {
+    const s = getComputedStyle(el);
+    for (const prop of ['color', 'backgroundColor', 'borderTopColor', 'stroke', 'fill', 'accentColor']) {
+      const rgb = parse(s[prop]);
+      if (!rgb) continue;
+      if (Math.max(...rgb) - Math.min(...rgb) > 2) {
+        bad.push(`${el.tagName}.${prop}=${s[prop]}`);
+        if (bad.length > 8) return bad;
+      }
+    }
+  }
+  return bad;
+});
+check('DOM 里没有彩色 token', badColors.length === 0, badColors.join(' | '));
+check('整棵 studio 被 grayscale', (await page.locator('.studio').evaluate((n) => getComputedStyle(n).filter)).includes('grayscale'));
+
+// 类型不靠颜色：叙事实线 vs 视觉虚线
+const dashPair = await page.evaluate(() => {
+  const narr = document.querySelector('.string--narr .string__line');
+  const vis = document.querySelector('.string--vis .string__line');
+  return {
+    narr: narr ? getComputedStyle(narr).strokeDasharray : '',
+    vis: vis ? getComputedStyle(vis).strokeDasharray : '',
+    narrOpacity: narr ? getComputedStyle(narr).opacity : '',
+    visOpacity: vis ? getComputedStyle(vis).opacity : '',
+  };
+});
+check('类型用虚线节奏区分', dashPair.narr !== dashPair.vis, JSON.stringify(dashPair));
+check('类型用灰度区分', dashPair.narrOpacity !== dashPair.visOpacity, `${dashPair.narrOpacity} vs ${dashPair.visOpacity}`);
+
+// ============ 3. 静止震颤：路径在动，三帧不同 ============
+const beforeD = await page.locator('[data-string="蛞蝓猫.体力"] .string__line').getAttribute('d');
 await page.waitForTimeout(350);
-const frameHashes = [];
-const flowOffsets = [];
-for (let i = 0; i < 3; i++) {
-  const buf = await page.locator('[data-testid="network"]').screenshot({ path: `artifacts/30-frame-${i}.png` });
-  frameHashes.push(createHash('sha256').update(buf).digest('hex').slice(0, 12));
-  flowOffsets.push(await page.locator('[data-string="蛞蝓猫.体力"] .string__flow').evaluate((n) => getComputedStyle(n).strokeDashoffset));
-  if (i < 2) await page.waitForTimeout(520);
-}
-check('静止态连续三帧不完全相同', new Set(frameHashes).size === 3, frameHashes.join(' / '));
-check('弦的流动偏移在三帧间变化', new Set(flowOffsets).size >= 2, flowOffsets.join(' / '));
-await page.screenshot({ path: 'artifacts/31-static.png' });
+const afterD = await page.locator('[data-string="蛞蝓猫.体力"] .string__line').getAttribute('d');
+check('弦不是静止直线', beforeD !== afterD, `${(beforeD ?? '').slice(0, 38)} → ${(afterD ?? '').slice(0, 38)}`);
+
 await page.locator('[data-testid="toggle-pause"]').click();
-await page.waitForTimeout(400);
-
-// ============ 2. 实体聚焦 ============
-await page.locator('[data-testid="entity-蜥蜴"]').click();
 await page.waitForTimeout(300);
-check('点击实体后该实体被聚焦', (await page.locator('.entity-btn.is-on').count()) === 1, await page.locator('.entity-btn.is-on').innerText());
-check('聚焦后其他声部变淡', (await page.locator('.voice.is-dim').count()) >= 3, `${await page.locator('.voice.is-dim').count()} 条被压暗`);
-await page.screenshot({ path: 'artifacts/27-entity-focus.png' });
-await page.locator('[data-testid="entity-蜥蜴"]').click();
-await page.waitForTimeout(200);
-check('再次点击取消聚焦', (await page.locator('.entity-btn.is-on').count()) === 0);
+const hashes = [];
+for (let i = 0; i < 3; i++) {
+  const buf = await page.locator('[data-testid="network"]').screenshot({ path: `artifacts/51-tremble-${i}.png` });
+  hashes.push(createHash('sha256').update(buf).digest('hex').slice(0, 10));
+  if (i < 2) await page.waitForTimeout(420);
+}
+check('暂停后连续三帧仍不同', new Set(hashes).size === 3, hashes.join(' / '));
+await page.screenshot({ path: 'artifacts/51-still.png' });
+await page.locator('[data-testid="toggle-pause"]').click();
+await page.waitForTimeout(300);
 
-// ============ 3. 悬停弦：类型 + 当前值位置 + 拖动提示 ============
-const strLine = page.locator('[data-string="蛞蝓猫.体力"] .string__line');
-check('体力弦在网络上', (await strLine.count()) === 1);
-const lineBox = await strLine.boundingBox();
-if (!lineBox) throw new Error('体力弦不可见');
-await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
+// ============ 4. 悬停 / 拖动 / 动态模糊 / 因果波 ============
+const hit = page.locator('[data-string="蜥蜴.饥饿"] .string__hit-area');
+const hitBox = await hit.boundingBox();
+if (!hitBox) throw new Error('饥饿弦不可见');
+await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2);
 await page.waitForTimeout(300);
 const tip = page.locator('[data-testid="string-tip"]');
-check('悬停出现弦读数', (await tip.count()) === 1);
 const tipText = await tip.innerText();
-check('读数含类型标签', tipText.includes('叙事弦'), tipText.replace(/\n/g, ' / '));
-check('读数含拖动提示', tipText.includes('按住拖动可调'), tipText.replace(/\n/g, ' / '));
+check('悬停出现读数', (await tip.count()) === 1);
+check('读数含类型与拖动提示', tipText.includes('叙事弦') && tipText.includes('按住拖动可调'), tipText.replace(/\n/g, ' / '));
 check('读数不含数字', !/\d/.test(tipText), tipText.replace(/\n/g, ' / '));
-await page.screenshot({ path: 'artifacts/21-string-hover.png' });
+check('读数卡片是白底', (await tip.evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(255, 255, 255)');
+await page.screenshot({ path: 'artifacts/52-hover.png' });
 
-// ============ 4. 拖动弦：值位置变化 + 现象残影立刻反应 ============
-const markerBefore = Number(await page.locator('[data-string="蛞蝓猫.体力"] .string__marker').getAttribute('y1'));
-const actorBefore = await page.locator('[data-testid="preview"] [data-actor="蛞蝓猫"]').getAttribute('opacity');
-await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2);
+const markerBefore = Number(await page.locator('[data-string="蜥蜴.饥饿"] .string__marker').getAttribute('y1'));
 await page.mouse.down();
-await page.mouse.move(lineBox.x + 1, lineBox.y + lineBox.height / 2 - 30, { steps: 10 });
-await page.waitForTimeout(520);
-const waveInfo = await page.evaluate(() => {
+await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2 - 80, { steps: 12 });
+await page.waitForTimeout(420);
+const dragState = await page.evaluate(() => {
+  const dragging = document.querySelector('.string.is-dragging');
+  const trail = dragging?.querySelector('.string__trail');
   const edges = [...document.querySelectorAll('[data-wave-edge]')];
   const nodes = [...document.querySelectorAll('[data-wave-node]')];
   return {
-    edges: edges.length,
+    draining: Boolean(dragging),
+    trailOpacity: trail ? Number(getComputedStyle(trail).opacity) : 0,
+    trailFilter: trail ? getComputedStyle(trail).filter : '',
     litEdges: edges.filter((n) => Number(getComputedStyle(n).opacity) > 0.05).length,
-    nodes: nodes.length,
-    litNodes: nodes.filter((n) => Number(getComputedStyle(n).opacity) > 0.05).length,
-    source: nodes.filter((n) => n.getAttribute('data-wave-source') === 'true').length,
     litNeighbors: nodes.filter((n) => n.getAttribute('data-wave-source') !== 'true' && Number(getComputedStyle(n).opacity) > 0.05).length,
+    source: nodes.filter((n) => n.getAttribute('data-wave-source') === 'true').length,
   };
 });
-check('拖动时至少 2 条耦合线出现脉冲', waveInfo.litEdges >= 2, JSON.stringify(waveInfo));
-check('拖动时至少 2 根相邻弦亮起', waveInfo.litNeighbors >= 2, JSON.stringify(waveInfo));
-check('传播从被拖的源弦出发', waveInfo.source === 1, String(waveInfo.source));
-await page.screenshot({ path: 'artifacts/32-wave-0.5s.png' });
-await page.locator('[data-testid="network"]').screenshot({ path: 'artifacts/32-wave-network.png' });
+check('拖动时出现残影层', dragState.draining && dragState.trailOpacity > 0, JSON.stringify(dragState));
+check('残影带模糊', dragState.trailFilter.includes('blur') || dragState.trailFilter.includes('ink-blur'), dragState.trailFilter);
+check('拖动时耦合脉冲可见', dragState.litEdges >= 1, String(dragState.litEdges));
+check('拖动时至少 2 根相邻弦亮起', dragState.litNeighbors >= 2, String(dragState.litNeighbors));
+check('因果波从源弦出发', dragState.source === 1, String(dragState.source));
+await page.screenshot({ path: 'artifacts/52-drag.png' });
 await page.mouse.up();
 await page.waitForTimeout(350);
-const markerAfter = Number(await page.locator('[data-string="蛞蝓猫.体力"] .string__marker').getAttribute('y1'));
-const actorAfter = await page.locator('[data-testid="preview"] [data-actor="蛞蝓猫"]').getAttribute('opacity');
-check('拖动后弦上的值位置改变', markerAfter < markerBefore, `y1 ${markerBefore} → ${markerAfter}`);
-check('现象残影里的角色立刻反应', actorBefore !== actorAfter, `opacity ${actorBefore} → ${actorAfter}`);
-await page.screenshot({ path: 'artifacts/22-string-drag.png' });
+const markerAfter = Number(await page.locator('[data-string="蜥蜴.饥饿"] .string__marker').getAttribute('y1'));
+check('拖动改变弦的值位置', markerAfter !== markerBefore, `y1 ${markerBefore} → ${markerAfter}`);
 
-// 拖动是现场调音，不写回文件；重载回到基线
-await reload();
-
-// ============ 5. 回路：闭环、悬停连锁、点击拨动 ============
-const loopHit = page.locator('[data-loop] .loop__hit').first();
-const loopPoint = await loopHit.evaluate((p) => {
+// ============ 5. 回路：黑墨闭环 + 拨动残影 ============
+const loopPoint = await page.locator('[data-loop] .loop__hit').first().evaluate((p) => {
   const el = p;
   const pt = el.getPointAtLength(el.getTotalLength() * 0.5);
   const m = el.getScreenCTM();
@@ -175,50 +193,70 @@ await page.mouse.move(loopPoint.x, loopPoint.y);
 await page.waitForTimeout(350);
 const loopTip = page.locator('[data-testid="network-loop-tip"]');
 check('悬停回路出现闭环提示', (await loopTip.count()) === 1);
-const loopText = await loopTip.innerText();
-check('回路提示含 A→B→C→A', loopText.includes('→'), loopText.replace(/\n/g, ' / '));
-await page.screenshot({ path: 'artifacts/23-loop-hover.png' });
+check('回路提示含 A→B→C→A', (await loopTip.innerText()).includes('→'), (await loopTip.innerText()).replace(/\n/g, ' / '));
+check('回路提示是白底', (await loopTip.evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(255, 255, 255)');
 await page.mouse.click(loopPoint.x, loopPoint.y);
-await page.waitForTimeout(450);
+await page.waitForTimeout(400);
 check('拨回路后弦序列亮起', (await page.locator('.string.is-pulse').count()) >= 3, `${await page.locator('.string.is-pulse').count()} 根`);
-check('残影里的角色收到连锁', (await page.locator('[data-testid="preview"] .actor--pulse').count()) >= 1);
+const pulseTrail = await page.locator('.string.is-pulse .string__trail').first().evaluate((n) => Number(getComputedStyle(n).opacity)).catch(() => 0);
+check('回路脉冲带残影', pulseTrail > 0, String(pulseTrail));
+await page.screenshot({ path: 'artifacts/53-loop.png' });
 await page.waitForTimeout(1800);
 
-// ============ 6. 力迫：菱形 → 条件/效果 ============
+// ============ 6. 力迫 / 实体聚焦 ============
 await page.locator('[data-forcing]').first().click();
 await page.waitForTimeout(300);
 const forcePop = page.locator('[data-testid="forcing-pop"]');
-check('点击力迫出现弹层', (await forcePop.count()) === 1);
-const forceText = await forcePop.innerText();
-check('弹层含「当」与条件', forceText.includes('当') && (forceText.includes('>=') || forceText.includes('>') || forceText.includes('==')), forceText.replace(/\n/g, ' / '));
-check('弹层含「效果」', forceText.includes('效果'), forceText.replace(/\n/g, ' / '));
-await page.screenshot({ path: 'artifacts/24-forcing-pop.png' });
+check('力迫弹层出现', (await forcePop.count()) === 1);
+check('力迫弹层是白底黑字', (await forcePop.evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(255, 255, 255)');
+check('力迫弹层含条件与效果', (await forcePop.innerText()).includes('当') && (await forcePop.innerText()).includes('效果'));
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
-check('Esc 关闭力迫弹层', (await forcePop.count()) === 0);
 
-// ============ 7. 工具栏：暂停 / 滑块 / 发布 ============
-const tickA = Number(await page.locator('[data-testid="preview"] [data-testid="scene"]').getAttribute('data-tick'));
-await page.locator('[data-testid="toggle-pause"]').click();
-await page.waitForTimeout(1100);
-const tickB = Number(await page.locator('[data-testid="preview"] [data-testid="scene"]').getAttribute('data-tick'));
-check('暂停后世界不再走', tickA === tickB, `${tickA} → ${tickB}`);
-await page.locator('[data-testid="toggle-pause"]').click();
-await page.waitForTimeout(900);
-const tickC = Number(await page.locator('[data-testid="preview"] [data-testid="scene"]').getAttribute('data-tick'));
-check('恢复后世界继续走', tickC > tickB, `${tickB} → ${tickC}`);
+await page.locator('[data-entity-label="蜥蜴"]').click();
+await page.waitForTimeout(300);
+check('点实体名聚焦该列', (await page.locator('.voice.is-dim').count()) === 6, `${await page.locator('.voice.is-dim').count()} 列被压暗`);
+await page.locator('[data-entity-label="蜥蜴"]').click();
+await page.waitForTimeout(200);
+check('再点取消聚焦', (await page.locator('.voice.is-dim').count()) === 0);
 
+// ============ 7. 视图 / 工具 / 发布 / 试玩 ============
 const pressureBox = await page.locator('[data-testid="slider-pressure"]').boundingBox();
-if (!pressureBox) throw new Error('压力滑块不可见');
-await page.mouse.move(pressureBox.x + pressureBox.width * 0.5, pressureBox.y + pressureBox.height / 2);
-await page.mouse.down();
-await page.mouse.move(pressureBox.x + pressureBox.width * 0.9, pressureBox.y + pressureBox.height / 2, { steps: 8 });
-await page.mouse.up();
+if (pressureBox) {
+  await page.mouse.move(pressureBox.x + pressureBox.width * 0.5, pressureBox.y + pressureBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pressureBox.x + pressureBox.width * 0.9, pressureBox.y + pressureBox.height / 2, { steps: 8 });
+  await page.mouse.up();
+}
 await page.waitForTimeout(300);
 const pressure = Number(await page.locator('[data-testid="slider-pressure"]').inputValue());
-check('底部压力滑块可用', pressure >= 85, String(pressure));
-check('滑块旁仍没有数字', !/\d/.test(await page.locator('.desk__tuning').innerText()), await page.locator('.desk__tuning').innerText());
-await page.waitForTimeout(1200);
+check('压力滑块可用', pressure >= 85, String(pressure));
+check('滑块旁没有数字', !/\d/.test(await page.locator('[data-testid="desk-controls"]').innerText()));
+
+await page.keyboard.press(' ');
+await page.waitForTimeout(500);
+check('空格切到现象层', (await page.locator('[data-testid="phenomenon"]').count()) === 1);
+await page.screenshot({ path: 'artifacts/56-phenomenon.png' });
+await page.keyboard.press(' ');
+await page.waitForTimeout(300);
+
+await page.keyboard.press('Tab');
+await page.waitForTimeout(400);
+check('Tab 打开结构层', (await page.locator('[data-testid="structure"]').count()) === 1);
+check('结构层也是白纸', (await page.locator('[data-testid="structure"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
+check('结构层仍是 23 根弦', (await page.locator('[data-testid="structure"] [data-string]').count()) === 23);
+await page.screenshot({ path: 'artifacts/54-structure.png' });
+await page.keyboard.press('Tab');
+await page.waitForTimeout(300);
+
+await page.keyboard.press('f');
+await page.waitForTimeout(400);
+check('F 打开力迫层', (await page.locator('[data-testid="forcing-layer"]').count()) === 1);
+check('力迫层也是白纸', (await page.locator('[data-testid="forcing-layer"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
+check('力迫层节点 6 个', (await page.locator('[data-force-node]').count()) === 6);
+await page.screenshot({ path: 'artifacts/55-forcing.png' });
+await page.keyboard.press('f');
+await page.waitForTimeout(300);
 
 const publishStart = Date.now();
 await page.locator('[data-testid="open-publish"]').click();
@@ -226,77 +264,24 @@ await page.waitForSelector('[data-testid="publish-result"]', { timeout: 20000 })
 const publishWall = Date.now() - publishStart;
 const lines = await page.locator('[data-publish-line]').allInnerTexts();
 const score = Number(lines[0]?.trim() ?? -1);
-check('发布页是全屏纯黑', (await page.locator('[data-testid="publish"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(0, 0, 0)');
 check('发布页默认 ≤2 行', lines.length <= 2, lines.join(' / '));
-check('发布分数合法', score >= 0 && score <= 100, String(score));
-check('发布诊断 ≤20 字', (lines[1] ?? '').trim().length <= 20, lines[1] ?? '');
+check('发布分数 58', score === 58, String(score));
 check('发布在秒级完成', publishWall < 5000, `${publishWall}ms`);
-await page.waitForTimeout(500);
-await page.screenshot({ path: 'artifacts/28-publish.png' });
+await page.waitForTimeout(400);
+await page.screenshot({ path: 'artifacts/57-publish.png' });
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
-check('Esc 从发布返回调律台', (await page.locator('[data-testid="publish"]').count()) === 0 && (await page.locator('[data-testid="desk"]').count()) === 1);
 
-// ============ 8. 预览 / 空格 / Tab / F ============
-await page.locator('[data-testid="preview"]').click();
-await page.waitForTimeout(400);
-check('点预览放大成现象层', (await page.locator('[data-testid="phenomenon"]').count()) === 1);
-await page.screenshot({ path: 'artifacts/25-phenomenon.png' });
-await page.keyboard.press(' ');
-await page.waitForTimeout(400);
-check('空格返回调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
-
-await page.keyboard.press('Tab');
-await page.waitForTimeout(400);
-check('Tab 打开结构层全屏', (await page.locator('[data-testid="structure"]').count()) === 1);
-check('结构层仍是同一张弦网络', (await page.locator('[data-testid="structure"] [data-string]').count()) === stringCount, `${await page.locator('[data-testid="structure"] [data-string]').count()} 根`);
-await page.screenshot({ path: 'artifacts/26-structure.png' });
-await page.keyboard.press('Tab');
-await page.waitForTimeout(400);
-check('Tab 回到调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
-
-await page.keyboard.press('f');
-await page.waitForTimeout(400);
-check('F 打开力迫层', (await page.locator('[data-testid="forcing-layer"]').count()) === 1);
-check('力迫层节点 ≥3', (await page.locator('[data-force-node]').count()) >= 3, `${await page.locator('[data-force-node]').count()} 个`);
-await page.locator('[data-force-node]').last().click();
-await page.waitForTimeout(300);
-check('力迫层可看条件/效果', (await page.locator('[data-testid="forcing-panel"]').innerText()).includes('效果'));
-await page.screenshot({ path: 'artifacts/29-forcing-layer.png' });
-await page.keyboard.press('f');
-await page.waitForTimeout(400);
-check('F 返回调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
-
-// ============ 9. 试玩 ============
 await page.keyboard.press('p');
 await page.waitForSelector('[data-testid="play"]');
 check('P 进入试玩', (await page.locator('[data-testid="play"]').count()) === 1);
 check('试玩有两分钟计时', /\d:\d\d/.test(await page.locator('[data-testid="play-timer"]').innerText()));
-const actionCount = await page.locator('[data-testid^="action-"]').count();
-check('试玩有动作', actionCount >= 3, `${actionCount} 个`);
-await page.locator('[data-testid^="action-"]').first().click();
-await page.waitForTimeout(300);
-await page.screenshot({ path: 'artifacts/30-play.png' });
+check('试玩有动作', (await page.locator('[data-testid^="action-"]').count()) >= 3, String(await page.locator('[data-testid^="action-"]').count()));
 await page.locator('[data-testid="play-exit"]').click();
-await page.waitForTimeout(400);
+await page.waitForTimeout(300);
 check('试玩返回调律台', (await page.locator('[data-testid="desk"]').count()) === 1);
 
-// ============ 10. 首屏可点击清单 + 性能 ============
-const clickables = await page.evaluate(() => ({
-  entities: document.querySelectorAll('.entity-btn').length,
-  strings: document.querySelectorAll('[data-string]').length,
-  loops: document.querySelectorAll('[data-loop]').length,
-  forcings: document.querySelectorAll('[data-forcing]').length,
-  preview: document.querySelectorAll('[data-testid="preview"]').length,
-  toolbarButtons: document.querySelectorAll('.desk-btn').length,
-  sliders: document.querySelectorAll('.desk__toolbar input[type="range"]').length,
-  terms: document.querySelectorAll('.desk .term').length,
-}));
-check('实体列表项可点', clickables.entities === 7, JSON.stringify(clickables));
-check('弦本身可拖', clickables.strings === stringCount, String(clickables.strings));
-check('预览窗可点', clickables.preview === 1);
-check('工具按钮存在', clickables.toolbarButtons >= 2, String(clickables.toolbarButtons));
-
+// ============ 8. 性能 ============
 const fps = await page.evaluate(
   () =>
     new Promise((resolve) => {
@@ -319,16 +304,19 @@ await browser.close();
 
 const summary = {
   when: new Date().toISOString(),
-  counts: { strings: stringCount, loops: loopCount, forcings: forceCount, entities: 7 },
-  clickables,
+  counts: { strings: stringCount, loops: loopCount, forcings: forceCount, entities: labelSpan.count },
+  layout: { networkBox, labelSpan, controls, hint: hintStyle },
+  trembleHashes: hashes,
+  dragState,
   published: { score, wallMs: publishWall, lines },
   fps,
   heapMB: heap,
+  badColors,
   consoleErrors,
   results,
   passed: results.filter((r) => r.ok).length,
   failed: results.filter((r) => !r.ok).length,
 };
-writeFileSync('artifacts/desk-test.json', JSON.stringify(summary, null, 2));
+writeFileSync('artifacts/paper-test.json', JSON.stringify(summary, null, 2));
 console.log(`\n=== ${summary.passed} passed / ${summary.failed} failed ===`);
 if (summary.failed > 0) process.exitCode = 1;

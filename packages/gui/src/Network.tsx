@@ -1,19 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { IRCoupling, IRString, LExpr, WorldIR } from '@neurou/core';
 import { tensionOf, type ViewSnapshot } from './types.js';
 import { Term } from './Term.js';
 import type { TermId } from './terms.js';
-
-const KIND_CLASS: Record<string, string> = {
-  叙事: 'narr',
-  视觉: 'vis',
-  物理: 'phys',
-  认知: 'cog',
-  空间: 'space',
-  关系: 'rel',
-  动画: 'anim',
-  控制: 'ctrl',
-};
 
 const KIND_ORDER = ['叙事', '视觉', '物理', '认知', '空间', '关系', '动画', '控制'];
 
@@ -27,6 +16,7 @@ export interface NetworkProps {
   onAdjustString: (id: string, value: number) => void;
   onPluckLoop: (loopId: string) => void;
   onForcing: (forcingId: string, rect: DOMRect | null) => void;
+  onFocusEntity: (entity: string) => void;
   onOpenTerm: (id: TermId, rect: DOMRect | null) => void;
 }
 
@@ -63,7 +53,7 @@ interface Wave {
 }
 
 function shortName(s: IRString): string {
-  return s.name.length > 7 ? `${s.name.slice(0, 6)}…` : s.name;
+  return s.name.length > 8 ? `${s.name.slice(0, 7)}…` : s.name;
 }
 
 function collectReads(e: LExpr, out: Set<string>): void {
@@ -76,15 +66,7 @@ function collectReads(e: LExpr, out: Set<string>): void {
 }
 
 function smoothClosed(points: { x: number; y: number }[]): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) return '';
-  if (points.length === 2) {
-    const a = points[0]!;
-    const b = points[1]!;
-    const dx = 18;
-    const dy = 12;
-    return `M ${a.x} ${a.y} C ${a.x + dx} ${a.y - dy}, ${b.x + dx} ${b.y + dy}, ${b.x} ${b.y} C ${b.x - dx} ${b.y + dy}, ${a.x - dx} ${a.y - dy}, ${a.x} ${a.y} Z`;
-  }
+  if (points.length < 2) return '';
   const n = points.length;
   let d = `M ${points[0]!.x} ${points[0]!.y}`;
   for (let i = 0; i < n; i++) {
@@ -101,20 +83,28 @@ function smoothClosed(points: { x: number; y: number }[]): string {
   return `${d} Z`;
 }
 
+function seedOf(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 10007;
+  return h;
+}
+
 /**
- * 弦网络：竖向声部线、横向耦合、常驻品丝、回路闭环、力迫菱形。
- * 这是 neurou 的主界面；现象层只是它右下角的一扇窗。
+ * 全屏弦网络：白纸、黑线、无侧栏。
+ *
+ * 弦不是直线：每根弦以不同的频率/振幅做贝塞尔震颤；
+ * 拖动时出现黑色残影（模糊），拨回路时弦序列带墨迹拖影。
  */
 export function Network({
   world,
   snap,
   focused,
-  full,
   pulse,
   onHoverString,
   onAdjustString,
   onPluckLoop,
   onForcing,
+  onFocusEntity,
   onOpenTerm,
 }: NetworkProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -124,9 +114,26 @@ export function Network({
   const [dragState, setDragState] = useState<{ id: string; dx: number } | null>(null);
   const [wave, setWave] = useState<Wave | null>(null);
   const [hoverLoop, setHoverLoop] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [phase, setPhase] = useState(0);
 
-  const W = full ? 1300 : 1000;
-  const H = full ? 800 : 720;
+  const W = 1600;
+  const H = 1000;
+
+  // 静止时弦也在呼吸：30fps 更新相位，所有弦用各自的频率/相位画出贝塞尔曲线。
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let raf = 0;
+    let last = 0;
+    const loop = (t: number) => {
+      if (t - last > 33) {
+        setPhase(t / 1000);
+        last = t;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -152,28 +159,27 @@ export function Network({
         .filter((s) => (s.owner ?? '世界') === owner)
         .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name)),
     }));
-    const maxCount = Math.max(1, ...columns.map((c) => c.strings.length));
     const top = 92;
-    const bottom = H - 36;
+    const bottom = H - 28;
     const gap = 14;
-    const segH = Math.min(full ? 84 : 72, (bottom - top - (maxCount - 1) * gap) / maxCount);
-    const left = 70;
-    const right = 50;
-    const colW = (W - left - right) / Math.max(1, columns.length);
+    const available = bottom - top;
+    const left = 36;
+    const right = 36;
     const nodes = new Map<string, Node>();
 
     columns.forEach((col, i) => {
-      const x = left + (i + 0.5) * colW;
-      const yStart = top + ((maxCount - col.strings.length) * (segH + gap)) / 2;
+      const x = columns.length <= 1 ? W / 2 : left + (i / (columns.length - 1)) * (W - left - right);
+      const count = Math.max(1, col.strings.length);
+      const h = (available - (count - 1) * gap) / count;
       col.strings.forEach((s, j) => {
-        const y0 = yStart + j * (segH + gap);
+        const y0 = top + j * (h + gap);
         const numeric = s.domain.type === 'number';
         const min = numeric && s.domain.type === 'number' ? (s.domain.min ?? 0) : 0;
         const max = numeric && s.domain.type === 'number' ? (s.domain.max ?? 100) : 100;
         const raw = snap.values[s.id];
         const value = typeof raw === 'number' ? raw : null;
         const norm = numeric && value !== null && max > min ? (value - min) / (max - min) : 0.5;
-        const vpos = y0 + (1 - Math.min(1, Math.max(0, norm))) * segH;
+        const vpos = y0 + (1 - Math.min(1, Math.max(0, norm))) * h;
         const tension = tensionOf(s, raw)?.tension ?? 0;
         const frets: Node['frets'] = [];
         if (numeric) {
@@ -183,15 +189,15 @@ export function Network({
           ] as const) {
             if (v === undefined) continue;
             const p = (v - min) / (max - min || 1);
-            frets.push({ y: y0 + (1 - Math.min(1, Math.max(0, p))) * segH, kind });
+            frets.push({ y: y0 + (1 - Math.min(1, Math.max(0, p))) * h, kind });
           }
         }
-        nodes.set(s.id, { s, x, y0, h: segH, vpos, tension, numeric, value, min, max, frets });
+        nodes.set(s.id, { s, x, y0, h, vpos, tension, numeric, value, min, max, frets });
       });
     });
 
-    return { columns, nodes, colW, top, bottom, segH };
-  }, [world, snap, full, H]);
+    return { columns, nodes, top, bottom };
+  }, [world, snap, H]);
 
   const pulseSet = useMemo(() => new Set(pulse?.strings ?? []), [pulse]);
   const activePulse = pulse && pulse.strings[pulse.index] ? pulse.strings[pulse.index]! : null;
@@ -203,7 +209,7 @@ export function Network({
   const couplingPath = (from: Node, to: Node): string => {
     if (Math.abs(from.x - to.x) < 1) {
       const dir = from.vpos < to.vpos ? 1 : -1;
-      return `M ${from.x} ${from.vpos} C ${from.x + 34} ${from.vpos}, ${to.x + 34} ${to.vpos}, ${to.x} ${to.vpos + dir * 6}`;
+      return `M ${from.x} ${from.vpos} C ${from.x + 36} ${from.vpos}, ${to.x + 36} ${to.vpos}, ${to.x} ${to.vpos + dir * 6}`;
     }
     const dx = (to.x - from.x) * 0.42;
     return `M ${from.x} ${from.vpos} C ${from.x + dx} ${from.vpos}, ${to.x - dx} ${to.vpos}, ${to.x} ${to.vpos}`;
@@ -251,23 +257,34 @@ export function Network({
       }
     }
 
-    const maxAt = Math.max(
-      0,
-      ...edges.map((e) => e.start + e.dur),
-      ...[...nodeMap.values()].map((n) => n.at),
-    );
+    const maxAt = Math.max(0, ...edges.map((e) => e.start + e.dur), ...[...nodeMap.values()].map((n) => n.at));
     if (waveTimer.current !== null) window.clearTimeout(waveTimer.current);
     setWave({ key: Date.now(), edges, nodes: [...nodeMap.values()] });
     waveTimer.current = window.setTimeout(() => setWave(null), maxAt + 900);
   };
 
+  const stringPath = (n: Node, s: IRString, dragDx: number): string => {
+    const seed = seedOf(s.id);
+    const amp = 1.1 + n.tension * 3.2;
+    const freq = 0.45 + n.tension * 1.7;
+    const sway = Math.sin(phase * freq * Math.PI * 2 + seed) * amp;
+    const sway2 = Math.sin(phase * freq * 1.37 * Math.PI * 2 + seed * 1.7) * amp * 0.45;
+    return `M ${n.x} ${n.y0} C ${n.x + sway + dragDx} ${n.y0 + n.h * 0.32}, ${n.x + sway2 - dragDx * 0.6} ${n.y0 + n.h * 0.68}, ${n.x} ${n.y0 + n.h}`;
+  };
+
   return (
-    <div className={`network ${full ? 'network--full' : ''}`} data-testid="network">
-      <svg ref={svgRef} className="network__svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+    <div className="network" data-testid="network">
+      <svg ref={svgRef} className="network__svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
         <defs>
           <marker id="net-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
             <path d="M0 0 L8 4 L0 8 z" fill="currentColor" />
           </marker>
+          <filter id="ink-blur" x="-30%" y="-10%" width="160%" height="120%">
+            <feGaussianBlur stdDeviation="2.4" />
+          </filter>
+          <filter id="ink-blur-wide" x="-40%" y="-15%" width="180%" height="130%">
+            <feGaussianBlur stdDeviation="5" />
+          </filter>
         </defs>
 
         {/* 横向耦合 */}
@@ -278,12 +295,14 @@ export function Network({
             if (!a || !b) return null;
             const dim = isDim(a.s.owner) && isDim(b.s.owner);
             const hot = Boolean(focused) && !dim;
+            const strength = Math.min(1, Math.max(0, Number(c.strength) || 0));
             return (
               <path
                 key={c.id}
                 d={couplingPath(a, b)}
                 className={`coupling coupling--${c.polarity === 1 ? 'pos' : 'neg'} ${dim ? 'is-dim' : ''} ${hot ? 'is-hot' : ''}`}
                 markerEnd="url(#net-arrow)"
+                style={{ '--strength': strength } as CSSProperties}
               />
             );
           })}
@@ -333,19 +352,36 @@ export function Network({
         {/* 竖向声部线与弦 */}
         {layout.columns.map((col) => (
           <g key={col.owner} className={`voice ${isDim(col.owner) ? 'is-dim' : ''}`} data-entity={col.owner}>
-            <line x1={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0} y1={layout.top - 34} x2={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0} y2={layout.bottom} className="voice__spine" />
-            <text x={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0} y={layout.top - 48} textAnchor="middle" className="voice__label">
+            <line
+              x1={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0}
+              y1={layout.top - 34}
+              x2={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0}
+              y2={layout.bottom}
+              className="voice__spine"
+            />
+            <text
+              x={col.strings[0] ? layout.nodes.get(col.strings[0].id)?.x ?? 0 : 0}
+              y={layout.top - 24}
+              textAnchor="middle"
+              className="voice__label"
+              data-entity-label={col.owner}
+              onClick={() => onFocusEntity(col.owner)}
+            >
               {col.owner}
             </text>
             {col.strings.map((s) => {
               const n = nodeFor(s.id);
               if (!n) return null;
               const pulseActive = activePulse === s.id;
+              const dragging = dragState?.id === s.id;
+              const d = stringPath(n, s, dragging ? dragState.dx : 0);
+              const flowDur = Math.max(1.1, 3.6 - n.tension * 2.5);
               return (
                 <g
                   key={s.id}
-                  className={`string string--${KIND_CLASS[s.kind] ?? 'narr'} ${pulseSet.has(s.id) ? 'is-pulse' : ''} ${pulseActive ? 'is-pulse-active' : ''}`}
+                  className={`string string--${kindClass(s.kind)} ${pulseSet.has(s.id) ? 'is-pulse' : ''} ${pulseActive ? 'is-pulse-active' : ''} ${dragging ? 'is-dragging' : ''}`}
                   data-string={s.id}
+                  data-kind={s.kind}
                   data-tension={n.tension.toFixed(2)}
                   onMouseEnter={(e) => onHoverString(s.id, e.currentTarget.getBoundingClientRect())}
                   onMouseLeave={() => onHoverString(null, null)}
@@ -354,7 +390,7 @@ export function Network({
                     if (reboundFrame.current !== null) cancelAnimationFrame(reboundFrame.current);
                     const svg = svgRef.current;
                     const rect = svg?.getBoundingClientRect();
-                    const scale = rect ? Math.min(rect.width / W, rect.height / H) : 1;
+                    const scale = rect ? rect.height / H : 1;
                     drag.current = {
                       id: s.id,
                       startY: e.clientY,
@@ -376,7 +412,7 @@ export function Network({
                     const dy = (d.startY - e.clientY) / d.screenH;
                     const next = d.startValue + dy * d.range * 0.65;
                     onAdjustString(d.id, next);
-                    d.dx = Math.max(-6, Math.min(6, (e.clientX - d.startX) * 0.18));
+                    d.dx = Math.max(-8, Math.min(8, (e.clientX - d.startX) * 0.2));
                     setDragState({ id: d.id, dx: d.dx });
                   }}
                   onPointerUp={(e) => {
@@ -388,12 +424,11 @@ export function Network({
                       /* ignore */
                     }
                     drag.current = null;
-                    // 回弹：松开后弦从弯曲处以阻尼振荡回到直线。
                     const dx0 = d.dx;
                     const id = d.id;
                     const started = performance.now();
                     const step = (now: number) => {
-                      const p = Math.min(1, (now - started) / 420);
+                      const p = Math.min(1, (now - started) / 460);
                       if (p >= 1) {
                         setDragState(null);
                         reboundFrame.current = null;
@@ -411,32 +446,32 @@ export function Network({
                 >
                   <line x1={n.x} y1={n.y0 - 4} x2={n.x} y2={n.y0 + n.h + 4} className="string__hit" />
                   <rect x={n.x - 13} y={n.y0 - 4} width={26} height={n.h + 8} className="string__hit-area" />
-                  <line
-                    x1={n.x}
-                    y1={n.y0}
-                    x2={n.x}
-                    y2={n.y0 + n.h}
+
+                  {/* 墨迹拖影：拖动/脉冲时出现；平时不可见 */}
+                  <path d={d} className="string__trail" filter="url(#ink-blur)" strokeWidth={3 + n.tension * 2} fill="none" />
+                  <path
+                    d={d}
+                    className="string__trail string__trail--wide"
+                    filter="url(#ink-blur-wide)"
+                    strokeWidth={5 + n.tension * 3}
+                    fill="none"
+                    transform={dragging ? `translate(${dragState.dx * 0.7} 0)` : undefined}
+                  />
+
+                  <path
+                    d={d}
                     className="string__glow"
-                    style={{ animationDuration: `${Math.max(2.2, 4.8 - n.tension * 2.2)}s` }}
+                    fill="none"
+                    style={{ animationDuration: `${Math.max(2.2, 5.2 - n.tension * 2.6)}s` }}
                   />
-                  {dragState?.id === s.id ? (
-                    <path
-                      d={`M ${n.x} ${n.y0} Q ${n.x + dragState.dx} ${n.y0 + n.h / 2} ${n.x} ${n.y0 + n.h}`}
-                      className="string__line"
-                      fill="none"
-                      strokeWidth={1 + n.tension * 2.4}
-                    />
-                  ) : (
-                    <line x1={n.x} y1={n.y0} x2={n.x} y2={n.y0 + n.h} className="string__line" strokeWidth={1 + n.tension * 2.4} />
-                  )}
-                  <line
-                    x1={n.x}
-                    y1={n.y0}
-                    x2={n.x}
-                    y2={n.y0 + n.h}
+                  <path d={d} className="string__line" fill="none" strokeWidth={1 + n.tension * 2.4} />
+                  <path
+                    d={d}
                     className="string__flow"
-                    style={{ animationDuration: `${Math.max(1.1, 3.4 - n.tension * 2.4)}s` }}
+                    fill="none"
+                    style={{ animationDuration: `${flowDur}s` }}
                   />
+
                   {n.frets.map((f, i) => (
                     <line key={i} x1={n.x - 5} y1={f.y} x2={n.x + 5} y2={f.y} className={`string__fret string__fret--${f.kind}`} />
                   ))}
@@ -474,7 +509,8 @@ export function Network({
               </g>
             );
           })}
-        {/* 因果波：源弦 → 耦合线脉冲 → 相邻弦 → 继续 */}
+
+        {/* 因果波：黑色墨迹，不用彩色 */}
         {wave && (
           <g className="wave-layer" pointerEvents="none">
             {wave.edges.map((w) => {
@@ -542,4 +578,25 @@ export function Network({
       )}
     </div>
   );
+}
+
+function kindClass(kind: string): string {
+  switch (kind) {
+    case '叙事':
+      return 'narr';
+    case '视觉':
+      return 'vis';
+    case '物理':
+      return 'phys';
+    case '认知':
+      return 'cog';
+    case '空间':
+      return 'space';
+    case '关系':
+      return 'rel';
+    case '动画':
+      return 'anim';
+    default:
+      return 'ctrl';
+  }
 }
