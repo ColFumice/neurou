@@ -183,8 +183,9 @@ export function App() {
       if (u.state.ended) return;
       const result = u.tick();
       ingest(result.cues);
-      if (result.fired.length > 0) {
-        const name = result.fired[result.fired.length - 1]!;
+      const authored = result.fired.filter((name) => !name.startsWith('调性.'));
+      if (authored.length > 0) {
+        const name = authored[authored.length - 1]!;
         setFlash({ name, at: Date.now() });
         if (!forceTermShown.current) {
           forceTermShown.current = true;
@@ -208,6 +209,21 @@ export function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mode]);
+
+  // —— ← →：切换示例世界（测试脚手架，不是产品形态） ——
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (mode === 'play' || publish.open) return;
+      if (e.target instanceof HTMLInputElement) return;
+      e.preventDefault();
+      const i = WORLD_ORDER.indexOf(worldKey);
+      const next = e.key === 'ArrowRight' ? (i + 1) % WORLD_ORDER.length : (i - 1 + WORLD_ORDER.length) % WORLD_ORDER.length;
+      setWorldKey(WORLD_ORDER[next]!);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [worldKey, mode, publish.open]);
 
   // —— 试玩计时 ——
   useEffect(() => {
@@ -435,36 +451,19 @@ export function App() {
       {mode !== 'play' && (
         <header className="hud hud--top">
           <div className="hud__left">
-            <span className="brand">neurou</span>
-            <div className="world-tabs">
-              {WORLD_ORDER.map((key) => (
-                <button
-                  key={key}
-                  className={`world-tab ${key === worldKey ? 'is-on' : ''}`}
-                  onClick={() => {
-                    if (key !== worldKey) {
-                      setWorldKey(key);
-                    }
-                  }}
-                  data-testid={`world-${key}`}
-                >
-                  {WORLDS[key].title}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="hud__mid">
-            <span className="muted">{world.subtitle}</span>
-            <span className="muted">第 {snap.tick} 拍</span>
-            {snap.ended && <span className="ended-chip">结局 · {snap.ended}</span>}
+            <span className="brand" data-ui="brand">
+              neurou
+            </span>
+            <span className="world-title" data-ui="world-title">
+              {world.title}
+            </span>
           </div>
 
           <div className="hud__right">
-            <button className="ghost-btn" onClick={enterPlay} data-testid="enter-play">
+            <button className="ghost-btn" data-ui="play-btn" onClick={enterPlay} data-testid="enter-play">
               试玩
             </button>
-            <button className="primary-btn" onClick={openPublish} data-testid="open-publish">
+            <button className="ghost-btn" data-ui="publish-btn" onClick={openPublish} data-testid="open-publish">
               发布
             </button>
           </div>
@@ -474,19 +473,21 @@ export function App() {
       {mode === 'phenomenon' && (
         <footer className="hud hud--bottom">
           <div className="mixer">
-            <div className="mixer__label">
+            <div className="mixer__label" data-ui="mixer-label">
               <Term id="调性" onOpen={openTerm}>
                 调性
               </Term>
-              <span className="muted">拖动它，世界会跟着变</span>
             </div>
             <label className="slider">
-              <span className="slider__name">压力 ↔ 舒缓</span>
+              <span className="slider__name" data-ui="slider-name">
+                压力 ↔ 舒缓
+              </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={tuning.pressure}
+                aria-label="压力与舒缓"
                 data-testid="slider-pressure"
                 onPointerDown={(e) => {
                   setDragging(true);
@@ -496,15 +497,17 @@ export function App() {
                 onPointerCancel={() => setDragging(false)}
                 onChange={(e) => changeTuning({ ...tuning, pressure: Number(e.target.value) })}
               />
-              <span className="slider__value">{Math.round(tuning.pressure)}</span>
             </label>
             <label className="slider">
-              <span className="slider__name">残酷 ↔ 温情</span>
+              <span className="slider__name" data-ui="slider-name">
+                残酷 ↔ 温情
+              </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={tuning.cruelty}
+                aria-label="残酷与温情"
                 data-testid="slider-cruelty"
                 onPointerDown={(e) => {
                   setDragging(true);
@@ -514,10 +517,15 @@ export function App() {
                 onPointerCancel={() => setDragging(false)}
                 onChange={(e) => changeTuning({ ...tuning, cruelty: Number(e.target.value) })}
               />
-              <span className="slider__value">{Math.round(tuning.cruelty)}</span>
             </label>
           </div>
         </footer>
+      )}
+
+      {mode !== 'play' && (
+        <div className="world-index" data-ui="world-index" data-testid="world-index">
+          {WORLD_ORDER.indexOf(worldKey) + 1} / {WORLD_ORDER.length}
+        </div>
       )}
 
       {mode === 'phenomenon' && (
@@ -532,7 +540,6 @@ export function App() {
 
       {hover && (
         <Hairlines
-          world={runtime?.ir ?? world.ir}
           entity={hover.entity}
           strings={hoverStrings}
           snap={snap}

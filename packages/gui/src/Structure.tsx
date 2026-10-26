@@ -136,6 +136,9 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
               <line x1={seg.x} y1={seg.y + 22} x2={seg.x + seg.w} y2={seg.y + 22} className="seg__track" />
               {numeric &&
                 seg.frets.map((f, i) => {
+                  if (seg.value === null) return null;
+                  const tension = 1 - Math.min(1, Math.abs(seg.value - f.v) / (seg.max - seg.min || 1));
+                  if (tension <= 0.7) return null;
                   const ft = (f.v - seg.min) / (seg.max - seg.min || 1);
                   return (
                     <line
@@ -145,6 +148,7 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
                       x2={seg.x + ft * seg.w}
                       y2={seg.y + 30}
                       className={`seg__fret seg__fret--${f.kind}`}
+                      data-tension={tension.toFixed(2)}
                     />
                   );
                 })}
@@ -189,6 +193,11 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
             }
           }
           const active = activeLoop === loop.id;
+          const first = edges[0];
+          const a = first ? layout.segs.get(first.from) : undefined;
+          const b = first ? layout.segs.get(first.to) : undefined;
+          const labelX = a && b ? (a.x + a.w / 2 + b.x + b.w / 2) / 2 : W / 2;
+          const labelY = a && b ? Math.min(a.y, b.y) - 26 : TOP;
           return (
             <g
               key={loop.id}
@@ -207,6 +216,9 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
                   <path d={d} className="loop__path" markerEnd="url(#loop-arrow)" />
                 </g>
               ))}
+              <text x={labelX} y={labelY} textAnchor="middle" className="loop__label">
+                {loop.name}
+              </text>
             </g>
           );
         })}
@@ -217,26 +229,6 @@ export function Structure({ world, snap, tuning, visuals, activeLoop, pulse, onH
           连锁：{pulse.strings.map((id) => world.strings.find((s) => s.id === id)?.name ?? id).join(' → ')}
         </div>
       )}
-
-      <div className="structure__legend">
-        <span className="structure__legend-title">回路</span>
-        {world.loops.map((loop) => (
-          <button
-            key={loop.id}
-            className={`legend legend--${loop.polarity === 1 ? 'reinforce' : 'balance'} ${
-              activeLoop === loop.id ? 'is-on' : ''
-            }`}
-            data-loop-legend={loop.id}
-            onMouseEnter={(e) => onHoverLoop(loop.id, e.currentTarget.getBoundingClientRect())}
-            onMouseLeave={() => onHoverLoop(null, null)}
-            onClick={() => onPluck(loop.id)}
-          >
-            <i />
-            <span>{loop.name}</span>
-            <em>{loop.polarity === 1 ? '自我强化' : '自我校正'}</em>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

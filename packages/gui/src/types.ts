@@ -1,4 +1,4 @@
-import type { WorldIR } from '@neurou/core';
+import type { IRString, WorldIR } from '@neurou/core';
 import type { RuntimeValue, Universe } from '@neurou/runtime';
 import type { TermId } from './terms.js';
 
@@ -8,6 +8,32 @@ export interface ViewSnapshot {
   phaseProgress: number;
   values: Record<string, RuntimeValue>;
   ended: string | null;
+}
+
+/** 一根弦离最近一条阈值线有多近：1 = 压在线上，0 = 在量程另一端。 */
+export interface TensionInfo {
+  tension: number;
+  threshold: number;
+  kind: 'verge' | 'safe';
+  /** 阈值在量程里的位置，0..1 */
+  position: number;
+}
+
+export function tensionOf(s: IRString, value: unknown): TensionInfo | null {
+  if (s.domain.type !== 'number') return null;
+  if (typeof value !== 'number') return null;
+  if (s.verge === undefined && s.safe === undefined) return null;
+  const min = s.domain.min ?? 0;
+  const max = s.domain.max ?? 100;
+  const range = max - min || 1;
+  let best: TensionInfo | null = null;
+  const consider = (threshold: number, kind: 'verge' | 'safe'): void => {
+    const tension = 1 - Math.min(1, Math.abs(value - threshold) / range);
+    if (!best || tension > best.tension) best = { tension, threshold, kind, position: Math.min(1, Math.max(0, (threshold - min) / range)) };
+  };
+  if (s.verge !== undefined) consider(s.verge, 'verge');
+  if (s.safe !== undefined) consider(s.safe, 'safe');
+  return best;
 }
 
 export interface DisplayCue {

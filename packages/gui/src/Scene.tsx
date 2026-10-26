@@ -55,7 +55,13 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
   const leave = () => onCharacterHover?.(null, null);
 
   return (
-    <div className={`scene ${ghost ? 'scene--ghost' : ''}`} style={style} data-testid="scene" data-world={isRain ? 'rain' : 'room'}>
+    <div
+      className={`scene ${ghost ? 'scene--ghost' : ''}`}
+      style={style}
+      data-testid="scene"
+      data-world={isRain ? 'rain' : 'room'}
+      data-tick={snap.tick}
+    >
       <svg className="scene__sky" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
@@ -245,12 +251,14 @@ export function Scene({ world, snap, tuning, visuals, ghost, pulseEntity, onChar
       <div className="scene__vignette" style={{ opacity: Math.min(0.6, Math.abs(visuals['暗角'] ?? 0) * 0.8) }} />
       <div className="scene__grain" />
 
-      {!ghost && phase && (
-        <div className="scene__phase" aria-hidden="true">
-          <span className="scene__phase-name">{phase}</span>
-          <span className="scene__phase-bar">
-            <i style={{ transform: `scaleX(${Math.max(0.02, snap.phaseProgress)})` }} />
-          </span>
+      {!ghost && (phase || snap.ended) && (
+        <div className="scene__phase" data-ui="phase" aria-hidden="true">
+          <span className="scene__phase-name">{snap.ended ? `结局 · ${snap.ended}` : phase}</span>
+          {!snap.ended && (
+            <span className="scene__phase-bar">
+              <i style={{ transform: `scaleX(${Math.max(0.02, snap.phaseProgress)})` }} />
+            </span>
+          )}
         </div>
       )}
     </div>

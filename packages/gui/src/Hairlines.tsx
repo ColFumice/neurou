@@ -1,10 +1,10 @@
-import type { IRString, WorldIR } from '@neurou/core';
+import type { IRString } from '@neurou/core';
 import type { ViewSnapshot } from './types.js';
+import { tensionOf } from './types.js';
 import { Term } from './Term.js';
 import type { TermId } from './terms.js';
 
 interface HairlinesProps {
-  world: WorldIR;
   entity: string;
   strings: IRString[];
   snap: ViewSnapshot;
@@ -15,19 +15,34 @@ interface HairlinesProps {
 }
 
 function place(rect: DOMRect): { left: number; top: number } {
-  const width = 300;
-  const height = 260;
+  const width = 244;
+  const height = 170;
   const left = rect.right + 18 + width > window.innerWidth ? rect.left - width - 18 : rect.right + 18;
   const top = Math.min(window.innerHeight - height - 12, Math.max(64, rect.top - 30));
   return { left: Math.max(12, left), top };
 }
 
 /**
- * 悬停角色时浮现的「弦状态细线」。
- * 只给看，不给调——细线本身就是这一层的最小单位。
+ * 悬停角色时浮现的最小读数：
+ * 只留 2–3 根离阈值最近的弦，用线的粗细和冷暖表示张力，不出现任何数字。
  */
-export function Hairlines({ world, entity, strings, snap, rect, onOpenTerm, onEnter, onLeave }: HairlinesProps) {
+export function Hairlines({ entity, strings, snap, rect, onOpenTerm, onEnter, onLeave }: HairlinesProps) {
   const pos = place(rect);
+
+  const ranked = strings
+    .map((s) => ({ s, t: tensionOf(s, snap.values[s.id]) }))
+    .filter((x): x is { s: IRString; t: NonNullable<ReturnType<typeof tensionOf>> } => x.t !== null)
+    .sort((a, b) => b.t.tension - a.t.tension);
+
+  const hot = ranked.filter((x) => x.t.tension > 0.6);
+  const shown = (hot.length > 0 ? hot : ranked.slice(0, 1)).slice(0, 3);
+
+  // 全部品丝预算 2 个：只标出离玩家最近的那两条线。
+  const frets = [...shown]
+    .sort((a, b) => b.t.tension - a.t.tension)
+    .slice(0, 2)
+    .map((x) => x.s.id);
+
   return (
     <div
       className="hairlines"
@@ -42,39 +57,24 @@ export function Hairlines({ world, entity, strings, snap, rect, onOpenTerm, onEn
         <Term id="弦" onOpen={onOpenTerm} className="hairlines__term" />
       </div>
       <div className="hairlines__body">
-        {strings.map((s) => {
-          const v = snap.values[s.id];
-          if (s.domain.type === 'number' && typeof v === 'number') {
-            const min = s.domain.min ?? 0;
-            const max = s.domain.max ?? 100;
-            const t = max > min ? (v - min) / (max - min) : 0;
-            const verge = s.verge !== undefined ? ((s.verge - min) / (max - min)) * 100 : null;
-            const safe = s.safe !== undefined ? ((s.safe - min) / (max - min)) * 100 : null;
-            return (
-              <div className="hline" key={s.id}>
-                <span className="hline__name">{s.name}</span>
-                <span className="hline__track">
-                  <i style={{ transform: `scaleX(${Math.max(0.01, Math.min(1, t))})` }} />
-                  {verge !== null && <b className="hline__fret hline__fret--verge" style={{ left: `${verge}%` }} />}
-                  {safe !== null && <b className="hline__fret hline__fret--safe" style={{ left: `${safe}%` }} />}
-                  <b className="hline__dot" style={{ left: `${Math.max(0, Math.min(100, t * 100))}%` }} />
-                </span>
-                <span className="hline__value">{Math.round(v * 10) / 10}</span>
-              </div>
-            );
-          }
-          let text = String(v);
-          if (typeof v === 'boolean') text = v ? '真' : '假';
-          else if (v instanceof Set) text = v.size === 0 ? '∅' : `{${[...v].join('、')}}`;
-          return (
-            <div className="hline hline--text" key={s.id}>
-              <span className="hline__name">{s.name}</span>
-              <span className="hline__text">{text}</span>
-            </div>
-          );
-        })}
+        {shown.map(({ s, t }) => (
+          <div className="hline" key={s.id}>
+            <span className="hline__name">{s.name}</span>
+            <span className="hline__track">
+              <i
+                className="hline__stroke"
+                style={{
+                  height: `${1 + t.tension * 2.6}px`,
+                  opacity: 0.35 + t.tension * 0.55,
+                  background: `hsl(28, ${Math.round(15 + t.tension * 40)}%, ${Math.round(45 + t.tension * 18)}%)`,
+                }}
+              />
+              {frets.includes(s.id) && <b className={`hline__fret hline__fret--${t.kind}`} style={{ left: `${t.position * 100}%` }} />}
+            </span>
+          </div>
+        ))}
+        {shown.length === 0 && <div className="hline hline--quiet">还没有接近阈值的弦</div>}
       </div>
-      <div className="hairlines__hint">hover 收起</div>
     </div>
   );
 }
