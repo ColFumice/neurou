@@ -192,6 +192,40 @@ const inkIsGrayscale = () =>
     }
     return true;
   });
+/** 墨晕墨迹的包围盒：宽高比必须横向（用户要求：沿水平扩散，不是四面八方）。 */
+const inkBounds = () =>
+  page.evaluate(() => {
+    const canvas = document.querySelector('[data-testid="ink-blooms"]');
+    if (!(canvas instanceof HTMLCanvasElement)) return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const { width, height } = canvas;
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    let total = 0;
+    let outsideBand = 0;
+    // 点击 y=520，视口高 900：把「横向带 ±130px」换算到画布像素。
+    const clickY = (520 / 900) * height;
+    const band = (130 / 900) * height;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4 + 3] <= 8) continue;
+        total++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (Math.abs(y - clickY) > band) outsideBand++;
+      }
+    }
+    if (total === 0) return { w: 0, h: 0, ratio: 0, outsideRatio: 0, total };
+    const w = maxX - minX + 1;
+    const h = maxY - minY + 1;
+    return { w, h, ratio: w / h, outsideRatio: outsideBand / total, total };
+  });
 
 const empty0 = await (async () => {
   // 上一节点节点时会顺带长一簇墨，等它自然消散后再量空白基线。
@@ -214,6 +248,18 @@ await page.waitForTimeout(520);
 const bloomPeak = await inkPixels();
 check('墨量在生长（220ms → 740ms 变多）', bloomPeak > bloomEarly, `${bloomEarly} → ${bloomPeak} 像素`);
 check('墨晕像素是灰度', await inkIsGrayscale());
+await page.waitForTimeout(260);
+const bloomBounds = await inkBounds();
+check(
+  '墨晕沿水平方向扩散（宽 ≥ 2.5×高）',
+  bloomBounds !== null && bloomBounds.ratio >= 2.5,
+  bloomBounds === null ? '读取失败' : `${bloomBounds.w}×${bloomBounds.h}px，宽高比 ${bloomBounds.ratio.toFixed(2)}`,
+);
+check(
+  '不是四面八方的扩散（横向带 ±130px 外 < 5%）',
+  bloomBounds !== null && bloomBounds.outsideRatio < 0.05,
+  bloomBounds === null ? '读取失败' : `带外 ${(bloomBounds.outsideRatio * 100).toFixed(1)}%`,
+);
 await page.screenshot({ path: 'artifacts/87-bloom-grow.png' });
 
 await page.waitForTimeout(2400);
@@ -299,7 +345,7 @@ const summary = {
   durations,
   flowHashes: hashes,
   badColors,
-  bloom: { early: bloomEarly, peak: bloomPeak, after: bloomAfter },
+  bloom: { early: bloomEarly, peak: bloomPeak, after: bloomAfter, bounds: bloomBounds },
   wave: { width: waveWidth, points: points1, shapedHeight: shaped, plucks: 3, audioState, rms },
   fps,
   heapMB: heap,

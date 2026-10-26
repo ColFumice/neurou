@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 墨晕生长 InkBloom
  * ---------------------------------------------------------------
  * 点击（视口 CSS 坐标）之后，从点处「长」出一簇湿墨：
@@ -74,7 +74,10 @@ function seedFor(ordinal: number, x: number, y: number): number {
 }
 
 /* ================================================================
-   几何预计算：一条须 = 一串点 + 每点宽度 + 累计弧长
+   几何预计算：一条须 = 一串点 + 每点宽度 + 左右笔边 + 累计弧长
+
+   墨晕生长是「横向」的：主脊沿水平方向铺开，像墨被纸的横纹拉着走；
+   上下起伏只允许 40–80px 的呼吸（峰谷），不出现长竖直主枝。
    ================================================================ */
 
 interface BakedPath {
@@ -90,48 +93,12 @@ interface BakedPath {
   total: number;
 }
 
-interface CurveSpec {
-  x: number;
-  y: number;
-  angle: number;
-  length: number;
-  segments: number;
-  /** 整体卷曲（弧度，越大约像钩藤） */
-  curl: number;
-  /** 两个频率的正弦扰动，保证没有一段是直线 */
-  wobbleAmp: number;
-  wobbleFreq: number;
-  wobble2Amp: number;
-  wobble2Freq: number;
-  phase: number;
-  phase2: number;
-  /** 向下垂坠 / 向上扬（正 = 下垂） */
-  droop: number;
-}
-
-function bakeCurve(spec: CurveSpec, widthStart: number, widthEnd: number, widthSeed: number): BakedPath {
-  const n = spec.segments;
-  const step = spec.length / n;
-  const xs: number[] = [spec.x];
-  const ys: number[] = [spec.y];
-  let x = spec.x;
-  let y = spec.y;
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const heading =
-      spec.angle +
-      spec.curl * Math.pow(t, 1.4) +
-      spec.wobbleAmp * Math.sin(spec.wobbleFreq * t * TAU + spec.phase) +
-      spec.wobble2Amp * Math.sin(spec.wobble2Freq * t * TAU + spec.phase2) +
-      spec.droop * t * t;
-    x += Math.cos(heading) * step;
-    y += Math.sin(heading) * step;
-    xs.push(x);
-    ys.push(y);
-  }
+/** 由点列生成笔宽 / 弧长 / 左右笔边（填充成有笔锋的墨迹） */
+function finalizePath(xs: number[], ys: number[], widthStart: number, widthEnd: number, widthSeed: number): BakedPath {
+  const n = xs.length - 1;
   const ws: number[] = [];
   for (let i = 0; i <= n; i++) {
-    const t = i / n;
+    const t = n > 0 ? i / n : 0;
     // 笔锋：起笔重，收笔细；0.65 次方收得快，像一笔提起来的墨
     const taper = Math.pow(1 - t, 0.65);
     const wobble = 1 + 0.1 * Math.sin(i * 1.85 + widthSeed);
@@ -163,6 +130,92 @@ function bakeCurve(spec: CurveSpec, widthStart: number, widthEnd: number, widthS
     rys.push(ys[i]! - dx * hw);
   }
   return { xs, ys, ws, lxs, lys, rxs, rys, cum, total: cum[n]! };
+}
+
+/** 把角度限制在 base ± maxSpread 内：所有副笔永远保持浅角度 */
+function clampAngle(angle: number, base: number, maxSpread: number): number {
+  let d = angle - base;
+  while (d > Math.PI) d -= TAU;
+  while (d < -Math.PI) d += TAU;
+  if (d > maxSpread) d = maxSpread;
+  else if (d < -maxSpread) d = -maxSpread;
+  return base + d;
+}
+
+/**
+ * 主脊：x 单调朝 side 方向铺开，y 只做上下呼吸 + 轻微整体倾斜。
+ * 不会绕回来，也不会出现竖直主枝——轮廓一定是横的。
+ */
+function bakeSpine(
+  rand: () => number,
+  ox: number,
+  oy: number,
+  side: number,
+  len: number,
+  segments: number,
+  widthStart: number,
+  widthEnd: number,
+): BakedPath {
+  const xs: number[] = [ox];
+  const ys: number[] = [oy];
+  const waveAmp = 18 + rand() * 18; // 呼吸半幅 18–36px
+  const waveFreq = 0.6 + rand() * 0.6; // 0.6–1.2 个波
+  const phase = rand() * TAU;
+  const sinPhase = Math.sin(phase);
+  const tilt = (rand() - 0.5) * 58; // 整条脊的上扬 / 下沉（±29px）
+  const fineAmp = 2 + rand() * 3;
+  const finePhase = rand() * TAU;
+  for (let i = 1; i <= segments; i++) {
+    const t = i / segments;
+    xs.push(ox + side * len * t);
+    ys.push(
+      oy +
+        waveAmp * (Math.sin(TAU * waveFreq * t + phase) - sinPhase) +
+        tilt * t * t +
+        fineAmp * Math.sin(TAU * 3.3 * t + finePhase) * t,
+    );
+  }
+  return finalizePath(xs, ys, widthStart, widthEnd, rand() * 10);
+}
+
+/**
+ * 浅角度副笔（侧枝 / 花丝 / 绒 / 辅须）：方向限制在水平 ±maxSpread 内，
+ * 只允许轻微起伏和小角度卷曲，保证整簇始终是横向展开的墨痕。
+ */
+function bakeShallow(
+  rand: () => number,
+  ox: number,
+  oy: number,
+  baseAngle: number,
+  len: number,
+  segments: number,
+  maxSpread: number,
+  widthStart: number,
+  widthEnd: number,
+): BakedPath {
+  const xs: number[] = [ox];
+  const ys: number[] = [oy];
+  const step = len / segments;
+  const offset = (rand() - 0.5) * 2 * maxSpread * 0.55;
+  const waveAmp = maxSpread * (0.4 + rand() * 0.5);
+  const waveFreq = 0.6 + rand() * 1.2;
+  const phase = rand() * TAU;
+  const curl = (rand() - 0.5) * maxSpread * 0.7;
+  let x = ox;
+  let y = oy;
+  for (let i = 1; i <= segments; i++) {
+    const t = i / segments;
+    const h = clampAngle(
+      baseAngle + offset + curl * t + waveAmp * Math.sin(TAU * waveFreq * t + phase),
+      baseAngle,
+      maxSpread,
+    );
+    x += Math.cos(h) * step;
+    y += Math.sin(h) * step;
+    xs.push(x);
+    ys.push(y);
+  }
+  return finalizePath(xs, ys, widthStart, widthEnd, rand() * 10);
 }
 
 interface Stroke extends BakedPath {
@@ -211,10 +264,11 @@ interface Cluster {
   bornAt: number;
   endAt: number;
   reduced: boolean;
+  /** 主脊：横向分左右两拨铺开 */
   primaries: Stroke[];
-  /** 从种点直接长出的短辅须，撑起中间的一小团墨 */
+  /** 从种点直接甩出的短辅须，撑起中心的一小团横向湿墨 */
   minor: Stroke[];
-  /** 次级细须：填补主须之间的空隙，让外轮廓更圆更密 */
+  /** 次级细须：水平方向补空隙 */
   secondary: Stroke[];
   branches: Stroke[];
   filaments: Stroke[];
@@ -223,9 +277,9 @@ interface Cluster {
   specks: Speck[];
   /** 种点处几团不规则的湿墨池 */
   pools: Speck[];
-  /** 落笔处偏移的几团墨晕，让外轮廓不规则 */
+  /** 落笔处横向偏移的几团墨晕，让外轮廓不规则 */
   lobes: Speck[];
-  /** 雾状飞溅（更小更散） */
+  /** 雾状飞溅（更小更散，沿横向带） */
   spray: Speck[];
   /** 分叉处的墨结 */
   joints: Speck[];
@@ -238,26 +292,6 @@ interface Cluster {
    一簇墨的诞生：一次性把点列 / 时间参数全部算好，rAF 里只画
    ================================================================ */
 
-function curveFrom(rand: () => number, x: number, y: number, angle: number, length: number, segments: number): CurveSpec {
-  // 每条须都带方向明确的卷曲（像藤蔓 / 水母须），没有一条是直线
-  const curl = (rand() < 0.5 ? -1 : 1) * (0.35 + rand() * 1.15);
-  return {
-    x,
-    y,
-    angle,
-    length,
-    segments,
-    curl,
-    wobbleAmp: 0.15 + rand() * 0.3, // 低频大摆，形状绵软
-    wobbleFreq: 0.6 + rand() * 1,
-    wobble2Amp: 0.03 + rand() * 0.08,
-    wobble2Freq: 1.6 + rand() * 2,
-    phase: rand() * TAU,
-    phase2: rand() * TAU,
-    droop: (rand() - 0.5) * 0.5,
-  };
-}
-
 /** 主须长到某个弧长比例的时刻（生长用了 easeOutCubic，需反解） */
 function timeAtFraction(s: Stroke, f: number): number {
   const grow = Math.max(0, Math.min(1, f));
@@ -265,51 +299,26 @@ function timeAtFraction(s: Stroke, f: number): number {
   return s.t0 + s.dur * p;
 }
 
-function makeFilament(rand: () => number, path: BakedPath, t0: number, strong: boolean): Stroke {
-  return {
-    ...path,
-    t0,
-    dur: 0.2 + rand() * 0.14,
-    alpha: strong ? 0.46 + rand() * 0.16 : 0.34 + rand() * 0.16,
-    bleed: 0,
-    bands: 1,
-    filament: true,
-    expand: 0.05 + rand() * 0.1, // 溶解时整体 ×1.05–1.15
-    lift: 6 + rand() * 12, // 上飘 6–18px
-    fadePow: 1.8,
-  };
-}
-
-/** 沿主须生长的细小绒丝（像墨在纸上洇出的毛边） */
-function makeFuzz(rand: () => number, x: number, y: number, angle: number, t0: number): Stroke {
-  const seg = 2 + Math.floor(rand() * 2);
-  const path = bakeCurve(
-    {
-      x,
-      y,
-      angle,
-      length: 4 + rand() * 9,
-      segments: seg,
-      curl: (rand() < 0.5 ? -1 : 1) * (0.4 + rand() * 1.2),
-      wobbleAmp: 0.08 + rand() * 0.18,
-      wobbleFreq: 0.6 + rand() * 0.9,
-      wobble2Amp: 0.03,
-      wobble2Freq: 2.2,
-      phase: rand() * TAU,
-      phase2: rand() * TAU,
-      droop: (rand() - 0.5) * 0.6,
-    },
+/** 主脊上的短绒：只做毛边，方向可以略大，但很短 */
+function makeFuzz(rand: () => number, x: number, y: number, baseAngle: number, t0: number): Stroke {
+  const path = bakeShallow(
+    rand,
+    x,
+    y,
+    baseAngle + (rand() - 0.5) * 1.7,
+    3 + rand() * 9,
+    2 + Math.floor(rand() * 2),
+    0.9,
     0.24 + rand() * 0.12,
     0.18,
-    rand() * 10,
   );
   return {
     ...path,
     t0: t0 + 0.02 + rand() * 0.12,
     dur: 0.16 + rand() * 0.14,
-    alpha: 0.34 + rand() * 0.2,
+    alpha: 0.3 + rand() * 0.2,
     bleed: 0,
-    bands: 1,
+    bands: 0,
     filament: true,
     expand: 0.04 + rand() * 0.06,
     lift: 3 + rand() * 5,
@@ -317,10 +326,28 @@ function makeFuzz(rand: () => number, x: number, y: number, angle: number, t0: n
   };
 }
 
+/** 花丝：浅角度、极细，可以小角度卷，末端收尖 */
+function makeFilament(rand: () => number, path: BakedPath, t0: number, strong: boolean): Stroke {
+  return {
+    ...path,
+    t0,
+    dur: 0.2 + rand() * 0.14,
+    alpha: strong ? 0.46 + rand() * 0.16 : 0.34 + rand() * 0.16,
+    bleed: 0,
+    bands: 0,
+    filament: true,
+    expand: 0.05 + rand() * 0.1, // 溶解时整体 ×1.05–1.15
+    lift: 6 + rand() * 12, // 上飘 6–18px
+    fadePow: 1.8,
+  };
+}
+
 function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bornAt: number): Cluster {
   const rnd = mulberry32(seed);
-  const nPrimary = 5 + Math.floor(rnd() * 3); // 5–7 条主须
-  const spin = rnd() * TAU;
+  const primarySide = rnd() < 0.5 ? -1 : 1; // 更长、更早长出来的一侧
+  const nPrimary = 5 + Math.floor(rnd() * 3); // 5–7 条主须（左右两拨）
+  const nLeft = nPrimary <= 5 ? 2 : 2 + Math.floor(rnd() * (nPrimary - 4));
+  const nRight = nPrimary - nLeft;
 
   const primaries: Stroke[] = [];
   const minor: Stroke[] = [];
@@ -330,127 +357,77 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
   const spores: Spore[] = [];
   const joints: Speck[] = [];
 
-  // 先抽长度：一条主须（hero）最长，至少一条短须，其余随机 → 不是对称星芒
-  const lens: number[] = [];
-  for (let i = 0; i < nPrimary; i++) lens.push(60 + Math.pow(rnd(), 0.6) * 112);
-  const hero = Math.floor(rnd() * nPrimary);
-  lens[hero] = Math.max(lens[hero]!, 176 + rnd() * 30);
-  let shortIdx = (hero + 1 + Math.floor(rnd() * (nPrimary - 1))) % nPrimary;
-  if (shortIdx === hero) shortIdx = (hero + 1) % nPrimary;
-  lens[shortIdx] = Math.min(lens[shortIdx]!, 56 + rnd() * 20);
-
   for (let i = 0; i < nPrimary; i++) {
-    const len = lens[i]!;
-    const angle = spin + (i + (rnd() - 0.5) * 0.8) * (TAU / nPrimary);
-    const seg = Math.max(16, Math.min(32, Math.round(len / 6.2)));
-    const sx = ox + (rnd() - 0.5) * 3;
-    const sy = oy + (rnd() - 0.5) * 3;
+    const side = i < nLeft ? -1 : 1;
+    const longSide = side === primarySide;
+    // 主脊长度：长侧 150–260，短侧 90–180，合起来横向约 320–520px
+    const len = longSide ? 150 + Math.pow(rnd(), 0.65) * 110 : 90 + Math.pow(rnd(), 0.7) * 90;
+    const seg = Math.max(16, Math.min(32, Math.round(len / 6)));
+    const baseAngle = side === 1 ? 0 : Math.PI;
+    const sx = ox + (rnd() - 0.5) * 8;
+    const sy = oy + (rnd() - 0.5) * 30;
+    const path = bakeSpine(rnd, sx, sy, side, len, seg, 3.4 + rnd() * 1.4, 0.45);
+    void nRight;
 
-    const path = bakeCurve(curveFrom(rnd, sx, sy, angle, len, seg), 3.4 + rnd() * 1.4, 0.45, rnd() * 10);
-
-    const t0 = 0.06 + rnd() * 0.2;
+    const t0 = longSide ? 0.05 + rnd() * 0.16 : 0.1 + rnd() * 0.2;
     const dur = 0.45 + rnd() * 0.17;
-    const alpha = 0.68 + rnd() * 0.14;
+    const alpha = 0.7 + rnd() * 0.12;
     const bleed = 0.08 + rnd() * 0.02;
-
     const primary: Stroke = {
       ...path,
       t0,
       dur,
       alpha,
       bleed,
-      bands: len > 150 ? 7 : 5,
+      bands: 0,
       filament: false,
       expand: 0.03 + rnd() * 0.05, // 溶解时轻微外扩 1.03–1.08
-      lift: 4 + rnd() * 8, // 上飘 4–12px
+      lift: 3 + rnd() * 7, // 上飘
       fadePow: 1.15,
     };
     primaries.push(primary);
 
-    // —— 沿须的细绒：主须长到哪，绒就从哪儿冒出来 ——
-    const nFuzz = 7 + Math.floor(rnd() * 5);
+    // —— 沿主脊的细绒：只负责毛边，不改变横向轮廓 ——
+    const nFuzz = 6 + Math.floor(rnd() * 4);
     for (let h = 0; h < nFuzz; h++) {
-      const f = 0.18 + rnd() * 0.76;
-      const at = Math.max(2, Math.min(seg - 2, Math.round(f * seg)));
-      const hx = path.xs[at]!;
-      const hy = path.ys[at]!;
-      const heading = Math.atan2(hy - path.ys[at - 1]!, hx - path.xs[at - 1]!);
-      const sign = rnd() < 0.5 ? -1 : 1;
-      filaments.push(makeFuzz(rnd, hx, hy, heading + sign * (0.9 + rnd() * 1.1), timeAtFraction(primary, f)));
+      const f = 0.12 + rnd() * 0.82;
+      const at = Math.max(2, Math.min(seg - 1, Math.round(f * seg)));
+      filaments.push(makeFuzz(rnd, path.xs[at]!, path.ys[at]!, baseAngle + (rnd() - 0.5) * 1.2, timeAtFraction(primary, f)));
     }
 
-    // —— 花丝第一波：0.6–0.88s，须尖绽出 4 条极细的丝 ——
+    // —— 须尖花丝：只朝水平外侧小角度卷 ——
     const tipX = path.xs[seg]!;
     const tipY = path.ys[seg]!;
-    const tipAngle = Math.atan2(tipY - path.ys[seg - 1]!, tipX - path.xs[seg - 1]!);
     for (let f = 0; f < 4; f++) {
-      const spread = (f - 1.5) * (0.6 + rnd() * 0.45);
-      const fSeg = 5 + Math.floor(rnd() * 3);
-      const fPath = bakeCurve(
-        {
-          x: tipX,
-          y: tipY,
-          angle: tipAngle + spread,
-          length: 20 + rnd() * 24,
-          segments: fSeg,
-          curl: (rnd() < 0.5 ? -1 : 1) * (0.9 + rnd() * 2.2),
-          wobbleAmp: 0.12 + rnd() * 0.3,
-          wobbleFreq: 1 + rnd() * 1.8,
-          wobble2Amp: 0.05,
-          wobble2Freq: 2.8,
-          phase: rnd() * TAU,
-          phase2: rnd() * TAU,
-          droop: (rnd() - 0.5) * 0.9,
-        },
-        0.34 + rnd() * 0.22,
-        0.18,
-        rnd() * 10,
-      );
+      const ang = baseAngle + (rnd() - 0.5) * 0.66;
+      const fPath = bakeShallow(rnd, tipX, tipY, ang, 16 + rnd() * 24, 4 + Math.floor(rnd() * 2), 0.55, 0.34 + rnd() * 0.2, 0.18);
       filaments.push(makeFilament(rnd, fPath, 0.6 + rnd() * 0.26, false));
     }
-    // —— 花丝第二波：0.86–1.14s 再开一层，制造「绽放」的一瞬 ——
     for (let f = 0; f < 2; f++) {
-      const spread = (f - 0.5) * (0.9 + rnd() * 0.7) + (rnd() - 0.5) * 0.7;
-      const fSeg = 5 + Math.floor(rnd() * 3);
-      const fPath = bakeCurve(
-        {
-          x: tipX,
-          y: tipY,
-          angle: tipAngle + spread,
-          length: 24 + rnd() * 28,
-          segments: fSeg,
-          curl: (rnd() < 0.5 ? -1 : 1) * (1 + rnd() * 2.4),
-          wobbleAmp: 0.14 + rnd() * 0.32,
-          wobbleFreq: 1.1 + rnd() * 1.8,
-          wobble2Amp: 0.05,
-          wobble2Freq: 2.6,
-          phase: rnd() * TAU,
-          phase2: rnd() * TAU,
-          droop: (rnd() - 0.5) * 1,
-        },
-        0.36 + rnd() * 0.22,
-        0.18,
-        rnd() * 10,
-      );
+      const ang = baseAngle + (rnd() - 0.5) * 0.9;
+      const fPath = bakeShallow(rnd, tipX, tipY, ang, 20 + rnd() * 26, 4 + Math.floor(rnd() * 2), 0.6, 0.36 + rnd() * 0.2, 0.18);
       filaments.push(makeFilament(rnd, fPath, 0.86 + rnd() * 0.28, true));
     }
 
-    // —— 侧枝：主须长到 55–80% 时岔出 1–2 条 ——
+    // —— 侧枝：主须长到 55–80% 时以浅角度（|θ|≤~30°）岔出 ——
     const nBranch = rnd() < 0.55 ? 2 : 1;
     for (let b = 0; b < nBranch; b++) {
       const f = 0.55 + rnd() * 0.25;
       const at = Math.max(2, Math.min(seg - 1, Math.round(f * seg)));
       const bx = path.xs[at]!;
       const by = path.ys[at]!;
-      const heading = Math.atan2(by - path.ys[at - 1]!, bx - path.xs[at - 1]!);
-      const sign = rnd() < 0.5 ? -1 : 1;
-      const bLen = Math.max(20, Math.min(68, len * (0.2 + rnd() * 0.22)));
+      const bLen = 20 + rnd() * 45;
       const bSeg = Math.max(7, Math.min(13, Math.round(bLen / 6)));
-      const bPath = bakeCurve(
-        curveFrom(rnd, bx, by, heading + sign * (0.6 + rnd() * 0.9), bLen, bSeg),
-        Math.max(0.9, path.ws[at]! * (0.6 + rnd() * 0.2)),
+      const bPath = bakeShallow(
+        rnd,
+        bx,
+        by,
+        baseAngle + (rnd() - 0.5) * 1.0,
+        bLen,
+        bSeg,
+        0.5,
+        Math.max(0.9, path.ws[at]! * 0.6),
         0.32,
-        rnd() * 10,
       );
       const bT0 = timeAtFraction(primary, f) + 0.02 + rnd() * 0.06;
       const bDur = 0.24 + rnd() * 0.18;
@@ -460,66 +437,50 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
         dur: bDur,
         alpha: alpha * 0.92,
         bleed: bleed * 0.9,
-        bands: 3,
+        bands: 0,
         filament: false,
         expand: 0.03 + rnd() * 0.05,
-        lift: 4 + rnd() * 8,
+        lift: 3 + rnd() * 6,
         fadePow: 1.4,
       });
+      joints.push({ x: bx, y: by, dx: 0, dy: 0, r: 1 + rnd() * 0.8, t0: bT0, alpha: 0.55 + rnd() * 0.2 });
 
-      // 分叉处更黑一点：墨结
-      joints.push({
-        x: bx,
-        y: by,
-        dx: 0,
-        dy: 0,
-        r: 1 + rnd() * 0.8,
-        t0: bT0,
-        alpha: 0.55 + rnd() * 0.2,
-      });
-
-      // 侧枝尖也带 1 根花丝
+      // 枝尖 1 根花丝（浅角）
       const bTipX = bPath.xs[bSeg]!;
       const bTipY = bPath.ys[bSeg]!;
-      const bTipAngle = Math.atan2(bTipY - bPath.ys[bSeg - 1]!, bTipX - bPath.xs[bSeg - 1]!);
-      const nBFil = 1 + (rnd() < 0.3 ? 1 : 0);
-      for (let f2 = 0; f2 < nBFil; f2++) {
-        const spread = (f2 - (nBFil - 1) / 2) * (0.7 + rnd() * 0.6);
-        const fSeg = 4 + Math.floor(rnd() * 3);
-        const fPath = bakeCurve(
-          {
-            x: bTipX,
-            y: bTipY,
-            angle: bTipAngle + spread + (rnd() - 0.5) * 0.6,
-            length: 10 + rnd() * 20,
-            segments: fSeg,
-            curl: (rnd() - 0.5) * 3.4,
-            wobbleAmp: 0.12 + rnd() * 0.3,
-            wobbleFreq: 1.3 + rnd() * 1.8,
-            wobble2Amp: 0.04,
-            wobble2Freq: 2.6,
-            phase: rnd() * TAU,
-            phase2: rnd() * TAU,
-            droop: (rnd() - 0.5) * 1,
-          },
-          0.32 + rnd() * 0.18,
-          0.18,
-          rnd() * 10,
-        );
-        filaments.push(makeFilament(rnd, fPath, Math.min(1.2, bT0 + bDur + 0.04 + rnd() * 0.16), false));
-      }
+      const fPath = bakeShallow(
+        rnd,
+        bTipX,
+        bTipY,
+        baseAngle + (rnd() - 0.5) * 0.8,
+        10 + rnd() * 16,
+        3 + Math.floor(rnd() * 3),
+        0.6,
+        0.3 + rnd() * 0.16,
+        0.17,
+      );
+      filaments.push(makeFilament(rnd, fPath, Math.min(1.2, bT0 + bDur + 0.04 + rnd() * 0.16), false));
     }
   }
 
-  // —— 次级细须：从种点向各方向散开，把外轮廓撑成圆形墨团 ——
+  // —— 次级细须：水平方向的短笔，填补左右两侧的空隙 ——
   const nSecondary = 10 + Math.floor(rnd() * 3);
   for (let i = 0; i < nSecondary; i++) {
-    const len = 38 + rnd() * 84;
-    const angle = spin + rnd() * TAU;
+    const side = rnd() < 0.5 ? -1 : 1;
+    const baseAngle = side === 1 ? 0 : Math.PI;
+    const len = 30 + rnd() * 90;
     const seg = Math.max(8, Math.min(15, Math.round(len / 6)));
-    const spec = curveFrom(rnd, ox + (rnd() - 0.5) * 2, oy + (rnd() - 0.5) * 2, angle, len, seg);
-    spec.curl *= 2.1;
-    const path = bakeCurve(spec, 1.1 + rnd() * 0.9, 0.28, rnd() * 10);
+    const path = bakeShallow(
+      rnd,
+      ox + (rnd() - 0.5) * 4,
+      oy + (rnd() - 0.5) * 10,
+      baseAngle + (rnd() - 0.5) * 0.5,
+      len,
+      seg,
+      0.42,
+      1.1 + rnd() * 0.9,
+      0.28,
+    );
     const t0 = 0.1 + rnd() * 0.3;
     const dur = 0.38 + rnd() * 0.2;
     const alpha = 0.5 + rnd() * 0.18;
@@ -529,67 +490,46 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
       dur,
       alpha,
       bleed: 0.06 + rnd() * 0.03,
-      bands: 2,
+      bands: 0,
       filament: false,
       expand: 0.03 + rnd() * 0.05,
-      lift: 4 + rnd() * 7,
+      lift: 3 + rnd() * 6,
       fadePow: 1.3,
     };
     secondary.push(stroke);
 
-    // 细须上也带 2–3 根绒
     const nFuzz = 2 + Math.floor(rnd() * 2);
     for (let h = 0; h < nFuzz; h++) {
-      const f = 0.25 + rnd() * 0.66;
+      const f = 0.25 + rnd() * 0.65;
       const at = Math.max(1, Math.min(seg - 1, Math.round(f * seg)));
-      const hx = path.xs[at]!;
-      const hy = path.ys[at]!;
-      const heading = Math.atan2(hy - path.ys[at - 1]!, hx - path.xs[at - 1]!);
-      const sign = rnd() < 0.5 ? -1 : 1;
-      filaments.push(makeFuzz(rnd, hx, hy, heading + sign * (0.9 + rnd() * 1.1), timeAtFraction(stroke, f)));
+      filaments.push(makeFuzz(rnd, path.xs[at]!, path.ys[at]!, baseAngle + (rnd() - 0.5) * 1.2, timeAtFraction(stroke, f)));
     }
-
-    // 细须尖端也开 1–2 根花丝
-    const tipX = path.xs[seg]!;
-    const tipY = path.ys[seg]!;
-    const tipAngle = Math.atan2(tipY - path.ys[seg - 1]!, tipX - path.xs[seg - 1]!);
     const nT = 1 + (rnd() < 0.5 ? 1 : 0);
     for (let f = 0; f < nT; f++) {
-      const spread = (f - (nT - 1) / 2) * (0.7 + rnd() * 0.6);
-      const fSeg = 4 + Math.floor(rnd() * 2);
-      const fPath = bakeCurve(
-        {
-          x: tipX,
-          y: tipY,
-          angle: tipAngle + spread + (rnd() - 0.5) * 0.5,
-          length: 12 + rnd() * 22,
-          segments: fSeg,
-          curl: (rnd() < 0.5 ? -1 : 1) * (1 + rnd() * 2),
-          wobbleAmp: 0.14 + rnd() * 0.3,
-          wobbleFreq: 1.1 + rnd() * 1.8,
-          wobble2Amp: 0.04,
-          wobble2Freq: 2.6,
-          phase: rnd() * TAU,
-          phase2: rnd() * TAU,
-          droop: (rnd() - 0.5) * 0.9,
-        },
-        0.3 + rnd() * 0.18,
-        0.16,
-        rnd() * 10,
-      );
+      const ang = baseAngle + (rnd() - 0.5) * 0.7;
+      const fPath = bakeShallow(rnd, path.xs[seg]!, path.ys[seg]!, ang, 10 + rnd() * 18, 3 + Math.floor(rnd() * 3), 0.55, 0.3 + rnd() * 0.16, 0.17);
       filaments.push(makeFilament(rnd, fPath, 0.7 + rnd() * 0.42, false));
     }
   }
 
-  // —— 短辅须：从种点直接冒出来，甩出几笔短促的墨，中心更毛更活 ——
+  // —— 短辅须：种点附近甩出的水平短笔，中心是一小团横向湿墨 ——
   const nMinor = 10 + Math.floor(rnd() * 3);
   for (let i = 0; i < nMinor; i++) {
-    const len = 24 + rnd() * 68;
-    const angle = spin + rnd() * TAU;
+    const side = rnd() < 0.5 ? -1 : 1;
+    const baseAngle = side === 1 ? 0 : Math.PI;
+    const len = 18 + rnd() * 62;
     const seg = Math.max(5, Math.min(11, Math.round(len / 5.5)));
-    const spec = curveFrom(rnd, ox + (rnd() - 0.5) * 2, oy + (rnd() - 0.5) * 2, angle, len, seg);
-    spec.curl *= 2.5;
-    const path = bakeCurve(spec, 1.2 + rnd() * 1, 0.26, rnd() * 10);
+    const path = bakeShallow(
+      rnd,
+      ox + (rnd() - 0.5) * 3,
+      oy + (rnd() - 0.5) * 8,
+      baseAngle + (rnd() - 0.5) * 0.7,
+      len,
+      seg,
+      0.5,
+      1.2 + rnd() * 1,
+      0.26,
+    );
     const t0 = 0.08 + rnd() * 0.3;
     const dur = 0.32 + rnd() * 0.2;
     const alpha = 0.48 + rnd() * 0.2;
@@ -599,55 +539,26 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
       dur,
       alpha,
       bleed: 0.055 + rnd() * 0.03,
-      bands: 2,
+      bands: 0,
       filament: false,
       expand: 0.03 + rnd() * 0.05,
-      lift: 4 + rnd() * 7,
+      lift: 3 + rnd() * 6,
       fadePow: 1.35,
     };
     minor.push(stroke);
 
-    // 短须上带 1–2 根绒
     const nFuzz = 1 + (rnd() < 0.5 ? 1 : 0);
     for (let h = 0; h < nFuzz; h++) {
       const f = 0.3 + rnd() * 0.6;
       const at = Math.max(1, Math.min(seg - 1, Math.round(f * seg)));
-      const hx = path.xs[at]!;
-      const hy = path.ys[at]!;
-      const heading = Math.atan2(hy - path.ys[at - 1]!, hx - path.xs[at - 1]!);
-      const sign = rnd() < 0.5 ? -1 : 1;
-      filaments.push(makeFuzz(rnd, hx, hy, heading + sign * (0.8 + rnd() * 1.1), timeAtFraction(stroke, f)));
+      filaments.push(makeFuzz(rnd, path.xs[at]!, path.ys[at]!, baseAngle + (rnd() - 0.5) * 1.1, timeAtFraction(stroke, f)));
     }
-
-    // 短须尖端 1 根更细的花丝
-    const tipX = path.xs[seg]!;
-    const tipY = path.ys[seg]!;
-    const tipAngle = Math.atan2(tipY - path.ys[seg - 1]!, tipX - path.xs[seg - 1]!);
-    const fSeg = 3 + Math.floor(rnd() * 3);
-    const fPath = bakeCurve(
-      {
-        x: tipX,
-        y: tipY,
-        angle: tipAngle + (rnd() - 0.5) * 0.9,
-        length: 10 + rnd() * 18,
-        segments: fSeg,
-        curl: (rnd() < 0.5 ? -1 : 1) * (1 + rnd() * 2),
-        wobbleAmp: 0.12 + rnd() * 0.26,
-        wobbleFreq: 1 + rnd() * 1.6,
-        wobble2Amp: 0.04,
-        wobble2Freq: 2.4,
-        phase: rnd() * TAU,
-        phase2: rnd() * TAU,
-        droop: (rnd() - 0.5) * 0.9,
-      },
-      0.28 + rnd() * 0.16,
-      0.15,
-      rnd() * 10,
-    );
+    const ang = baseAngle + (rnd() - 0.5) * 0.8;
+    const fPath = bakeShallow(rnd, path.xs[seg]!, path.ys[seg]!, ang, 8 + rnd() * 14, 3 + Math.floor(rnd() * 3), 0.55, 0.28 + rnd() * 0.16, 0.16);
     filaments.push(makeFilament(rnd, fPath, 0.66 + rnd() * 0.4, false));
   }
 
-  // —— 小墨滴 / 孢子：6–9 个，挂在须尖或分叉，1s 内向外漂 10–30px ——
+  // —— 孢子 / 小墨滴：主要沿水平方向缓缓向外漂（可轻微上飘） ——
   const hosts: Stroke[] = [...primaries, ...branches];
   const nSpore = 6 + Math.floor(rnd() * 4);
   for (let s = 0; s < nSpore; s++) {
@@ -655,24 +566,24 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
     const last = host.xs.length - 1;
     const tipX = host.xs[last]!;
     const tipY = host.ys[last]!;
-    const heading = Math.atan2(tipY - host.ys[last - 1]!, tipX - host.xs[last - 1]!);
-    const off = 2 + rnd() * 8;
-    const drift = heading + (rnd() - 0.5) * 2;
+    const out = tipX >= host.xs[0]! ? 1 : -1;
+    const drift = out === 1 ? 0 : Math.PI;
+    const ang = drift + (rnd() - 0.5) * 0.34; // 只允许 ±10°
     spores.push({
-      x: tipX + Math.cos(heading) * off,
-      y: tipY + Math.sin(heading) * off,
-      dirX: Math.cos(drift),
-      dirY: Math.sin(drift),
-      speed: 13 + rnd() * 18, // 13–31 px/s
-      r: s < 2 ? 1.8 + rnd() * 0.8 : 0.9 + rnd() * 1.3,
+      x: tipX + Math.cos(drift) * (2 + rnd() * 7),
+      y: tipY + (rnd() - 0.5) * 6,
+      dirX: Math.cos(ang),
+      dirY: Math.sin(ang),
+      speed: 14 + rnd() * 20,
+      r: s < 2 ? 1.7 + rnd() * 0.8 : 0.9 + rnd() * 1.3,
       t0: 0.62 + rnd() * 0.55,
       lift: 8 + rnd() * 14,
       alpha: 0.7 + rnd() * 0.2,
-      linger: s < 2 || rnd() < 0.25, // 2–3 个残留到最后
+      linger: s < 2 || rnd() < 0.25,
     });
   }
 
-  // —— 种点周围溅开的小墨点（刚落笔的溅射） ——
+  // —— 种点周围溅开的小墨点（落笔的溅射） ——
   const specks: Speck[] = [];
   const nSpeck = 4 + Math.floor(rnd() * 4);
   for (let i = 0; i < nSpeck; i++) {
@@ -680,9 +591,9 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
     const d = 3 + rnd() * 16;
     specks.push({
       x: ox + Math.cos(a) * d,
-      y: oy + Math.sin(a) * d,
+      y: oy + Math.sin(a) * d * 0.5, // 溅射也偏横向
       dx: Math.cos(a) * (1.2 + rnd() * 2.6),
-      dy: Math.sin(a) * (1.2 + rnd() * 2.6),
+      dy: Math.sin(a) * (0.6 + rnd() * 1.2),
       r: 0.7 + rnd() * 1.1,
       t0: 0.02 + rnd() * 0.12,
       alpha: 0.45 + rnd() * 0.3,
@@ -693,11 +604,9 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
   const pools: Speck[] = [];
   const nPool = 2 + Math.floor(rnd() * 2);
   for (let i = 0; i < nPool; i++) {
-    const a = rnd() * TAU;
-    const d = 2 + rnd() * 11;
     pools.push({
-      x: ox + Math.cos(a) * d,
-      y: oy + Math.sin(a) * d,
+      x: ox + (rnd() - 0.5) * 30,
+      y: oy + (rnd() - 0.5) * 14,
       dx: 0,
       dy: 0,
       r: 8 + rnd() * 13,
@@ -706,15 +615,14 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
     });
   }
 
-  // —— 落笔处偏移的几团墨晕，让外轮廓不规则 ——
+  // —— 落笔处横向偏移的墨晕，让横向轮廓不规则 ——
   const lobes: Speck[] = [];
   const nLobe = 2 + Math.floor(rnd() * 2);
   for (let i = 0; i < nLobe; i++) {
-    const a = rnd() * TAU;
-    const d = 14 + rnd() * 30;
+    const side = rnd() < 0.5 ? -1 : 1;
     lobes.push({
-      x: ox + Math.cos(a) * d,
-      y: oy + Math.sin(a) * d,
+      x: ox + side * (16 + rnd() * 34),
+      y: oy + (rnd() - 0.5) * 22,
       dx: 0,
       dy: 0,
       r: 20 + rnd() * 22,
@@ -723,18 +631,17 @@ function buildCluster(ox: number, oy: number, seed: number, reduced: boolean, bo
     });
   }
 
-  // —— 更细的雾状飞溅：落笔瞬间一圈，绽放时再爆一小圈 ——
+  // —— 更细的雾状飞溅：前后两小圈，都在横向带内 ——
   const spray: Speck[] = [];
   const nSpray = 11 + Math.floor(rnd() * 6);
   for (let i = 0; i < nSpray; i++) {
     const late = i >= Math.round(nSpray * 0.55);
-    const a = rnd() * TAU;
-    const d = late ? 42 + rnd() * 82 : 16 + rnd() * 60;
+    const side = rnd() < 0.5 ? -1 : 1;
     spray.push({
-      x: ox + Math.cos(a) * d,
-      y: oy + Math.sin(a) * d,
-      dx: Math.cos(a) * (2 + rnd() * 5),
-      dy: Math.sin(a) * (2 + rnd() * 5),
+      x: ox + side * (late ? 46 + rnd() * 82 : 20 + rnd() * 70),
+      y: oy + (rnd() - 0.5) * 64,
+      dx: side * (2 + rnd() * 5),
+      dy: (rnd() - 0.5) * 2,
       r: 0.4 + rnd() * 0.7,
       t0: late ? 0.8 + rnd() * 0.4 : 0.05 + rnd() * 0.3,
       alpha: 0.2 + rnd() * 0.26,
@@ -956,10 +863,12 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
   const ink = inverted ? INK_LIGHT : INK_DARK;
   const inkRgb = inverted ? INK_RGB_LIGHT : INK_RGB_DARK;
   const appear = reduced ? 1 : Math.min(1, age / SEED_AT);
+  // reduced-motion 下所有「漂移 / 外扩」都冻结，只保留整体淡出
+  const motion = reduced ? 0 : dr;
 
   // 种点墨晕：落笔时先扩散（半径 20→46），随后随整簇散掉
   const spread = reduced ? 1 : 1 - Math.pow(1 - Math.min(1, age / 1.05), 3);
-  const haloR = 20 + spread * 26 + dr * 12;
+  const haloR = 20 + spread * 26 + motion * 12;
   const haloA = (0.06 + 0.025 * appear) * Math.pow(fade, 0.8) * appear;
   if (haloA > 0.003) {
     const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, haloR);
@@ -979,7 +888,7 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
     if (!reduced && t <= 0) continue;
     const a = l.alpha * Math.min(1, t / 0.25) * Math.pow(fade, 0.85);
     if (a <= 0.003) continue;
-    const lr = l.r * (1 + 0.35 * dr);
+    const lr = l.r * (1 + 0.35 * motion);
     const lob = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, lr);
     lob.addColorStop(0, `rgba(${inkRgb}, ${a.toFixed(4)})`);
     lob.addColorStop(0.6, `rgba(${inkRgb}, ${(a * 0.5).toFixed(4)})`);
@@ -995,7 +904,7 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
     if (!reduced && t <= 0) continue;
     const a = p.alpha * Math.min(1, t / 0.12) * Math.pow(fade, 0.95);
     if (a <= 0.003) continue;
-    const pr = p.r * (1 + 0.55 * dr);
+    const pr = p.r * (1 + 0.55 * motion);
     const pool = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, pr);
     pool.addColorStop(0, `rgba(${inkRgb}, ${a.toFixed(4)})`);
     pool.addColorStop(0.6, `rgba(${inkRgb}, ${(a * 0.55).toFixed(4)})`);
@@ -1013,7 +922,7 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
     if (!reduced && t <= 0) continue;
     const pop = reduced ? 1 : Math.min(1, t / 0.16);
     const px = sp.x + sp.dx * Math.min(t, 1.4);
-    const py = sp.y + sp.dy * Math.min(t, 1.4) - 3 * dr;
+    const py = sp.y + sp.dy * Math.min(t, 1.4) - 3 * motion;
     const a = sp.alpha * pop * Math.pow(fade, 0.7);
     if (a <= 0.004) continue;
     ctx.globalAlpha = a;
@@ -1028,7 +937,7 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
     if (!reduced && t <= 0) continue;
     const pop = reduced ? 1 : Math.min(1, t / 0.12);
     const px = sp.x + sp.dx * Math.min(t, 1.2);
-    const py = sp.y + sp.dy * Math.min(t, 1.2) - 4 * dr;
+    const py = sp.y + sp.dy * Math.min(t, 1.2) - 4 * motion;
     const a = sp.alpha * pop * Math.pow(fade, 0.8);
     if (a <= 0.004) continue;
     ctx.globalAlpha = a;
@@ -1060,10 +969,10 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
     const pop = reduced ? 1 : Math.min(1, t / 0.18);
     const driftT = reduced ? 0 : Math.min(t, 1.8);
     const px = sp.x + sp.dirX * sp.speed * driftT;
-    const py = sp.y + sp.dirY * sp.speed * driftT - sp.lift * dr;
+    const py = sp.y + sp.dirY * sp.speed * driftT - sp.lift * motion;
     const a = sp.alpha * pop * Math.pow(fade, sp.linger ? 0.3 : 0.85);
     if (a <= 0.004) continue;
-    const r = sp.r * (0.55 + 0.45 * pop) * (1 - 0.22 * dr);
+    const r = sp.r * (0.55 + 0.45 * pop) * (1 - 0.22 * motion);
     ctx.fillStyle = ink;
     if (sp.r > 1.25) {
       ctx.globalAlpha = a * 0.1;
@@ -1080,7 +989,7 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
   // 落笔中心的湿墨：一小团更黑的墨池，最后才散
   const poolA = 0.18 * appear * Math.pow(fade, 1.1);
   if (poolA > 0.003) {
-    const poolR = c.coreR * 3.8 * (1 + 0.4 * dr);
+    const poolR = c.coreR * 3.8 * (1 + 0.4 * motion);
     const pool = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, poolR);
     pool.addColorStop(0, `rgba(${inkRgb}, ${(poolA * 1.6).toFixed(4)})`);
     pool.addColorStop(0.55, `rgba(${inkRgb}, ${(poolA * 0.7).toFixed(4)})`);
@@ -1091,10 +1000,10 @@ function drawCluster(ctx: CanvasRenderingContext2D, c: Cluster, now: number, inv
   }
 
   // 墨核：最先出现，最后 150ms 才消失
-  const coreFade = reduced ? 1 : Math.pow(Math.max(0, 1 - dr), 0.85);
+  const coreFade = reduced ? fade : Math.pow(Math.max(0, 1 - dr), 0.85);
   const coreA = 0.85 * appear * coreFade;
   if (coreA > 0.004) {
-    const r = c.coreR * (0.5 + 0.5 * appear) * (1 + 0.12 * dr);
+    const r = c.coreR * (0.5 + 0.5 * appear) * (1 + 0.12 * motion);
     ctx.fillStyle = ink;
     ctx.globalAlpha = coreA;
     ctx.beginPath();
