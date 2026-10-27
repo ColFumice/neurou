@@ -32,6 +32,7 @@ export {
   removeCoupling,
   addString,
   removeString,
+  setSpectrumBand,
   findCoupling,
   type ThresholdName,
   type EditResult,

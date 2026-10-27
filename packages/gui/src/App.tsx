@@ -10,11 +10,13 @@ import {
   serialize,
   setCouplingStrengthBetween,
   setStringThreshold,
+  setSpectrumBand,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
+import { SpectrumField, type SpectrumView } from './SpectrumField.js';
 import type { Lane, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
@@ -174,6 +176,12 @@ export function App() {
   const [couplingRemoves, setCouplingRemoves] = useState(0);
   const [stringAdds, setStringAdds] = useState(0);
   const [stringRemoves, setStringRemoves] = useState(0);
+  /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑。 */
+  const [screen, setScreen] = useState<'strings' | 'spectrum'>('strings');
+  const [spectrumIndex, setSpectrumIndex] = useState(0);
+  const [bandEdits, setBandEdits] = useState(0);
+  const screenRef = useRef<'strings' | 'spectrum'>('strings');
+  screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
   /** 撤销/重做的缓动状态。 */
   const [transition, setTransition] = useState<UndoTransition | null>(null);
@@ -261,6 +269,10 @@ export function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (screen === 'spectrum' && (worldIR?.spectra.length ?? 0) === 0) setScreen('strings');
+  }, [screen, worldIR]);
 
   const lanes = useMemo(() => {
     if (transition) {
@@ -397,7 +409,8 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    if (!beginTransition(previous, 'undo')) await reload();
+    if (screenRef.current === 'spectrum') apply(previous);
+    else if (!beginTransition(previous, 'undo')) await reload();
   };
 
   const redo = async (): Promise<void> => {
@@ -415,7 +428,8 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    if (!beginTransition(next, 'redo')) await reload();
+    if (screenRef.current === 'spectrum') apply(next);
+    else if (!beginTransition(next, 'redo')) await reload();
   };
   actions.current = { undo, redo };
 
@@ -426,6 +440,20 @@ export function App() {
       event.preventDefault();
       if (event.shiftKey) void actions.current.redo();
       else void actions.current.undo();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // F2：从八弦进入谱模式（世界里至少有一条谱）。谱模式内的 F2/Esc 由 SpectrumField 处理。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'F2' || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (screenRef.current !== 'strings') return;
+      if ((worldIRRef.current?.spectra.length ?? 0) === 0) return;
+      event.preventDefault();
+      setSpectrumIndex(0);
+      setScreen('spectrum');
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -447,6 +475,10 @@ export function App() {
       data-coupling-removes={couplingRemoves}
       data-string-adds={stringAdds}
       data-string-removes={stringRemoves}
+      data-screen={screen}
+      data-spectrum-index={spectrumIndex}
+      data-spectrum-count={worldIR?.spectra.length ?? 0}
+      data-spectrum-band-edits={bandEdits}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -478,6 +510,17 @@ export function App() {
     lanes,
     couplings: couplingLanes(worldIR),
   };
+
+  const spectra: SpectrumView[] = worldIR.spectra.map((s) => ({
+    id: s.id,
+    name: s.name,
+    bands: [...s.bands],
+    min: s.min,
+    max: s.max,
+    interpolation: s.interpolation,
+    loop: s.loop,
+    mode: s.mode,
+  }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
     if (transitionRef.current) return;
@@ -597,17 +640,46 @@ export function App() {
     scheduleSave();
   };
 
+  /** 谱模式：拖动一个段值（persist 时 debounce 写回，patch 只改 段 行数字）。 */
+  const onEditBand = (spectrumId: string, bandIndex: number, value: number, persist = false): void => {
+    if (transitionRef.current) return;
+    const result = setSpectrumBand(worldIR, spectrumId, bandIndex, value);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setBandEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
+  const exitSpectrum = (): void => setScreen('strings');
+
   return shell(
-    <StringField
-      view={view}
-      onInject={onInject}
-      onEditThreshold={onEditThreshold}
-      onCycleString={onCycleString}
-      onEditCoupling={onEditCoupling}
-      onToggleCoupling={onToggleCoupling}
-      onAddString={onAddString}
-      onRemoveString={onRemoveString}
-    />,
+    screen === 'spectrum' && spectra.length > 0 ? (
+      <SpectrumField
+        spectra={spectra}
+        index={Math.min(spectrumIndex, spectra.length - 1)}
+        onCycleSpectrum={(dir) =>
+          setSpectrumIndex((current) => ((current + dir) % spectra.length + spectra.length) % spectra.length)
+        }
+        onEditBand={onEditBand}
+        onExit={exitSpectrum}
+      />
+    ) : (
+      <StringField
+        view={view}
+        onInject={onInject}
+        onEditThreshold={onEditThreshold}
+        onCycleString={onCycleString}
+        onEditCoupling={onEditCoupling}
+        onToggleCoupling={onToggleCoupling}
+        onAddString={onAddString}
+        onRemoveString={onRemoveString}
+      />
+    ),
     false,
   );
 }

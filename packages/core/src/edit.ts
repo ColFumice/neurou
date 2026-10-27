@@ -208,3 +208,21 @@ export function removeString(ir: WorldIR, id: string): EditResult {
   if (!valid.ok) return valid;
   return { ok: true, ir: candidate };
 }
+
+/** 改一条谱的某个段值（v1.9 GUI 拖动写回）；不 clamp，越界由界面先夹取。 */
+export function setSpectrumBand(ir: WorldIR, id: string, index: number, value: number): EditResult {
+  const spectrum = ir.spectra.find((s) => s.id === id);
+  if (!spectrum) return fail(`没有谱「${id}」`);
+  if (!Number.isInteger(index) || index < 0 || index >= spectrum.bands.length) {
+    return fail(`谱「${id}」没有第 ${index} 段（共 ${spectrum.bands.length} 段）`);
+  }
+  if (!Number.isFinite(value)) return fail('段值必须是有限数字');
+  if (value < spectrum.min || value > spectrum.max) {
+    return fail(`段值 ${value} 超出范围 ${spectrum.min}..${spectrum.max}`);
+  }
+  const next = {
+    ...spectrum,
+    bands: spectrum.bands.map((band, i) => (i === index ? round(value) : band)),
+  };
+  return { ok: true, ir: { ...ir, spectra: ir.spectra.map((s) => (s.id === id ? next : s)) } };
+}

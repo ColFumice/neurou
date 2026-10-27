@@ -1,4 +1,4 @@
-import type { IRCoupling, IRString, WorldIR } from './ir.js';
+import type { IRCoupling, IRSpectrum, IRString, WorldIR } from './ir.js';
 import { stringBlockLines } from './serialize.js';
 
 /**
@@ -78,6 +78,16 @@ function structuralSignature(ir: WorldIR): string {
     name: ir.name,
     meta: ir.meta,
     entities: ir.entities,
+    spectra: ir.spectra.map((s) => ({
+      id: s.id,
+      name: s.name,
+      min: s.min,
+      max: s.max,
+      interpolation: s.interpolation,
+      loop: s.loop,
+      mode: s.mode,
+      bandCount: s.bands.length,
+    })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
     axioms: ir.axioms,
@@ -141,7 +151,33 @@ function couplingStructure(coupling: IRCoupling): string {
   });
 }
 
-/** 删除一条耦合声明所占的整行（行内写法或块写法）。 */
+/** 替换一条谱 `段 …` 行里的数字，保留缩进、数字间空白与行尾注释。 */
+function spectrumBandsEdit(text: string, base: IRSpectrum, edited: IRSpectrum): TextEdit | { error: string } {
+  if (!base.span) return { error: `谱「${base.id}」没有源位置` };
+  const lines = linesIn(text, base.span.start.offset, base.span.end.offset);
+  const line = lines.find((item) => /^\s*段(?=\s|$)/.test(contentOf(text, item)));
+  if (!line) return { error: `谱「${base.id}」没有「段」行，无法写回` };
+  const content = contentOf(text, line);
+  const prefix = /^(\s*段\s+)/.exec(content)?.[1];
+  if (!prefix) return { error: `谱「${base.id}」的「段」行格式无法识别` };
+  const bodyStart = prefix.length;
+  const body = content.slice(bodyStart);
+  const matches = [...body.matchAll(/-?\d+(?:\.\d+)?/g)];
+  if (matches.length !== base.bands.length || matches.length !== edited.bands.length) {
+    return { error: `谱「${base.id}」的段数与源文本不一致，无法写回` };
+  }
+  let nextBody = body;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i]!;
+    const at = match.index ?? 0;
+    nextBody = nextBody.slice(0, at) + formatNumber(edited.bands[i]!) + nextBody.slice(at + match[0].length);
+  }
+  return {
+    start: line.contentStart + bodyStart,
+    end: line.contentEnd,
+    text: nextBody,
+  };
+}
 function deleteCouplingEdit(text: string, coupling: IRCoupling): TextEdit | { error: string } {
   if (!coupling.span) return { error: `耦合「${coupling.from} → ${coupling.to}」没有源位置` };
   const lines = linesIn(text, coupling.span.start.offset, coupling.span.end.offset);
@@ -315,6 +351,26 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   }
   if (addedStrings.length > 0) {
     edits.push(insertStringsEdit(normalized, baseIR, addedStrings, eol));
+  }
+
+  for (const edited of editedIR.spectra) {
+    const base = baseIR.spectra.find((s) => s.id === edited.id);
+    if (!base) return { ok: false, reason: `谱「${edited.id}」是新增的，需要回退规范序列化` };
+    if (base.bands.length !== edited.bands.length) {
+      return { ok: false, reason: `谱「${edited.id}」的段数发生变化，需要回退规范序列化` };
+    }
+    let differs = false;
+    for (let i = 0; i < edited.bands.length; i++) {
+      if (Math.abs((base.bands[i] ?? 0) - (edited.bands[i] ?? 0)) > 1e-9) {
+        differs = true;
+        break;
+      }
+    }
+    if (!differs) continue;
+    const result = spectrumBandsEdit(normalized, base, edited);
+    if ('error' in result) return { ok: false, reason: result.error };
+    edits.push(result);
+    changed.push(`${edited.id}.bands`);
   }
 
   const baseCouplings = new Map(baseIR.couplings.map((c) => [couplingKey(c), c]));

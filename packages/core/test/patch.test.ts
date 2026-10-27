@@ -10,6 +10,7 @@ import {
   setCouplingStrengthBetween,
   setStringBaseline,
   setStringThreshold,
+  setSpectrumBand,
   type WorldIR,
 } from '../src/index.js';
 
@@ -141,6 +142,35 @@ describe('源文本行级写回（保留注释与排版）', () => {
     expect(second.text).not.toContain('叙事弦 信任新');
     expect(second.text).toBe(text);
     expect(commentLines(second.text)).toBe(commentLines(text));
+  });
+
+  it('谱段值行级 patch：只改段行数字，注释保留', () => {
+    const text = readCommitted('examples/spectra.nro');
+    const compiled = compileText(text, 'examples/spectra.nro');
+    expect(compiled.ok).toBe(true);
+    const spectrum = compiled.ir.spectra[0]!;
+    const edited = setSpectrumBand(compiled.ir, spectrum.id, 1, 0.62);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    const result = patchWorldText(text, compiled.ir, edited.ir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toContain('段 0.1 0.62 0.8 0.5');
+    expect(commentLines(result.text)).toBe(commentLines(text));
+    const recompiled = compileText(result.text, 'spectra-patched.nro');
+    expect(recompiled.ok).toBe(true);
+    expect(recompiled.ir.spectra[0]?.bands[1]).toBe(0.62);
+  });
+
+  it('谱结构变化（范围/段数/模式）拒绝 patch', () => {
+    const text = readCommitted('examples/spectra.nro');
+    const compiled = compileText(text, 'examples/spectra.nro');
+    expect(compiled.ok).toBe(true);
+    const edited: WorldIR = {
+      ...compiled.ir,
+      spectra: compiled.ir.spectra.map((s) => ({ ...s, min: 1, max: 2 })),
+    };
+    expect(patchWorldText(text, compiled.ir, edited).ok).toBe(false);
   });
 
   it('删除普通耦合：整行删除，注释保留', () => {

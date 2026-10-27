@@ -840,6 +840,49 @@ const backLane = (await tmpLanes())[0];
 check('ArrowLeft 切回同类上一根', backLane.name === '甲' && Math.abs(backLane.value - 40) < 1e-6, JSON.stringify(backLane));
 await page.screenshot({ path: 'artifacts/98-string-world-switch.png' });
 
+// ============ 12. 谱模式：F2 进入、拖段点、行级写回、撤销 ============
+const SPECTRA_PATH = 'examples/spectra.nro';
+const spectraBefore = readFileSync(SPECTRA_PATH, 'utf8');
+await page.goto('http://127.0.0.1:5188/?world=examples/spectra.nro', { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]');
+await page.waitForTimeout(900);
+check('谱示例世界可加载', (await attr('data-world')) === '谱之境', String(await attr('data-world')));
+await page.keyboard.press('F2');
+await page.waitForTimeout(500);
+const spectrumField = page.locator('[data-testid="spectrum-field"]');
+check('F2 进入谱模式', (await appAttr('data-screen')) === 'spectrum' && (await spectrumField.count()) === 1, String(await appAttr('data-screen')));
+check('显示第一条谱「情绪地形」', (await spectrumField.getAttribute('data-spectrum-name')) === '情绪地形', String(await spectrumField.getAttribute('data-spectrum-name')));
+const spectrumBandsBefore = JSON.parse(String((await spectrumField.getAttribute('data-band-values')) ?? '[]'));
+check('初始 4 个段值', spectrumBandsBefore.length === 4, JSON.stringify(spectrumBandsBefore));
+await page.screenshot({ path: 'artifacts/99-string-spectrum.png' });
+const bandPositions = await page.evaluate(() => window.__neurouSpectrum?.bandPositions() ?? []);
+const band1 = bandPositions[1];
+if (band1) {
+  await page.mouse.move(band1.x, band1.y);
+  await page.mouse.down();
+  await page.mouse.move(band1.x, band1.y - 100, { steps: 10 });
+  await page.waitForTimeout(260);
+  await page.mouse.up();
+  await page.waitForTimeout(1400);
+  const bandsAfter = JSON.parse(String((await spectrumField.getAttribute('data-band-values')) ?? '[]'));
+  check('拖动段点改变曲线值', Math.abs(bandsAfter[1] - spectrumBandsBefore[1]) > 0.05, `${spectrumBandsBefore[1]} → ${bandsAfter[1]}`);
+  check('段值写回走行级 patch', (await appAttr('data-save-mode')) === 'patch', String(await appAttr('data-save-mode')));
+  const spectraAfterText = readFileSync(SPECTRA_PATH, 'utf8');
+  const bandLine = spectraAfterText.split(/\r?\n/).find((line) => line.trimStart().startsWith('段')) ?? '';
+  check('文件里的段行被更新、注释保留', /段 0\.1 0\.\d+ 0\.8 0\.5/.test(bandLine) && spectraAfterText.includes('# 谱（stage 1）'), bandLine);
+  check('谱编辑计数', Number((await appAttr('data-spectrum-band-edits')) ?? 0) >= 1, String(await appAttr('data-spectrum-band-edits')));
+  await page.screenshot({ path: 'artifacts/99-string-spectrum-edited.png' });
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(900);
+  const bandsUndo = JSON.parse(String((await spectrumField.getAttribute('data-band-values')) ?? '[]'));
+  check('Ctrl+Z 撤销谱编辑', Math.abs(bandsUndo[1] - spectrumBandsBefore[1]) < 1e-6, JSON.stringify(bandsUndo));
+  check('撤销后谱文件恢复原样', readFileSync(SPECTRA_PATH, 'utf8') === spectraBefore);
+}
+await page.keyboard.press('F2');
+await page.waitForTimeout(300);
+check('F2 退出谱模式回到八弦', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
+execFileSync('git', ['checkout', '--', SPECTRA_PATH], { stdio: 'ignore' });
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

@@ -14,6 +14,7 @@ import {
   setCouplingStrengthBetween,
   setStringBaseline,
   setStringThreshold,
+  setSpectrumBand,
   type WorldIR,
 } from '../src/index.js';
 
@@ -178,6 +179,25 @@ describe('IR 编辑：增删耦合', () => {
     expect(findCoupling(removed.ir, '信任', '恐惧')).toBeUndefined();
     expect(removeCoupling(ir, '信任', '色温').ok).toBe(false); // 回路边
     expect(removeCoupling(ir, '信任', '不存在').ok).toBe(false);
+  });
+});
+
+describe('IR 编辑：谱段值', () => {
+  it('改段值可编译；越界/未知谱/未知段被拒绝', () => {
+    const ir = loadExample('spectra.nro');
+    expect(ir.spectra).toHaveLength(1);
+    const spectrum = ir.spectra[0]!;
+    const result = setSpectrumBand(ir, spectrum.id, 1, 0.62);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.spectra[0]?.bands[1]).toBe(0.62);
+    expect(ir.spectra[0]?.bands[1]).not.toBe(0.62); // 纯函数
+    expect(setSpectrumBand(ir, spectrum.id, 1, 1.2).ok).toBe(false);
+    expect(setSpectrumBand(ir, spectrum.id, 9, 0.2).ok).toBe(false);
+    expect(setSpectrumBand(ir, '不存在', 0, 0.2).ok).toBe(false);
+    const compiled = compileText(serialize(result.ir), 'edited-spectrum.nro');
+    expect(compiled.ok).toBe(true);
+    expect(compiled.ir.spectra[0]?.bands[1]).toBe(0.62);
   });
 });
 
