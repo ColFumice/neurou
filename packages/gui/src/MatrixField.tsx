@@ -146,6 +146,11 @@ const CURSOR_FADE_MS = 160;
 /** 命中容差：视差弹簧还没追上时也能稳定点到目标格。 */
 const HIT_TOLERANCE_PX = 10;
 
+/** 选中框：外扩 padding 9px、线宽 2、圆角略增；用 difference 白描边，深浅底都可见。 */
+const SELECTION_RING_PADDING = 9;
+const SELECTION_RING_WIDTH = 2;
+const SELECTION_RING_RADIUS_EXTRA = 4;
+
 /** 伪 3D：越白的格子略大（0.94..1.05），且视差移动更快（0.78..1.22 × 组 offset）。 */
 const CELL_VALUE_SCALE_MIN = 0.94;
 const CELL_VALUE_SCALE_MAX = 1.05;
@@ -893,16 +898,23 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cells.sort((a, b) => a.size - b.size || a.row - b.row || a.col - b.col);
       for (const cell of cells) {
         drawCell(cell.centerX, cell.centerY, cell.value, cell.size / layout.cell, cell.isSelected);
-        if (cell.isSelected) {
-          // 选中框紧跟在选中格之后画，因此会被之后更大的格子盖住（不再强制置顶）。
-          const ringSize = layout.cell * valueScale(cell.value) * 1.06;
-          const radius = layout.radius + 2;
-          ctx.strokeStyle = rgba(LABEL_RGB, 0.7);
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.roundRect(selectionX.value - ringSize / 2, selectionY.value - ringSize / 2, ringSize, ringSize, radius);
-          ctx.stroke();
-        }
+      }
+
+      // 选中框：所有格子之后画（即使被大格盖住也能看见）；difference 白描边适配深浅底；
+      // 在行列标签/矩阵名/summary/自定义光标之前。外扩 9px、线宽 2、圆角略增。
+      if (selected) {
+        const selectedValue = displayed[selected.row]?.[selected.col] ?? 0;
+        const selectedSize = cellDisplaySize(selected.row, selected.col, selectedValue);
+        const ringSize = selectedSize + SELECTION_RING_PADDING * 2;
+        const radius = layout.radius + SELECTION_RING_RADIUS_EXTRA;
+        ctx.save();
+        ctx.globalCompositeOperation = 'difference';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = SELECTION_RING_WIDTH;
+        ctx.beginPath();
+        ctx.roundRect(selectionX.value - ringSize / 2, selectionY.value - ringSize / 2, ringSize, ringSize, radius);
+        ctx.stroke();
+        ctx.restore();
       }
 
       // 行标签（左侧）：跟组 offset
