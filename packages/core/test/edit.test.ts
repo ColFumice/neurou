@@ -1,11 +1,14 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   addCoupling,
+  addString,
   compileText,
   findCoupling,
   removeCoupling,
+  removeString,
   serialize,
   setCouplingStrength,
   setCouplingStrengthBetween,
@@ -15,7 +18,14 @@ import {
 } from '../src/index.js';
 
 function loadExample(file: string): WorldIR {
-  const result = compileText(readFileSync(resolve('examples', file), 'utf8'), `examples/${file}`);
+  // 用 git 里的干净版本，避免验收/手工测试把示例文件改脏后单测抖动。
+  let text = '';
+  try {
+    text = execFileSync('git', ['show', `HEAD:examples/${file}`], { encoding: 'utf8' });
+  } catch {
+    text = readFileSync(resolve('examples', file), 'utf8');
+  }
+  const result = compileText(text, `examples/${file}`);
   if (!result.ok) throw new Error(`${file} 编译失败`);
   return result.ir;
 }
@@ -168,5 +178,52 @@ describe('IR 编辑：增删耦合', () => {
     expect(findCoupling(removed.ir, '信任', '恐惧')).toBeUndefined();
     expect(removeCoupling(ir, '信任', '色温').ok).toBe(false); // 回路边
     expect(removeCoupling(ir, '信任', '不存在').ok).toBe(false);
+  });
+});
+
+describe('IR 编辑：增删弦', () => {
+  it('新增同类弦：继承类型/阈值/响应，名字唯一，编译通过', () => {
+    const ir = loadExample('tuner.nro');
+    const result = addString(ir, '信任');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.strings).toHaveLength(9);
+    const added = result.ir.strings[8];
+    expect(added?.name).toBe('信任新');
+    expect(added?.kind).toBe('叙事');
+    expect(added?.baseline).toBe(55);
+    expect(added?.verge).toBe(25);
+    expect(added?.safe).toBe(75);
+    const compiled = compileText(serialize(result.ir), 'added-string.nro');
+    expect(compiled.ok).toBe(true);
+    expect(compiled.ir.strings).toHaveLength(9);
+  });
+
+  it('新增两次名字自动去重', () => {
+    const ir = loadExample('tuner.nro');
+    const first = addString(ir, '信任');
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = addString(first.ir, '信任');
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(new Set(second.ir.strings.map((s) => s.id)).size).toBe(10);
+  });
+
+  it('删除刚加的无引用弦；被规则/信号/结局引用的弦会被拒绝', () => {
+    const ir = loadExample('tuner.nro');
+    const added = addString(ir, '信任');
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const newName = added.ir.strings[8]!.id;
+    const removed = removeString(added.ir, newName);
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.ir.strings).toHaveLength(8);
+    // 信任被力迫/信号/结局引用，删除必须失败
+    const refused = removeString(ir, '信任');
+    expect(refused.ok).toBe(false);
+    // 回路里的弦也不能删
+    expect(removeString(ir, '色温').ok).toBe(false);
   });
 });

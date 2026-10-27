@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   addCoupling,
+  addString,
   compileText,
   findCoupling,
   patchWorldText,
   removeCoupling,
+  removeString,
   serialize,
   setCouplingStrengthBetween,
   setStringThreshold,
@@ -170,6 +172,8 @@ export function App() {
   const [couplingEdits, setCouplingEdits] = useState(0);
   const [couplingAdds, setCouplingAdds] = useState(0);
   const [couplingRemoves, setCouplingRemoves] = useState(0);
+  const [stringAdds, setStringAdds] = useState(0);
+  const [stringRemoves, setStringRemoves] = useState(0);
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
   /** 撤销/重做的缓动状态。 */
   const [transition, setTransition] = useState<UndoTransition | null>(null);
@@ -441,6 +445,8 @@ export function App() {
       data-coupling-edits={couplingEdits}
       data-coupling-adds={couplingAdds}
       data-coupling-removes={couplingRemoves}
+      data-string-adds={stringAdds}
+      data-string-removes={stringRemoves}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -549,6 +555,48 @@ export function App() {
     scheduleSave();
   };
 
+  /** 弦结构变化后重建 Universe（保留仍在的弦的当前值；新弦从基线开始）。 */
+  const rebuildUniverse = (ir: WorldIR): void => {
+    const next = new Universe(ir, { seed: 7 });
+    for (const string of ir.strings) {
+      const value = universe.get(string.id);
+      if (typeof value === 'number') next.inject(string.id, value);
+    }
+    setUniverse(next);
+  };
+
+  /** Alt+Enter：新增一根同类弦（继承焦点弦的类型/阈值/基线）。 */
+  const onAddString = (focusId: string): void => {
+    if (transitionRef.current) return;
+    const result = addString(worldIR, focusId);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    rebuildUniverse(result.ir);
+    setSaveError('');
+    setStringAdds((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  /** Alt+Backspace：删除焦点弦；有引用/回路时 core 会拒绝。 */
+  const onRemoveString = (focusId: string): void => {
+    if (transitionRef.current) return;
+    const result = removeString(worldIR, focusId);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    rebuildUniverse(result.ir);
+    setSaveError('');
+    setStringRemoves((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
   return shell(
     <StringField
       view={view}
@@ -557,6 +605,8 @@ export function App() {
       onCycleString={onCycleString}
       onEditCoupling={onEditCoupling}
       onToggleCoupling={onToggleCoupling}
+      onAddString={onAddString}
+      onRemoveString={onRemoveString}
     />,
     false,
   );

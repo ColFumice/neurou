@@ -169,6 +169,20 @@ function stringBlock(w: Writer, s: IRString, indent: number): void {
   w.blank();
 }
 
+export function stringBlockLines(s: IRString): string[] {
+  const lines = [
+    `${KIND_KEYWORD[s.kind]} ${s.name}`,
+    `  类型 ${domainText(s)}`,
+    `  基线 ${valueText(s.baseline)}`,
+  ];
+  if (s.verge !== undefined) lines.push(`  悬崖 ${numberText(s.verge)}`);
+  if (s.safe !== undefined) lines.push(`  安全 ${numberText(s.safe)}`);
+  if (s.response !== '线性') lines.push(`  响应 ${s.response}`);
+  if (s.target) lines.push(`  对象 ${s.target}`);
+  if (s.note) lines.push(`  描述 ${stringText(s.note)}`);
+  return lines;
+}
+
 // ---------- 实体 ----------
 
 function entityBlock(w: Writer, entity: IREntity, strings: IRString[]): void {

@@ -21,7 +21,7 @@ export * from './ast.js';
 export * from './ir.js';
 export { parse } from './parser.js';
 export { compile, compileText, kindSolver, suggestName, type CompileResult } from './compiler.js';
-export { serialize } from './serialize.js';
+export { serialize, stringBlockLines } from './serialize.js';
 export { patchWorldText, type PatchResult } from './patch.js';
 export {
   setStringBaseline,
@@ -30,6 +30,8 @@ export {
   setCouplingStrengthBetween,
   addCoupling,
   removeCoupling,
+  addString,
+  removeString,
   findCoupling,
   type ThresholdName,
   type EditResult,

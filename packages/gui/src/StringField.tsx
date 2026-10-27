@@ -248,6 +248,10 @@ export interface StringFieldProps {
   onEditCoupling?: (from: string, to: string, strength: number, persist?: boolean) => void;
   /** Shift+Enter：在焦点弦与 link 目标之间增删一条耦合（App 判断 add/remove 并写回）。 */
   onToggleCoupling?: (fromId: string, toId: string) => void;
+  /** Alt+Enter：以焦点弦为模板新增一条同类弦（App/core 决定名字/基线/阈值）。 */
+  onAddString?: (focusId: string) => void;
+  /** Alt+Backspace：删除焦点弦（App 校验引用/回路，失败写 data-save-error）。 */
+  onRemoveString?: (focusId: string) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -397,6 +401,8 @@ export function StringField({
   onCycleString,
   onEditCoupling,
   onToggleCoupling,
+  onAddString,
+  onRemoveString,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -406,12 +412,16 @@ export function StringField({
   const cycleRef = useRef(onCycleString);
   const couplingEditRef = useRef(onEditCoupling);
   const toggleCouplingRef = useRef(onToggleCoupling);
+  const addStringRef = useRef(onAddString);
+  const removeStringRef = useRef(onRemoveString);
   viewRef.current = view;
   injectRef.current = onInject;
   thresholdEditRef.current = onEditThreshold;
   cycleRef.current = onCycleString;
   couplingEditRef.current = onEditCoupling;
   toggleCouplingRef.current = onToggleCoupling;
+  addStringRef.current = onAddString;
+  removeStringRef.current = onRemoveString;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
@@ -1918,6 +1928,20 @@ export function StringField({
 
     function onKeyDown(event: KeyboardEvent): void {
       if (event.repeat) return;
+      // Alt+Enter / Alt+Backspace：增删弦（Alt 组合优先于普通按键，避免被 alt 守卫吞掉）。
+      if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        if (event.code === 'Enter' || event.code === 'Backspace') {
+          event.preventDefault();
+          if (modeNow === 'strings' && !dualNow) {
+            const focusLane = laneAt(focusIdx);
+            if (focusLane) {
+              if (event.code === 'Enter') addStringRef.current?.(focusLane.id);
+              else removeStringRef.current?.(focusLane.id);
+            }
+          }
+        }
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.code === 'Tab') {
         event.preventDefault();
@@ -2434,6 +2458,7 @@ export function StringField({
       data-holding={holding ? 'true' : 'false'}
       data-held-amplitude={heldAmplitude.toFixed(1)}
       data-link-target={linkTargetName}
+      data-focus-id={focusLane?.id ?? ''}
       data-resting={resting ? 'true' : 'false'}
       data-key-count={46}
       data-overview-rows={mode === 'overview' ? KIND_ORDER.length : 0}

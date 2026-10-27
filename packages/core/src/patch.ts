@@ -1,4 +1,5 @@
 import type { IRCoupling, IRString, WorldIR } from './ir.js';
+import { stringBlockLines } from './serialize.js';
 
 /**
  * 源文本行级写回（v1.4）：只改被编辑的那几行，保留注释、空行、排版。
@@ -77,16 +78,6 @@ function structuralSignature(ir: WorldIR): string {
     name: ir.name,
     meta: ir.meta,
     entities: ir.entities,
-    strings: ir.strings.map((s) => ({
-      id: s.id,
-      name: s.name,
-      kind: s.kind,
-      domain: s.domain,
-      response: s.response,
-      owner: s.owner,
-      target: s.target,
-      note: s.note,
-    })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
     axioms: ir.axioms,
@@ -100,6 +91,44 @@ function structuralSignature(ir: WorldIR): string {
 
 function couplingKey(coupling: IRCoupling): string {
   return `${coupling.from}->${coupling.to}`;
+}
+
+function stringStructure(string: IRString): string {
+  return JSON.stringify({
+    name: string.name,
+    kind: string.kind,
+    domain: string.domain,
+    response: string.response,
+    owner: string.owner,
+    target: string.target,
+    note: string.note,
+  });
+}
+
+/** 删除一整块弦声明。 */
+function deleteStringEdit(text: string, string: IRString): TextEdit | { error: string } {
+  if (!string.span) return { error: `弦「${string.id}」没有源位置` };
+  const lines = linesIn(text, string.span.start.offset, string.span.end.offset);
+  const first = lines[0];
+  const last = lines[lines.length - 1];
+  if (!first || !last) return { error: `弦「${string.id}」所在块无法识别` };
+  return { start: first.start, end: last.end, text: '' };
+}
+
+/** 在最后一块弦声明之后插入新弦块。 */
+function insertStringsEdit(
+  text: string,
+  baseIR: WorldIR,
+  added: IRString[],
+  eol: string,
+): TextEdit {
+  const spans = baseIR.strings.filter((s) => s.span).map((s) => s.span!.end.offset);
+  const pos = spans.length > 0 ? Math.max(...spans) : 0;
+  const newline = text.indexOf('\n', pos);
+  const at = newline === -1 ? text.length : newline + 1;
+  const prefix = at === text.length && !text.endsWith('\n') ? eol : '';
+  const block = added.map((s) => stringBlockLines(s).join(eol)).join(eol + eol) + eol + eol;
+  return { start: at, end: at, text: `${prefix}${block}` };
 }
 
 function couplingStructure(coupling: IRCoupling): string {
@@ -234,9 +263,6 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   if (structuralSignature(baseIR) !== structuralSignature(editedIR)) {
     return { ok: false, reason: '编辑涉及结构变化，需要回退规范序列化' };
   }
-  if (baseIR.strings.length !== editedIR.strings.length) {
-    return { ok: false, reason: '编辑涉及增删弦，需要回退规范序列化' };
-  }
 
   // SourceFile 在编译时把 CRLF 统一成 LF，span 偏移也随之基于 LF；
   // 这里同样先统一，patch 结果按 LF 写出（注释、缩进、空行保持不变）。
@@ -245,9 +271,22 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   const edits: TextEdit[] = [];
   const changed: string[] = [];
 
-  for (const edited of editedIR.strings) {
-    const base = baseIR.strings.find((s) => s.id === edited.id);
-    if (!base) return { ok: false, reason: `弦「${edited.id}」是新增的，无法行级写回` };
+  const baseStrings = new Map(baseIR.strings.map((s) => [s.id, s]));
+  const editedStrings = new Map(editedIR.strings.map((s) => [s.id, s]));
+  const addedStrings: IRString[] = [];
+
+  for (const [id, base] of baseStrings) {
+    const edited = editedStrings.get(id);
+    if (!edited) {
+      const result = deleteStringEdit(normalized, base);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${id}.removed`);
+      continue;
+    }
+    if (stringStructure(base) !== stringStructure(edited)) {
+      return { ok: false, reason: `弦「${id}」的名字/类型/取值域/响应发生变化，需要回退规范序列化` };
+    }
     const fields: { key: 'verge' | 'safe' | 'baseline'; label: '基线' | '悬崖' | '安全' }[] = [
       { key: 'baseline', label: '基线' },
       { key: 'verge', label: '悬崖' },
@@ -257,15 +296,25 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       const before = base[field.key];
       const after = edited[field.key];
       if (typeof before !== 'number' || typeof after !== 'number') {
-        if (before !== after) return { ok: false, reason: `弦「${edited.id}」的${field.label}不是数字，无法行级写回` };
+        if (before !== after) return { ok: false, reason: `弦「${id}」的${field.label}不是数字，无法行级写回` };
         continue;
       }
       if (Math.abs(before - after) < 1e-9) continue;
       const result = stringFieldEdit(normalized, base, field.label, after, eol);
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
-      changed.push(`${edited.id}.${field.key}`);
+      changed.push(`${id}.${field.key}`);
     }
+  }
+
+  for (const [id, edited] of editedStrings) {
+    if (baseStrings.has(id)) continue;
+    if (edited.owner) return { ok: false, reason: '实体里的弦暂不支持新增' };
+    addedStrings.push(edited);
+    changed.push(`${id}.added`);
+  }
+  if (addedStrings.length > 0) {
+    edits.push(insertStringsEdit(normalized, baseIR, addedStrings, eol));
   }
 
   const baseCouplings = new Map(baseIR.couplings.map((c) => [couplingKey(c), c]));

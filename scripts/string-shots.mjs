@@ -78,6 +78,19 @@ await page.waitForTimeout(220);
 await page.screenshot({ path: 'docs/images/string-link.png' });
 await page.keyboard.press('Escape');
 
+// 1e. 增删弦：Alt+Enter 新增同类弦，ArrowRight 切到它，截图后删掉并恢复世界
+await page.keyboard.press('Alt+Enter');
+await page.waitForTimeout(1600);
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(260);
+await page.screenshot({ path: 'docs/images/string-addstring.png' });
+await page.keyboard.press('Alt+Backspace');
+await page.waitForTimeout(1600);
+restoreWorld();
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]');
+await page.waitForTimeout(1000);
+
 // 2. 拖弦写回世界：信任下移 100px，等 1–2 拍看耦合弦自己波动
 const baseY = await focusBaselineY();
 await page.mouse.move(720, Math.round(baseY));

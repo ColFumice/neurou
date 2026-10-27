@@ -592,6 +592,40 @@ await page.waitForTimeout(300);
 check('回路边删除被 App 拒绝', (await couplingsOf()).length === loopBefore && String(await appAttr('data-save-error')).length > 0, String(await appAttr('data-save-error')));
 await page.keyboard.press('Escape');
 
+// ============ 8c. 增删弦：Alt+Enter / Alt+Backspace ============
+await page.waitForTimeout(300);
+const stringPreFile = readFileSync(WORLD_PATH, 'utf8');
+const lanePreCount = Number(await attr('data-lane-count'));
+check('初始焦点 id = 信任', (await attr('data-focus-id')) === '信任', String(await attr('data-focus-id')));
+await page.keyboard.press('Alt+Enter');
+await page.waitForTimeout(280);
+check('Alt+Enter 新增同类弦（同类多实例，视图仍每类一根）', Number((await appAttr('data-string-adds')) ?? 0) >= 1 && Number(await attr('data-lane-count')) === lanePreCount, String(await appAttr('data-string-adds')));
+check('data-string-adds 计数', Number((await appAttr('data-string-adds')) ?? 0) >= 1, String(await appAttr('data-string-adds')));
+await page.waitForTimeout(1700);
+const stringAddedText = readFileSync(WORLD_PATH, 'utf8');
+check('新增弦写回文件（整块插入）', stringAddedText.includes('叙事弦 信任新'));
+check('新增弦保留注释', commentCount(stringAddedText) === originalCommentCount);
+check('新增弦走行级 patch', (await appAttr('data-save-mode')) === 'patch', String(await appAttr('data-save-mode')));
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(160);
+check('ArrowRight 切到新弦', (await attr('data-focus-id')) === '信任新', String(await attr('data-focus-id')));
+await page.keyboard.press('Alt+Backspace');
+await page.waitForTimeout(280);
+check('Alt+Backspace 删除新弦', Number(await attr('data-lane-count')) === lanePreCount && (await attr('data-focus-id')) === '信任', String(await attr('data-focus-id')));
+check('data-string-removes 计数', Number((await appAttr('data-string-removes')) ?? 0) >= 1, String(await appAttr('data-string-removes')));
+await page.waitForTimeout(1700);
+check('删除弦后文件恢复原排版', readFileSync(WORLD_PATH, 'utf8') === stringPreFile);
+// 被规则/回路引用的弦不能被删除
+const focusNow = String(await attr('data-focus-id'));
+if (focusNow !== '信任') {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(120);
+}
+const laneBeforeRefuse = Number(await attr('data-lane-count'));
+await page.keyboard.press('Alt+Backspace');
+await page.waitForTimeout(300);
+check('删除被引用/回路中的弦被拒绝', Number(await attr('data-lane-count')) === laneBeforeRefuse && String(await appAttr('data-save-error')).length > 0, String(await appAttr('data-save-error')));
+
 // ============ 8b. 撤销缓动（不是闪回） ============
 await page.waitForTimeout(300);
 const easingPreFile = readFileSync(WORLD_PATH, 'utf8');

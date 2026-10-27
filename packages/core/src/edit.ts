@@ -1,4 +1,6 @@
 import type { IRCoupling, IRString, WorldIR } from './ir.js';
+import { compileText } from './compiler.js';
+import { serialize } from './serialize.js';
 
 /**
  * IR 编辑操作：调律台的结构编辑都走这里。
@@ -137,4 +139,72 @@ export function removeCoupling(ir: WorldIR, from: string, to: string): EditResul
   if (!coupling) return fail(`没有耦合「${from} → ${to}」`);
   if (coupling.loop) return fail(`耦合「${from} → ${to}」属于回路「${coupling.loop}」，不能单独删除`);
   return { ok: true, ir: { ...ir, couplings: ir.couplings.filter((c) => c.id !== coupling.id) } };
+}
+
+/** 编译闸门：编辑后的图必须仍然是一个合法世界。 */
+function validateWorld(ir: WorldIR): EditResult | { ok: true } {
+  const compiled = compileText(serialize(ir), 'edit.nro');
+  if (!compiled.ok) {
+    const first = compiled.diagnostics.errors[0];
+    return fail(first ? `编辑后的世界编译不过去：${first.code} ${first.message}` : '编辑后的世界编译不过去');
+  }
+  return { ok: true };
+}
+
+function uniqueStringName(ir: WorldIR, base: string): string {
+  if (!ir.strings.some((s) => s.id === base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base}${i}`;
+    if (!ir.strings.some((s) => s.id === candidate)) return candidate;
+  }
+  return `${base}${Date.now()}`;
+}
+
+/**
+ * 新增一根同类弦（v1.6）：继承焦点弦的类型/阈值/响应，基线取当前焦点弦的值。
+ * 只支持顶层数值弦；新弦没有 span，写回时由 patch 插入一整块。
+ */
+export function addString(ir: WorldIR, focusId: string, preferredName?: string): EditResult {
+  const focus = ir.strings.find((s) => s.id === focusId);
+  if (!focus) return fail(`没有弦「${focusId}」`);
+  if (focus.owner) return fail('实体里的弦暂不支持新增');
+  const domain = domainOf(focus);
+  if (!domain || typeof focus.baseline !== 'number') return fail('只能从数值弦新增同类弦');
+  const name = uniqueStringName(ir, preferredName ?? `${focus.name}新`);
+  const next: IRString = {
+    id: name,
+    name,
+    kind: focus.kind,
+    domain: { ...focus.domain },
+    baseline: focus.baseline,
+    ...(focus.verge !== undefined ? { verge: focus.verge } : {}),
+    ...(focus.safe !== undefined ? { safe: focus.safe } : {}),
+    response: focus.response,
+    ...(focus.target ? { target: focus.target } : {}),
+  };
+  const candidate: WorldIR = { ...ir, strings: [...ir.strings, next] };
+  const valid = validateWorld(candidate);
+  if (!valid.ok) return valid;
+  return { ok: true, ir: candidate };
+}
+
+/**
+ * 删除一根弦（v1.6）：只允许「没有其它引用」的弦。
+ * 普通耦合会被一并删除；属于回路、或被规则/信号/公理/结局引用的弦会被编译闸门拒绝。
+ */
+export function removeString(ir: WorldIR, id: string): EditResult {
+  const string = ir.strings.find((s) => s.id === id);
+  if (!string) return fail(`没有弦「${id}」`);
+  if (ir.strings.length <= 1) return fail('世界里至少要留一根弦');
+  if (string.owner) return fail('实体里的弦暂不支持删除');
+  const loopEdge = ir.couplings.find((c) => c.loop && (c.from === id || c.to === id));
+  if (loopEdge) return fail(`弦「${id}」属于回路「${loopEdge.loop}」，不能删除（先编辑回路）`);
+  const candidate: WorldIR = {
+    ...ir,
+    strings: ir.strings.filter((s) => s.id !== id),
+    couplings: ir.couplings.filter((c) => c.from !== id && c.to !== id),
+  };
+  const valid = validateWorld(candidate);
+  if (!valid.ok) return valid;
+  return { ok: true, ir: candidate };
 }

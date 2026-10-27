@@ -2,9 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   addCoupling,
+  addString,
   compileText,
   patchWorldText,
   removeCoupling,
+  removeString,
   setCouplingStrengthBetween,
   setStringBaseline,
   setStringThreshold,
@@ -115,6 +117,30 @@ describe('源文本行级写回（保留注释与排版）', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.text).toBe(text);
+  });
+
+  it('新增再删除弦（连续两次 patch）可逐字节恢复', () => {
+    const { text, ir } = loadTuner();
+    const added = addString(ir, '信任');
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const first = patchWorldText(text, ir, added.ir);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.text).toContain('叙事弦 信任新');
+    expect(commentLines(first.text)).toBe(commentLines(text));
+    const firstCompiled = compileText(first.text, 'added-string.nro');
+    expect(firstCompiled.ok).toBe(true);
+    expect(firstCompiled.ir.strings).toHaveLength(9);
+    const removed = removeString(added.ir, '信任新');
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    const second = patchWorldText(first.text, firstCompiled.ir, removed.ir);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.text).not.toContain('叙事弦 信任新');
+    expect(second.text).toBe(text);
+    expect(commentLines(second.text)).toBe(commentLines(text));
   });
 
   it('删除普通耦合：整行删除，注释保留', () => {
