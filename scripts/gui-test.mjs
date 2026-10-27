@@ -953,6 +953,7 @@ const depthCells = await page.evaluate(() => window.__neurouMatrix?.cellPosition
 const whiteCell = depthCells.find((c) => c.row === 0 && c.col === 0);
 const darkCell = depthCells.find((c) => c.row === 0 && c.col === 2);
 check('越白的格子视差移动越快（伪 3D 差速）', (whiteCell?.dx ?? 0) > (darkCell?.dx ?? 0) + 5, `${whiteCell?.dx?.toFixed(2)} vs ${darkCell?.dx?.toFixed(2)}`);
+check('越白的格子尺寸越大（大格覆盖层）', (whiteCell?.size ?? 0) > (darkCell?.size ?? 0) + 8, `${whiteCell?.size?.toFixed(1)} vs ${darkCell?.size?.toFixed(1)}`);
 await page.mouse.move(720, 450);
 await page.waitForTimeout(700);
 const offsetCenter = JSON.parse(String((await matrixRoot.getAttribute('data-matrix-offset')) ?? '[0,0]'));

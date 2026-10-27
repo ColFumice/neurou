@@ -38,6 +38,8 @@ interface CellPosition {
   /** 该格相对未视差位置的实际位移（含亮度差速）。 */
   dx: number;
   dy: number;
+  /** 当前显示尺寸（基础尺寸 × 数值倍率 × hover/selected spring）。 */
+  size: number;
   value: number;
 }
 
@@ -528,7 +530,13 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       };
     }
 
-    /** 屏幕坐标 → 格子：按每格「亮度差速后的实际位置 + 实际尺寸」命中。 */
+    /** 每格当前显示尺寸：基础尺寸 × 亮度倍率 × hover/selected spring。 */
+    function cellDisplaySize(row: number, col: number, value: number): number {
+      const spring = scales[row]?.[col];
+      return layout.cell * valueScale(value) * (spring?.value ?? SCALE_BASE);
+    }
+
+    /** 屏幕坐标 → 格子：按绘制顺序（大→小）命中最上层的大格。 */
     function cellAtScreen(logicalX: number, logicalY: number, useParallax: boolean): CellRef | null {
       const matrix = currentMatrix();
       if (!matrix) return null;
@@ -536,27 +544,30 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const cols = matrixCols(matrix);
       const groupX = useParallax ? parallaxX.value : 0;
       const groupY = useParallax ? parallaxY.value : 0;
-      let best: CellRef | null = null;
-      let bestDistance = Number.POSITIVE_INFINITY;
+      const candidates: Array<{ row: number; col: number; size: number; centerX: number; centerY: number }> = [];
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
           const value = displayed[r]?.[c] ?? 0;
           const factor = frozenFactors?.[r]?.[c] ?? valueParallaxFactor(value);
           const center = cellCenter(layout, r, c);
-          const centerX = center.x + groupX * factor;
-          const centerY = center.y + groupY * factor;
-          const half = (layout.cell * valueScale(value)) / 2 + HIT_TOLERANCE_PX;
-          const dx = logicalX - centerX;
-          const dy = logicalY - centerY;
-          if (Math.abs(dx) > half || Math.abs(dy) > half) continue;
-          const distance = dx * dx + dy * dy;
-          if (distance < bestDistance) {
-            bestDistance = distance;
-            best = { row: r, col: c };
-          }
+          candidates.push({
+            row: r,
+            col: c,
+            size: cellDisplaySize(r, c, value),
+            centerX: center.x + groupX * factor,
+            centerY: center.y + groupY * factor,
+          });
         }
       }
-      return best;
+      // 大格先命中：重叠区命中最上层大格。
+      candidates.sort((a, b) => b.size - a.size);
+      for (const candidate of candidates) {
+        const half = candidate.size / 2 + HIT_TOLERANCE_PX;
+        if (Math.abs(logicalX - candidate.centerX) <= half && Math.abs(logicalY - candidate.centerY) <= half) {
+          return { row: candidate.row, col: candidate.col };
+        }
+      }
+      return null;
     }
 
     /** 屏幕坐标 → 格子：先按当前视差命中，视差弹簧未追上时退回未平移坐标。 */
@@ -853,31 +864,45 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.scale(scale, scale);
       ctx.translate(-LOGICAL_W / 2, -LOGICAL_H / 2);
 
-      // 格子：尺寸随亮度（0.94..1.05），视差位移随亮度差速（0.78..1.22 × 组 offset）。
+      // 格子：按当前显示尺寸从小到大绘制（大格后画、盖住小格）；选中描边随格一起画，不强制置顶。
+      const cells: Array<{
+        row: number;
+        col: number;
+        value: number;
+        size: number;
+        centerX: number;
+        centerY: number;
+        isSelected: boolean;
+      }> = [];
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
           const base = cellCenter(layout, r, c);
-          const spring = scales[r]?.[c];
           const value = displayed[r]?.[c] ?? 0;
           const factor = frozenFactors?.[r]?.[c] ?? valueParallaxFactor(value);
-          const centerX = base.x + parallaxX.value * factor;
-          const centerY = base.y + parallaxY.value * factor;
-          const isSelected = selected !== null && selected.row === r && selected.col === c;
-          const cellScale = (spring?.value ?? SCALE_BASE) * valueScale(value);
-          drawCell(centerX, centerY, value, cellScale, isSelected);
+          cells.push({
+            row: r,
+            col: c,
+            value,
+            size: cellDisplaySize(r, c, value),
+            centerX: base.x + parallaxX.value * factor,
+            centerY: base.y + parallaxY.value * factor,
+            isSelected: selected !== null && selected.row === r && selected.col === c,
+          });
         }
       }
-
-      // 选中框：弹簧滑动位置（跟组 offset，不跟格子差速）
-      if (selected) {
-        const selectedValue = displayed[selected.row]?.[selected.col] ?? 0;
-        const size = layout.cell * valueScale(selectedValue) * 1.06;
-        const radius = layout.radius + 2;
-        ctx.strokeStyle = rgba(LABEL_RGB, 0.7);
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.roundRect(selectionX.value - size / 2, selectionY.value - size / 2, size, size, radius);
-        ctx.stroke();
+      cells.sort((a, b) => a.size - b.size || a.row - b.row || a.col - b.col);
+      for (const cell of cells) {
+        drawCell(cell.centerX, cell.centerY, cell.value, cell.size / layout.cell, cell.isSelected);
+        if (cell.isSelected) {
+          // 选中框紧跟在选中格之后画，因此会被之后更大的格子盖住（不再强制置顶）。
+          const ringSize = layout.cell * valueScale(cell.value) * 1.06;
+          const radius = layout.radius + 2;
+          ctx.strokeStyle = rgba(LABEL_RGB, 0.7);
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.roundRect(selectionX.value - ringSize / 2, selectionY.value - ringSize / 2, ringSize, ringSize, radius);
+          ctx.stroke();
+        }
       }
 
       // 行标签（左侧）：跟组 offset
@@ -1073,6 +1098,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
               y: Math.round((center.y + dy) * 100) / 100,
               dx: Math.round(dx * 100) / 100,
               dy: Math.round(dy * 100) / 100,
+              size: Math.round(cellDisplaySize(r, c, value) * 100) / 100,
               value: round4(value),
             });
           }
