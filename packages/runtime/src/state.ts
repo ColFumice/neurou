@@ -9,6 +9,24 @@ import type { IRString, WorldIR } from '@neurou/core';
 
 export type RuntimeValue = number | boolean | string | Set<string> | null;
 
+/** 谱的调制模式：固定（持久叠加）或受迫（每拍衰减回锚点）。 */
+export type SpectrumMode = '固定' | '受迫';
+
+/**
+ * 谱在一局里的可变状态。
+ *
+ * - `anchors`：玩家编辑的锚点，永不自行回弹；
+ * - `values`：锚点叠加调制后的当前曲线，每拍末夹回谱的范围；
+ * - `mode`：从 IR 复制过来，便于快照自带完整语义。
+ *
+ * 范围 / 插值 / 循环是编译期固定的元数据，留在 IR 里，不进快照。
+ */
+export interface SpectrumState {
+  anchors: number[];
+  values: number[];
+  mode: SpectrumMode;
+}
+
 export interface PendingDelta {
   due: number;
   id: string;
@@ -45,6 +63,11 @@ export interface WorldState {
   rng: number;
   /** 分支标识，纯为调试与回放 */
   branch: string;
+  /**
+   * 谱的可变状态。旧快照可能没有这个字段；新世界即使没有谱也会有空对象，
+   * 这样快照形状对「有没有谱」保持稳定。
+   */
+  spectra?: Record<string, SpectrumState>;
 }
 
 export function initialValues(world: WorldIR): Record<string, RuntimeValue> {
@@ -70,6 +93,22 @@ export function cloneValue(v: RuntimeValue): RuntimeValue {
   return v instanceof Set ? new Set(v) : v;
 }
 
+function initialSpectra(world: WorldIR): Record<string, SpectrumState> {
+  const out: Record<string, SpectrumState> = {};
+  for (const s of world.spectra) {
+    out[s.id] = { anchors: [...s.bands], values: [...s.bands], mode: s.mode };
+  }
+  return out;
+}
+
+function cloneSpectra(spectra: Record<string, SpectrumState>): Record<string, SpectrumState> {
+  const out: Record<string, SpectrumState> = {};
+  for (const [id, s] of Object.entries(spectra)) {
+    out[id] = { anchors: [...s.anchors], values: [...s.values], mode: s.mode };
+  }
+  return out;
+}
+
 export function createState(world: WorldIR, seed = 1, log = false): WorldState {
   return {
     tick: 0,
@@ -85,6 +124,7 @@ export function createState(world: WorldIR, seed = 1, log = false): WorldState {
     log: [],
     rng: seed >>> 0 || 1,
     branch: 'root',
+    spectra: initialSpectra(world),
   };
 }
 
@@ -105,6 +145,7 @@ export function cloneState(s: WorldState): WorldState {
     log: s.log.map((e) => ({ ...e })),
     rng: s.rng,
     branch: s.branch,
+    ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
   };
 }
 
@@ -122,6 +163,8 @@ export interface SerializedState {
   ended: { id: string; name: string; tick: number } | null;
   rng: number;
   branch: string;
+  /** 与 WorldState.spectra 同形；旧存档可能没有。 */
+  spectra?: Record<string, SpectrumState>;
 }
 
 export function serializeState(s: WorldState): SerializedState {
@@ -140,6 +183,7 @@ export function serializeState(s: WorldState): SerializedState {
     ended: s.ended ? { ...s.ended } : null,
     rng: s.rng,
     branch: s.branch,
+    ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
   };
 }
 
@@ -160,6 +204,7 @@ export function deserializeState(s: SerializedState): WorldState {
     log: [],
     rng: s.rng,
     branch: s.branch,
+    ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
   };
 }
 

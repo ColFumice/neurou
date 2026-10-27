@@ -23,6 +23,7 @@ function spectrumShape(ir: WorldIR) {
     max: s.max,
     interpolation: s.interpolation,
     loop: s.loop,
+    mode: s.mode,
   }));
 }
 
@@ -44,11 +45,12 @@ describe('谱：解析、编译与验证', () => {
       max: 1,
       interpolation: '平滑',
       loop: true,
+      mode: '固定',
     });
     expect(spectrum.span).toBeDefined();
   });
 
-  it('省略范围 / 插值 / 循环时取默认值，序列化也省略默认值', () => {
+  it('省略范围 / 插值 / 循环 / 模式时取默认值，序列化也省略默认值', () => {
     const r = compileWorld(`${STRING}谱 默认地形
   段 0 0.5 1
 `);
@@ -61,7 +63,10 @@ describe('谱：解析、编译与验证', () => {
       max: 1,
       interpolation: '线性',
       loop: false,
+      mode: '固定',
     });
+    const decl = r.program.decls.find((d) => d.k === 'spectrum');
+    expect(decl?.mode).toBe('固定');
 
     const text = serialize(r.ir);
     expect(text).toContain('谱 默认地形');
@@ -69,6 +74,52 @@ describe('谱：解析、编译与验证', () => {
     expect(text).not.toContain('范围');
     expect(text).not.toContain('插值');
     expect(text).not.toContain('循环');
+    expect(text).not.toContain('模式');
+  });
+
+  it('显式写「模式 固定」与默认等价，序列化时省略', () => {
+    const r = compileWorld(`${STRING}谱 显式固定
+  段 0 0.5 1
+  模式 固定
+`);
+
+    expect(r.ok).toBe(true);
+    expect(r.ir.spectra[0]?.mode).toBe('固定');
+    expect(serialize(r.ir)).not.toContain('模式');
+  });
+
+  it('「模式 受迫」可解析、编译并依次写回，往返与幂等', () => {
+    const r = compileWorld(`${STRING}谱 受迫地形
+  段 0.1 0.4 0.8 0.5
+  范围 0..1
+  插值 平滑
+  循环 是
+  模式 受迫
+`);
+    expect(r.ok).toBe(true);
+
+    const decl = r.program.decls.find((d) => d.k === 'spectrum');
+    expect(decl?.mode).toBe('受迫');
+    expect(r.ir.spectra[0]).toMatchObject({
+      bands: [0.1, 0.4, 0.8, 0.5],
+      min: 0,
+      max: 1,
+      interpolation: '平滑',
+      loop: true,
+      mode: '受迫',
+    });
+
+    const text = serialize(r.ir);
+    expect(text).toContain('  模式 受迫');
+    // 模式写在谱块最后，符合规范顺序。
+    expect(text.indexOf('  循环 是')).toBeLessThan(text.indexOf('  模式 受迫'));
+
+    const again = compileText(text, 'roundtrip-mode.nro');
+    expect(again.ok).toBe(true);
+    expect(spectrumShape(again.ir)).toEqual(spectrumShape(r.ir));
+    expect(again.ir.spectra[0]?.mode).toBe('受迫');
+    expect(serialize(again.ir)).toBe(text);
+    expect(serialize(r.ir)).toBe(text);
   });
 
   it('音段可以是负数，范围也可以是负区间', () => {
@@ -193,6 +244,31 @@ describe('谱：解析、编译与验证', () => {
     expect(
       unknownLoop.diagnostics.errors.some(
         (d) => d.code === 'NRO1100' && d.message.includes('只能写「是」或「否」'),
+      ),
+    ).toBe(true);
+  });
+
+  it('未知模式、重复模式是语法诊断', () => {
+    const unknownMode = compileWorld(`${STRING}谱 杂项
+  段 0.5
+  模式 随机
+`);
+    expect(unknownMode.ok).toBe(false);
+    expect(
+      unknownMode.diagnostics.errors.some(
+        (d) => d.code === 'NRO1100' && d.message.includes('不认识的模式') && d.hint?.includes('固定、受迫'),
+      ),
+    ).toBe(true);
+
+    const repeatedMode = compileWorld(`${STRING}谱 重复模式
+  段 0.5
+  模式 固定
+  模式 受迫
+`);
+    expect(repeatedMode.ok).toBe(false);
+    expect(
+      repeatedMode.diagnostics.errors.some(
+        (d) => d.code === 'NRO1100' && d.message.includes('「模式」只能声明一次'),
       ),
     ).toBe(true);
   });

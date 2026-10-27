@@ -185,7 +185,10 @@ export interface EndingDecl extends DeclBase {
 
 /**
  * 谱：一组采样音段，描述某个维度随参数变化的曲线。
- * 目前只是编译期的数据模型；运行时/音频的读取留给后续阶段。
+ *
+ * `mode` 决定调制如何留在谱上：
+ *   - `固定`（默认）：调制持久叠加，锚点即稳态；
+ *   - `受迫`：调制每拍向锚点衰减，锚点本身不反弹。
  */
 export interface SpectrumDecl extends DeclBase {
   k: 'spectrum';
@@ -195,6 +198,7 @@ export interface SpectrumDecl extends DeclBase {
   max: number;
   interpolation: '线性' | '平滑';
   loop: boolean;
+  mode: '固定' | '受迫';
 }
 
 export type Decl =

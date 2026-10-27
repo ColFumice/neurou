@@ -153,8 +153,8 @@ export interface IRPhase {
 }
 
 /**
- * 谱：一组采样音段 + 插值方式。
- * 目前只有编译期数据模型；运行时/音频读取留给后续阶段。
+ * 谱：一组采样音段 + 插值方式 + 调制模式。
+ * 运行时读取见 packages/runtime/src/engine.ts。
  */
 export interface IRSpectrum {
   id: string;
@@ -164,6 +164,8 @@ export interface IRSpectrum {
   max: number;
   interpolation: '线性' | '平滑';
   loop: boolean;
+  /** 调制模式：固定（持久叠加）或受迫（每拍衰减回锚点）。 */
+  mode: '固定' | '受迫';
   span?: Span;
 }
 

@@ -6,12 +6,14 @@ import type {
   IREnding,
   IRRule,
   IRSignal,
+  IRSpectrum,
   IRString,
   WorldIR,
 } from '@neurou/core';
 import { evalExpr, asNumber, truthy } from './eval.js';
 import {
   type RuntimeValue,
+  type SpectrumMode,
   type WorldState,
   type TimelineEvent,
   clampString,
@@ -51,6 +53,39 @@ const MAX_CUES = 400;
 const MAX_LOG = 2000;
 
 /**
+ * 受迫模式每拍向锚点衰减后保留的偏移比例。
+ * 偏移 0.3 在 n 拍后剩 0.3 × 0.75ⁿ；锚点本身不参与衰减。
+ */
+export const FORCED_DECAY = 0.75;
+
+/** 一条谱的只读快照（数组是防御性副本）。 */
+export interface SpectrumSnapshot {
+  id: string;
+  mode: SpectrumMode;
+  min: number;
+  max: number;
+  interpolation: IRSpectrum['interpolation'];
+  loop: boolean;
+  /** 玩家编辑的锚点（authored bands 的当前值）。 */
+  anchors: number[];
+  /** 当前曲线：锚点 + 尚未衰减的调制，已夹在 [min, max]。 */
+  values: number[];
+}
+
+/** 调制目标：单个段下标（0 基），或闭区间 [from, to]。 */
+export type SpectrumTarget = number | { from: number; to: number };
+
+/** 谱 API 的统一结果：成功没有负载，失败带中文原因。 */
+export type SpectrumResult = { ok: true } | { ok: false; error: string };
+
+interface PendingSpectrumModulation {
+  id: string;
+  from: number;
+  to: number;
+  delta: number;
+}
+
+/**
  * 世界运行时。
  *
  * 一拍 = 一次「呼吸」：投递上一拍排队的耦合 → 执行玩家动作 → 按偏序判定力迫 →
@@ -63,6 +98,7 @@ export class Universe {
   state: WorldState;
 
   readonly strings = new Map<string, IRString>();
+  private readonly spectra = new Map<string, IRSpectrum>();
   readonly couplings: IRCoupling[];
   readonly forces: IRRule[];
   readonly chords = new Map<string, IRRule>();
@@ -74,6 +110,8 @@ export class Universe {
   private readonly actionList: IRRule[];
 
   private queuedAction: string | undefined;
+  /** 谱调制队列：modulateSpectrum 入队，下一拍 tick 顺序应用。 */
+  private pendingSpectrumModulations: PendingSpectrumModulation[] = [];
   private readonly logEnabled: boolean;
 
   /** 统计（每局一份） */
@@ -97,6 +135,7 @@ export class Universe {
   constructor(world: WorldIR, opts: UniverseOptions = {}) {
     this.ir = world;
     for (const s of world.strings) this.strings.set(s.id, s);
+    for (const s of world.spectra) this.spectra.set(s.id, s);
     this.couplings = world.couplings;
     this.forces = world.rules.filter((r) => r.kind === 'forcing');
     for (const r of world.rules) {
@@ -113,6 +152,7 @@ export class Universe {
       this.couplingByFrom.set(c.from, arr);
     }
     this.state = createState(world, opts.seed ?? 1, opts.log ?? false);
+    this.ensureSpectrumState();
     this.logEnabled = opts.log ?? false;
     this.prevValues = { ...this.state.values };
     if (this.logEnabled) this.log({ tick: 0, kind: 'ending', id: 'world.start' });
@@ -165,6 +205,59 @@ export class Universe {
       }
       return row;
     });
+  }
+
+  /**
+   * 读取一条谱的当前快照。返回的数组是副本，修改它不会影响世界。
+   * 未知 id（或该谱不在当前状态里）返回 undefined。
+   */
+  getSpectrum(id: string): SpectrumSnapshot | undefined {
+    const ir = this.spectra.get(id);
+    const st = this.state.spectra?.[id];
+    if (!ir || !st) return undefined;
+    return {
+      id: ir.id,
+      mode: st.mode,
+      min: ir.min,
+      max: ir.max,
+      interpolation: ir.interpolation,
+      loop: ir.loop,
+      anchors: [...st.anchors],
+      values: [...st.values],
+    };
+  }
+
+  /**
+   * 在归一化横轴 [0, 1] 上采样一条谱的当前曲线。
+   *
+   * - 线性：相邻段之间直线插值；段 i 落在 i / (n - 1)；
+   * - 平滑：余弦插值 t' = (1 - cos(πt)) / 2，中点和线性一致，段点处导数为 0；
+   * - `loop` 为 false 时位置夹到 [0, 1]；为 true 时按周期 [0, 1) 回绕
+   *   （position = 1 等价于 0，负数同样回绕）。
+   *
+   * 未知 id、空谱或非有限位置返回 undefined。
+   */
+  getSpectrumAt(id: string, position: number): number | undefined {
+    const ir = this.spectra.get(id);
+    const st = this.state.spectra?.[id];
+    if (!ir || !st || !Number.isFinite(position)) return undefined;
+
+    const n = st.values.length;
+    if (n === 0) return undefined;
+    const p = ir.loop ? ((position % 1) + 1) % 1 : Math.min(1, Math.max(0, position));
+    if (n === 1) return st.values[0]!;
+
+    const x = p * (n - 1);
+    const i = Math.floor(x);
+    if (i >= n - 1) return st.values[n - 1]!;
+    const a = st.values[i]!;
+    const b = st.values[i + 1]!;
+    const t = x - i;
+    if (ir.interpolation === '平滑') {
+      const eased = (1 - Math.cos(Math.PI * t)) / 2;
+      return a + (b - a) * eased;
+    }
+    return a + (b - a) * t;
   }
 
   // ---------- 操作 ----------
@@ -223,6 +316,85 @@ export class Universe {
         return 0;
       }
     }
+  }
+
+  /**
+   * 给一条谱的指定段（或闭区间段）排队一次调制。
+   *
+   * 调制不会立即改变曲线：它和 inject 一样面向下一拍，`tick()` 时按入队
+   * 顺序逐条应用，每条应用后夹回谱的 [min, max]。delta 可以为负。
+   */
+  modulateSpectrum(id: string, target: SpectrumTarget, delta: number): SpectrumResult {
+    const ir = this.spectra.get(id);
+    if (!ir) return { ok: false, error: `不存在的谱「${id}」。` };
+    const count = ir.bands.length;
+
+    let from: number;
+    let to: number;
+    if (typeof target === 'number') {
+      if (!Number.isInteger(target) || target < 0 || target >= count) {
+        return {
+          ok: false,
+          error: `谱「${id}」的频段下标 ${target} 无效：必须是 0..${count - 1} 内的整数。`,
+        };
+      }
+      from = target;
+      to = target;
+    } else {
+      const f = target.from;
+      const t = target.to;
+      if (!Number.isInteger(f) || !Number.isInteger(t) || f < 0 || t < 0 || f >= count || t >= count) {
+        return {
+          ok: false,
+          error: `谱「${id}」的频段范围 ${String(f)}..${String(t)} 无效：必须是 0..${count - 1} 内的整数。`,
+        };
+      }
+      if (f > t) {
+        return {
+          ok: false,
+          error: `谱「${id}」的频段范围 ${f}..${t} 无效：起点不能大于终点。`,
+        };
+      }
+      from = f;
+      to = t;
+    }
+
+    if (!Number.isFinite(delta)) {
+      return { ok: false, error: `谱「${id}」的调制量 ${String(delta)} 不是有限数字。` };
+    }
+    this.pendingSpectrumModulations.push({ id, from, to, delta });
+    return { ok: true };
+  }
+
+  /**
+   * 玩家拖动一个段点：改写锚点，并把同样的位移叠加到当前值上，
+   * 从而保留「锚点 + 调制」的相对偏移；结果一律夹在 [min, max]。
+   * 锚点永不回弹，调制如果之后还在，会继续生效。
+   */
+  setSpectrumAnchor(id: string, index: number, value: number): SpectrumResult {
+    const ir = this.spectra.get(id);
+    const st = this.state.spectra?.[id];
+    if (!ir || !st) return { ok: false, error: `不存在的谱「${id}」。` };
+
+    if (!Number.isInteger(index) || index < 0 || index >= ir.bands.length) {
+      return {
+        ok: false,
+        error: `谱「${id}」的频段下标 ${index} 无效：必须是 0..${ir.bands.length - 1} 内的整数。`,
+      };
+    }
+    if (!Number.isFinite(value)) {
+      return {
+        ok: false,
+        error: `谱「${id}」的第 ${index + 1} 段锚点值 ${String(value)} 不是有限数字。`,
+      };
+    }
+
+    const nextAnchor = clampSpectrum(ir, value);
+    const oldAnchor = st.anchors[index]!;
+    const oldValue = st.values[index]!;
+    st.anchors[index] = nextAnchor;
+    st.values[index] = clampSpectrum(ir, oldValue + (nextAnchor - oldAnchor));
+    return { ok: true };
   }
 
   /** 把一次外部注入的变化排进耦合队列（与 tick 内 propagate 同一套公式）。 */
@@ -341,10 +513,13 @@ export class Universe {
     // 9. 段落推进
     this.advancePhase();
 
+    // 10. 谱：受迫模式先向锚点衰减，再按入队顺序叠加本拍调制（锚点不动）。
+    this.applySpectrumTick();
+
     this.stats.ticks++;
     this.state.tick = t + 1;
 
-    // 10. 死局检测：进入下一拍后仍没有任何可做的事（「忙」不算死局）
+    // 11. 死局检测：进入下一拍后仍没有任何可做的事（「忙」不算死局）
     if (!this.state.ended && !this.anyActionAllowed()) {
       this.stats.deadStates++;
     }
@@ -371,12 +546,17 @@ export class Universe {
 
   restore(s: WorldState): void {
     this.state = cloneState(s);
+    // 旧快照可能没有 spectra：用 IR 里的作者数据补齐，避免恢复后谱凭空消失。
+    this.ensureSpectrumState();
   }
 
   /** 从当前状态分叉出一个新宇宙（力迫的 V[G]）。 */
   branch(label?: string): Universe {
     const u = new Universe(this.ir, { seed: this.state.rng, log: this.logEnabled });
     u.state = cloneState(this.state);
+    u.ensureSpectrumState();
+    // 尚未 tick 的谱调制也是「当下状态」的一部分；分叉时一起带走。
+    u.pendingSpectrumModulations = this.pendingSpectrumModulations.map((m) => ({ ...m }));
     if (label) u.state.branch = label;
     return u;
   }
@@ -390,6 +570,52 @@ export class Universe {
   }
 
   // ---------- 内部 ----------
+
+  /** 确保每条 IR 谱在当前状态里都有可变槽位（兼容没有 spectra 的旧快照）。 */
+  private ensureSpectrumState(): void {
+    if (!this.state.spectra) this.state.spectra = {};
+    for (const ir of this.spectra.values()) {
+      if (!this.state.spectra[ir.id]) {
+        this.state.spectra[ir.id] = { anchors: [...ir.bands], values: [...ir.bands], mode: ir.mode };
+      }
+    }
+  }
+
+  /**
+   * 谱的一拍：
+   *   1. 受迫模式的每条谱先把当前偏移乘 FORCED_DECAY 收回锚点（每拍一次）；
+   *   2. 再按入队顺序应用本拍调制，每次写入都夹回范围；
+   *   3. 清空队列——调制只影响下一拍。
+   */
+  private applySpectrumTick(): void {
+    const spectra = this.state.spectra;
+    if (!spectra) return;
+
+    for (const [id, st] of Object.entries(spectra)) {
+      if (st.mode !== '受迫') continue;
+      const ir = this.spectra.get(id);
+      if (!ir) continue;
+      const n = Math.min(st.anchors.length, st.values.length);
+      for (let i = 0; i < n; i++) {
+        const anchor = st.anchors[i]!;
+        const value = st.values[i]!;
+        st.values[i] = clampSpectrum(ir, anchor + (value - anchor) * FORCED_DECAY);
+      }
+    }
+
+    if (this.pendingSpectrumModulations.length === 0) return;
+    for (const mod of this.pendingSpectrumModulations) {
+      const st = spectra[mod.id];
+      const ir = this.spectra.get(mod.id);
+      if (!st || !ir) continue;
+      for (let i = mod.from; i <= mod.to; i++) {
+        const value = st.values[i];
+        if (value === undefined) continue;
+        st.values[i] = clampSpectrum(ir, value + mod.delta);
+      }
+    }
+    this.pendingSpectrumModulations = [];
+  }
 
   private rulesById(id: string): IRRule | undefined {
     return this.forces.find((r) => r.id === id) ?? this.chords.get(id) ?? this.actions.get(id);
@@ -614,6 +840,10 @@ function rangeOf(s: IRString, fallback: number): number {
   if (d.type !== 'number') return fallback;
   if (d.min !== undefined && d.max !== undefined && d.max > d.min) return d.max - d.min;
   return fallback;
+}
+
+function clampSpectrum(spectrum: IRSpectrum, value: number): number {
+  return Math.min(spectrum.max, Math.max(spectrum.min, value));
 }
 
 function curveFactor(curve: IRCoupling['curve'], magnitude: number): number {

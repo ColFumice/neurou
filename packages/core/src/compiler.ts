@@ -241,6 +241,14 @@ class Compiler {
       interpolation = '线性';
     }
 
+    let mode: IRSpectrum['mode'] = d.mode ?? '固定';
+    if (mode !== '固定' && mode !== '受迫') {
+      this.error('NRO2100', `谱「${d.name}」的模式「${String(mode)}」无效。`, d.span, {
+        hint: '可用：固定、受迫。',
+      });
+      mode = '固定';
+    }
+
     if (d.bands.length === 0) {
       this.error('NRO2100', `谱「${d.name}」的「段」至少需要一个音段值。`, d.span, {
         hint: '空谱无法插值——写一行「段 0.1 0.4 0.8 0.5」。',
@@ -272,6 +280,7 @@ class Compiler {
       max,
       interpolation,
       loop: d.loop,
+      mode,
       span: d.span,
     });
   }

@@ -33,6 +33,7 @@ class ParseError extends Error {}
 const RESPONSE_CURVES: ResponseCurve[] = ['线性', '缓入', '缓出', '阶跃'];
 
 const SPECTRUM_INTERPOLATIONS: readonly string[] = ['线性', '平滑'];
+const SPECTRUM_MODES: readonly string[] = ['固定', '受迫'];
 
 /**
  * 递归下降解析器，按缩进分块。
@@ -454,6 +455,7 @@ class Parser {
    *   范围 0..1
    *   插值 平滑
    *   循环 是
+   *   模式 受迫
    *
    * 「段」的条数、取值范围等语义留给编译器；这里只负责把写法解析干净，
    * 让语法错误指到具体的 token。
@@ -469,11 +471,13 @@ class Parser {
       max: 1,
       interpolation: '线性',
       loop: false,
+      mode: '固定',
       span: this.spanFrom(start),
     };
     this.finishLine();
 
     let sawBands = false;
+    let sawMode = false;
     if (this.enterBlock(`谱「${name}」`)) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -539,8 +543,25 @@ class Parser {
             this.finishLine();
             break;
           }
+          case '模式': {
+            if (sawMode) {
+              this.fail(`谱「${name}」的「模式」只能声明一次。`, fieldStart.span, '把模式写在一行，例如「模式 受迫」。');
+              this.skipToLineEnd();
+              break;
+            }
+            sawMode = true;
+            const valueStart = this.peek();
+            const value = this.readName('模式');
+            if (!SPECTRUM_MODES.includes(value)) {
+              this.fail(`不认识的模式「${value}」。`, valueStart.span, '可用：固定、受迫。');
+            } else {
+              decl.mode = value as SpectrumDecl['mode'];
+            }
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环。');
+            this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环、模式。');
             this.skipToLineEnd();
         }
       }

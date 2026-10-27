@@ -6,10 +6,14 @@
 
 export {
   Universe,
+  FORCED_DECAY,
   type EmittedCue,
   type AxiomViolation,
   type TickResult,
   type UniverseOptions,
+  type SpectrumSnapshot,
+  type SpectrumTarget,
+  type SpectrumResult,
 } from './engine.js';
 export { evalExpr, asNumber, truthy, equalValues, compareValues } from './eval.js';
 export {
@@ -18,6 +22,8 @@ export {
   type SerializedState,
   type TimelineEvent,
   type PendingDelta,
+  type SpectrumMode,
+  type SpectrumState,
   createState,
   cloneState,
   serializeState,

@@ -201,7 +201,7 @@ function entityBlock(w: Writer, entity: IREntity, strings: IRString[]): void {
 
 function spectrumBlock(w: Writer, spectrum: IRSpectrum): void {
   w.line(0, `谱 ${spectrum.name}`);
-  // 默认值不写回：0..1 / 线性 / 不循环。重新编译时由语法默认值补齐。
+  // 默认值不写回：0..1 / 线性 / 不循环 / 固定模式。重新编译时由语法默认值补齐。
   const bands = spectrum.bands.map((b) => numberText(b)).join(' ');
   w.line(1, bands ? `段 ${bands}` : '段');
   if (spectrum.min !== 0 || spectrum.max !== 1) {
@@ -209,6 +209,7 @@ function spectrumBlock(w: Writer, spectrum: IRSpectrum): void {
   }
   if (spectrum.interpolation !== '线性') w.line(1, `插值 ${spectrum.interpolation}`);
   if (spectrum.loop) w.line(1, '循环 是');
+  if (spectrum.mode !== '固定') w.line(1, `模式 ${spectrum.mode}`);
   w.blank();
 }
 
