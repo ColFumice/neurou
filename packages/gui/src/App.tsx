@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  addCoupling,
   compileText,
+  findCoupling,
   patchWorldText,
+  removeCoupling,
   serialize,
   setCouplingStrengthBetween,
   setStringThreshold,
@@ -165,6 +168,8 @@ export function App() {
   const [redoDepth, setRedoDepth] = useState(0);
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
   const [couplingEdits, setCouplingEdits] = useState(0);
+  const [couplingAdds, setCouplingAdds] = useState(0);
+  const [couplingRemoves, setCouplingRemoves] = useState(0);
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
   /** 撤销/重做的缓动状态。 */
   const [transition, setTransition] = useState<UndoTransition | null>(null);
@@ -434,6 +439,8 @@ export function App() {
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
       data-coupling-edits={couplingEdits}
+      data-coupling-adds={couplingAdds}
+      data-coupling-removes={couplingRemoves}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -522,6 +529,26 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  /** Shift+Enter：已有方向上的耦合则删除，否则新增（默认同向 0.2）。 */
+  const onToggleCoupling = (fromId: string, toId: string): void => {
+    if (transitionRef.current) return;
+    const existing = findCoupling(worldIR, fromId, toId);
+    const result = existing ? removeCoupling(worldIR, fromId, toId) : addCoupling(worldIR, fromId, toId);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setCouplingEdits((n) => n + 1);
+    if (existing) setCouplingRemoves((n) => n + 1);
+    else setCouplingAdds((n) => n + 1);
+    const updated = findCoupling(result.ir, fromId, toId);
+    setLastCoupling({ from: fromId, to: toId, strength: updated?.strength ?? 0 });
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
   return shell(
     <StringField
       view={view}
@@ -529,6 +556,7 @@ export function App() {
       onEditThreshold={onEditThreshold}
       onCycleString={onCycleString}
       onEditCoupling={onEditCoupling}
+      onToggleCoupling={onToggleCoupling}
     />,
     false,
   );

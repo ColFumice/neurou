@@ -28,6 +28,8 @@ export {
   setStringThreshold,
   setCouplingStrength,
   setCouplingStrengthBetween,
+  addCoupling,
+  removeCoupling,
   findCoupling,
   type ThresholdName,
   type EditResult,

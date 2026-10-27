@@ -71,7 +71,7 @@ function applyEdits(text: string, edits: TextEdit[]): string {
   return output;
 }
 
-/** 不参与行级 patch 的字段签名；只要它们变了，就认为需要回退规范序列化。 */
+/** 不参与行级 patch 的结构字段签名；耦合单独比较（允许增删）。 */
 function structuralSignature(ir: WorldIR): string {
   const payload = {
     name: ir.name,
@@ -87,16 +87,7 @@ function structuralSignature(ir: WorldIR): string {
       target: s.target,
       note: s.note,
     })),
-    couplings: ir.couplings.map((c) => ({
-      from: c.from,
-      to: c.to,
-      polarity: c.polarity,
-      delay: c.delay,
-      curve: c.curve,
-      guard: c.guard,
-      loop: c.loop,
-    })),
-    loops: ir.loops,
+    loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
     axioms: ir.axioms,
     signals: ir.signals,
@@ -105,6 +96,68 @@ function structuralSignature(ir: WorldIR): string {
   };
   // span 是源位置，patch 前后必然变化；比较语义时要去掉。
   return JSON.stringify(payload, (key, value) => (key === 'span' ? undefined : value));
+}
+
+function couplingKey(coupling: IRCoupling): string {
+  return `${coupling.from}->${coupling.to}`;
+}
+
+function couplingStructure(coupling: IRCoupling): string {
+  return JSON.stringify({
+    polarity: coupling.polarity,
+    delay: coupling.delay,
+    curve: coupling.curve,
+    guard: coupling.guard,
+    loop: coupling.loop,
+  });
+}
+
+/** 删除一条耦合声明所占的整行（行内写法或块写法）。 */
+function deleteCouplingEdit(text: string, coupling: IRCoupling): TextEdit | { error: string } {
+  if (!coupling.span) return { error: `耦合「${coupling.from} → ${coupling.to}」没有源位置` };
+  const lines = linesIn(text, coupling.span.start.offset, coupling.span.end.offset);
+  const first = lines[0];
+  const last = lines[lines.length - 1];
+  if (!first || !last) return { error: `耦合「${coupling.from} → ${coupling.to}」所在行无法识别` };
+  return { start: first.start, end: last.end, text: '' };
+}
+
+/** 在已有耦合声明之后（没有则首个顶层段之前/文件末尾）插入新耦合行。 */
+function insertCouplingsEdit(
+  text: string,
+  baseIR: WorldIR,
+  added: { from: string; to: string; polarity: 1 | -1; strength: number }[],
+  eol: string,
+): TextEdit {
+  const lines = added.map(
+    (c) => `耦合 ${c.from} → ${c.to} ${c.polarity === 1 ? '同向' : '反向'} ${formatNumber(c.strength)}`,
+  );
+  const block = lines.join(eol) + eol;
+  const spans = baseIR.couplings.filter((c) => !c.loop && c.span).map((c) => c.span!.end.offset);
+  if (spans.length > 0) {
+    const pos = Math.max(...spans);
+    const newline = text.indexOf('\n', pos);
+    const at = newline === -1 ? text.length : newline + 1;
+    const prefix = at === text.length && !text.endsWith('\n') ? eol : '';
+    return { start: at, end: at, text: `${prefix}${block}` };
+  }
+  // 没有普通耦合：插在第一个顶层的「回路/力迫/规则/结局/信号/相位/实体」段之前，否则文末。
+  const top = /^(回路|力迫|规则|结局|信号|相位|实体)/;
+  let cursor = 0;
+  let at = text.length;
+  while (cursor < text.length) {
+    const newline = text.indexOf('\n', cursor);
+    const lineEnd = newline === -1 ? text.length : newline;
+    const content = text.slice(cursor, lineEnd).trimStart();
+    if (top.test(content)) {
+      at = cursor;
+      break;
+    }
+    if (newline === -1) break;
+    cursor = newline + 1;
+  }
+  const prefix = at === text.length && !text.endsWith('\n') ? eol : '';
+  return { start: at, end: at, text: `${prefix}${block}` };
 }
 
 function stringFieldEdit(
@@ -181,8 +234,8 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   if (structuralSignature(baseIR) !== structuralSignature(editedIR)) {
     return { ok: false, reason: '编辑涉及结构变化，需要回退规范序列化' };
   }
-  if (baseIR.strings.length !== editedIR.strings.length || baseIR.couplings.length !== editedIR.couplings.length) {
-    return { ok: false, reason: '编辑涉及增删弦/耦合，需要回退规范序列化' };
+  if (baseIR.strings.length !== editedIR.strings.length) {
+    return { ok: false, reason: '编辑涉及增删弦，需要回退规范序列化' };
   }
 
   // SourceFile 在编译时把 CRLF 统一成 LF，span 偏移也随之基于 LF；
@@ -215,14 +268,38 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
     }
   }
 
-  for (const edited of editedIR.couplings) {
-    const base = baseIR.couplings.find((c) => c.from === edited.from && c.to === edited.to && c.loop === edited.loop);
-    if (!base) return { ok: false, reason: '耦合是新增/删除的，无法行级写回' };
+  const baseCouplings = new Map(baseIR.couplings.map((c) => [couplingKey(c), c]));
+  const editedCouplings = new Map(editedIR.couplings.map((c) => [couplingKey(c), c]));
+  const added: { from: string; to: string; polarity: 1 | -1; strength: number }[] = [];
+
+  for (const [key, base] of baseCouplings) {
+    const edited = editedCouplings.get(key);
+    if (!edited) {
+      if (base.loop) return { ok: false, reason: `耦合「${base.from} → ${base.to}」属于回路，不能单独删除` };
+      const result = deleteCouplingEdit(normalized, base);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${base.from}→${base.to}.removed`);
+      continue;
+    }
+    if (couplingStructure(base) !== couplingStructure(edited)) {
+      return { ok: false, reason: `耦合「${base.from} → ${base.to}」的极性/延迟/曲线/回路发生变化，需要回退规范序列化` };
+    }
     if (Math.abs(base.strength - edited.strength) < 1e-9) continue;
     const result = couplingStrengthEdit(normalized, base, edited.strength);
     if ('error' in result) return { ok: false, reason: result.error };
     edits.push(result);
-    changed.push(`${edited.from}→${edited.to}.strength`);
+    changed.push(`${base.from}→${base.to}.strength`);
+  }
+
+  for (const [key, edited] of editedCouplings) {
+    if (baseCouplings.has(key)) continue;
+    if (edited.loop) return { ok: false, reason: '还不能把新耦合直接加进回路' };
+    added.push({ from: edited.from, to: edited.to, polarity: edited.polarity, strength: edited.strength });
+    changed.push(`${edited.from}→${edited.to}.added`);
+  }
+  if (added.length > 0) {
+    edits.push(insertCouplingsEdit(normalized, baseIR, added, eol));
   }
 
   if (edits.length === 0) return { ok: true, text: normalized, changed: [] };

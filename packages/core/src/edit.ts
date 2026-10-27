@@ -98,3 +98,43 @@ export function setCouplingStrengthBetween(
   if (!coupling) return fail(`没有耦合「${from} → ${to}」`);
   return setCouplingStrength(ir, coupling.id, strength);
 }
+
+/**
+ * 新增一条耦合（调律台 v1.5 的 Shift+Enter）。
+ * 默认同向 0.2、无延迟；span 留空——写回时由 patch 插入新行。
+ */
+export function addCoupling(
+  ir: WorldIR,
+  from: string,
+  to: string,
+  options: { strength?: number; polarity?: 1 | -1; delay?: number } = {},
+): EditResult {
+  if (from === to) return fail('一根弦不能耦合到自己');
+  if (!ir.strings.some((s) => s.id === from)) return fail(`没有弦「${from}」`);
+  if (!ir.strings.some((s) => s.id === to)) return fail(`没有弦「${to}」`);
+  if (findCoupling(ir, from, to)) return fail(`已经有耦合「${from} → ${to}」`);
+  const strength = options.strength ?? 0.2;
+  const polarity = options.polarity ?? 1;
+  const delay = options.delay ?? 0;
+  if (!Number.isFinite(strength) || strength < 0 || strength > 2) return fail('耦合强度必须在 0..2 之间');
+  if (polarity !== 1 && polarity !== -1) return fail('耦合极性只能是同向或反向');
+  if (!Number.isInteger(delay) || delay < 0) return fail('耦合延迟必须是非负整数');
+  const coupling: IRCoupling = {
+    id: `c:${from}->${to}:${ir.couplings.length}`,
+    from,
+    to,
+    polarity,
+    strength: round(strength),
+    delay,
+    curve: '线性',
+  };
+  return { ok: true, ir: { ...ir, couplings: [...ir.couplings, coupling] } };
+}
+
+/** 删除一条耦合（回路里的边不能单独删，否则回路不成立）。 */
+export function removeCoupling(ir: WorldIR, from: string, to: string): EditResult {
+  const coupling = findCoupling(ir, from, to);
+  if (!coupling) return fail(`没有耦合「${from} → ${to}」`);
+  if (coupling.loop) return fail(`耦合「${from} → ${to}」属于回路「${coupling.loop}」，不能单独删除`);
+  return { ok: true, ir: { ...ir, couplings: ir.couplings.filter((c) => c.id !== coupling.id) } };
+}

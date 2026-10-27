@@ -100,10 +100,10 @@ const COUPLING_STEP = 0.05;
 const COUPLING_MAX = 2;
 const COUPLING_INSET_PX = 10;
 
-/** 按住绷弦：长按不动 ≥HOLD_MS 后把按住点钉成一个局部波峰。 */
+/** 按住绷弦：长按不动 ≥HOLD_MS 后把按住点钉成一个平滑的局部波峰。 */
 const HOLD_MS = 180;
+/** 平滑正弦峰的半宽（halfWidth）。 */
 const PIN_RADIUS_PX = 44;
-const TENSION_DX_PX = 80;
 
 /** 世界逐拍 → 视觉波。 */
 const TICK_WAVE_RATIO = 1.6;
@@ -246,6 +246,8 @@ export interface StringFieldProps {
   onCycleString?: (kind: StringKind, dir: 1 | -1) => void;
   /** 滚轮调焦点弦的一条耦合强度（0..2，App 会 debounce 写回）。 */
   onEditCoupling?: (from: string, to: string, strength: number, persist?: boolean) => void;
+  /** Shift+Enter：在焦点弦与 link 目标之间增删一条耦合（App 判断 add/remove 并写回）。 */
+  onToggleCoupling?: (fromId: string, toId: string) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -377,6 +379,8 @@ declare global {
         direction: 1 | -1;
         heldMs: number;
       };
+      /** 增删耦合的 link 目标（验收用）。 */
+      linkTarget: () => { index: number; id: string; name: string; existing: boolean } | null;
       rms: () => number;
     };
   }
@@ -392,6 +396,7 @@ export function StringField({
   onEditThreshold,
   onCycleString,
   onEditCoupling,
+  onToggleCoupling,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -400,11 +405,13 @@ export function StringField({
   const thresholdEditRef = useRef(onEditThreshold);
   const cycleRef = useRef(onCycleString);
   const couplingEditRef = useRef(onEditCoupling);
+  const toggleCouplingRef = useRef(onToggleCoupling);
   viewRef.current = view;
   injectRef.current = onInject;
   thresholdEditRef.current = onEditThreshold;
   cycleRef.current = onCycleString;
   couplingEditRef.current = onEditCoupling;
+  toggleCouplingRef.current = onToggleCoupling;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
@@ -428,6 +435,7 @@ export function StringField({
   const [lastDirection, setLastDirection] = useState<'up' | 'down'>('down');
   const [holding, setHolding] = useState(false);
   const [heldAmplitude, setHeldAmplitude] = useState(0);
+  const [linkTargetName, setLinkTargetName] = useState('');
 
   useEffect(() => {
     const hostElement = hostRef.current;
@@ -494,6 +502,8 @@ export function StringField({
     let hoverCouplingNow: CouplingMark | null = null;
     /** 滚轮连续调强度时的本地暂存（快速滚轮可能早于 view 回传）。 */
     let couplingPending: { from: string; to: string; value: number; at: number } | null = null;
+    /** 增删耦合的 link 目标（lanes 下标，null = 非 link 模式）。 */
+    let linkTargetIndex: number | null = null;
     let hoverLatchUntil = 0;
     let ripples: Ripple[] = [];
     const ghostMarks: GhostMark[] = [];
@@ -616,6 +626,54 @@ export function StringField({
       kbHold = null;
       setHoldingUi(false);
       setHeldAmplitudeUi(0);
+    }
+
+    /** 焦点 → 目标方向是否已有一条耦合（方向敏感）。 */
+    function hasDirectionalCoupling(fromId: string, toId: string): boolean {
+      return viewRef.current.couplings.some((coupling) => coupling.from === fromId && coupling.to === toId);
+    }
+
+    function setLinkTarget(index: number | null): void {
+      const next = index === null || !lanesNow[index] ? null : index;
+      linkTargetIndex = next;
+      setLinkTargetName(next === null ? '' : lanesNow[next]!.name);
+    }
+
+    function clearLinkTarget(): void {
+      if (linkTargetIndex === null && linkTargetName === '') return;
+      linkTargetIndex = null;
+      setLinkTargetName('');
+    }
+
+    /** Shift+↑/↓：在「其它 lanes」里循环选目标（不切焦点、不触发同类切换）。 */
+    function cycleLinkTarget(step: 1 | -1): void {
+      const count = lanesNow.length;
+      if (count <= 1) return;
+      const others: number[] = [];
+      for (let i = 0; i < count; i += 1) {
+        if (i !== focusIdx) others.push(i);
+      }
+      if (others.length === 0) return;
+      if (linkTargetIndex === null) {
+        setLinkTarget(step > 0 ? others[0]! : others[others.length - 1]!);
+        return;
+      }
+      const current = others.indexOf(linkTargetIndex);
+      const next = current < 0 ? 0 : ((current + step) % others.length + others.length) % others.length;
+      setLinkTarget(others[next]!);
+    }
+
+    function linkTargetInfo(): { index: number; id: string; name: string; existing: boolean } | null {
+      if (linkTargetIndex === null) return null;
+      const target = lanesNow[linkTargetIndex];
+      const focusLane = laneAt(focusIdx);
+      if (!target || !focusLane) return null;
+      return {
+        index: linkTargetIndex,
+        id: target.id,
+        name: target.name,
+        existing: hasDirectionalCoupling(focusLane.id, target.id),
+      };
     }
 
     function bumpPlucks(): void {
@@ -793,6 +851,7 @@ export function StringField({
       const next = clamp(index, 0, lanesNow.length - 1);
       if (next === focusIdx) return;
       clearHold();
+      clearLinkTarget();
       if (sims[focusIdx]) sims[focusIdx] = new StringSim(STRING_N, LOGICAL_W);
       focusIdx = next;
       setFocusIndex(focusIdx);
@@ -900,10 +959,14 @@ export function StringField({
       const count = u.length;
       const stepX = LOGICAL_W / (count - 1);
       const amplitude = sim.amplitude();
-      const width = profile.restWidth * OTHER_WIDTH_SCALE;
+      const isLinkTarget = linkTargetIndex === index;
+      const width = Math.max(profile.restWidth * OTHER_WIDTH_SCALE, isLinkTarget ? 1.6 : 0);
       const baseAlpha = OTHER_ALPHA + ((index % 3) - 1) * OTHER_ALPHA_STEP;
-      const alpha =
-        amplitude > 1 ? Math.min(0.34, baseAlpha + (amplitude / Math.max(1, profile.maxPull)) * 0.38) : baseAlpha;
+      const alpha = isLinkTarget
+        ? 0.55
+        : amplitude > 1
+          ? Math.min(0.34, baseAlpha + (amplitude / Math.max(1, profile.maxPull)) * 0.38)
+          : baseAlpha;
       ctx.strokeStyle = rgba(ink, alpha);
       ctx.lineWidth = width;
       ctx.lineCap = 'round';
@@ -933,14 +996,17 @@ export function StringField({
         if (resonance) value += standingOvertone(x01, now, 5) * RESONANCE_OVERTONE_PX;
         if (hold && pinAmp !== 0) {
           const distance = Math.abs(geom.xL + x01 * geom.width - hold.x);
-          if (distance < PIN_RADIUS_PX) value += pinAmp * (1 - distance / PIN_RADIUS_PX);
+          if (distance < PIN_RADIUS_PX) {
+            // 平滑正弦峰：d=|x-pin.x|，位移 = amp * 0.5*(1+cos(pi*d/halfWidth))，峰顶/两侧一阶导都连续。
+            value += pinAmp * 0.5 * (1 + Math.cos((Math.PI * distance) / PIN_RADIUS_PX));
+          }
         }
         focusDispBuf[i] = value;
       }
       return focusDispBuf;
     }
 
-    /** 按住绷弦的视觉：两条极淡张力线 + 比普通波峰更粗更深的局部峰。 */
+    /** 按住绷弦的视觉：平滑正弦峰 + 沿 flank 外侧偏移的极淡细曲线 + 峰顶圆点。 */
     function drawPin(disp: Float32Array): void {
       if (!hold) return;
       const geom = focusGeom();
@@ -948,16 +1014,23 @@ export function StringField({
       const profile = profileOf(focusIdx);
       const amplitude = pinAmplitude();
       if (Math.abs(amplitude) < 0.5) return;
-      const tipX = clamp(hold.x, geom.xL, geom.xR);
-      const tipY = baseline + amplitude;
-      // 两条张力细线：峰顶 → 基线
-      ctx.strokeStyle = rgba(ink, 0.07);
+      const halfWidth = PIN_RADIUS_PX;
+      const tipX = clamp(hold.x, geom.xL + halfWidth, geom.xR - halfWidth);
+      const smoothY = (distance: number): number =>
+        baseline + amplitude * 0.5 * (1 + Math.cos((Math.PI * distance) / halfWidth));
+      // 两条沿平滑 flank、向外偏移 1.5px 的极淡细曲线（不再画峰顶→基线的直线，避免尖 V）。
+      ctx.strokeStyle = rgba(ink, 0.055);
       ctx.lineWidth = 1;
       ctx.lineCap = 'round';
-      for (const direction of [-1, 1]) {
+      for (const side of [-1, 1] as const) {
         ctx.beginPath();
-        ctx.moveTo(tipX, tipY);
-        ctx.lineTo(clamp(tipX + direction * TENSION_DX_PX, geom.xL, geom.xR), baseline);
+        for (let step = 0; step <= 24; step += 1) {
+          const distance = halfWidth * (1 - step / 24);
+          const x = tipX + side * (distance + 1.5);
+          const y = smoothY(distance);
+          if (step === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
         ctx.stroke();
       }
       // 局部峰加粗加深（比普通波峰略粗，但不至于压过弦本身）
@@ -969,7 +1042,7 @@ export function StringField({
       ctx.beginPath();
       for (let i = 0; i < count; i += 1) {
         const x = geom.xL + i * stepX;
-        if (Math.abs(x - tipX) > PIN_RADIUS_PX) continue;
+        if (Math.abs(x - tipX) > halfWidth) continue;
         const y = baseline + (disp[i] ?? 0);
         if (!started) {
           ctx.moveTo(x, y);
@@ -982,7 +1055,7 @@ export function StringField({
       // 峰顶小圆点
       ctx.fillStyle = rgba(ink, 0.55);
       ctx.beginPath();
-      ctx.arc(tipX, tipY, 1.8, 0, Math.PI * 2);
+      ctx.arc(tipX, smoothY(0), 1.8, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -1289,6 +1362,34 @@ export function StringField({
       }
     }
 
+    /** 右侧的 link 连接线：已有该方向耦合 → 实线 α.30；没有 → 分段虚线 α.12。 */
+    function drawLinkTarget(): void {
+      if (linkTargetIndex === null) return;
+      const target = lanesNow[linkTargetIndex];
+      const focusLane = laneAt(focusIdx);
+      if (!target || !focusLane) return;
+      const x = LOGICAL_W - 260;
+      const yFocus = focusBaseline();
+      const yTarget = baselineOf(linkTargetIndex);
+      const existing = hasDirectionalCoupling(focusLane.id, target.id);
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = rgba(ink, existing ? 0.3 : 0.12);
+      if (!existing) ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(x, yFocus);
+      ctx.lineTo(x, yTarget);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = rgba(ink, existing ? 0.3 : 0.16);
+      for (const y of [yFocus, yTarget]) {
+        ctx.beginPath();
+        ctx.moveTo(x - 4, y);
+        ctx.lineTo(x + 4, y);
+        ctx.stroke();
+      }
+    }
+
     /* —— 场景 —— */
     function renderStringsScene(now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1326,6 +1427,7 @@ export function StringField({
       drawStringLabels();
       drawCouplings();
       drawThresholds();
+      drawLinkTarget();
       drawTextOverlays(now);
       if (dualNow) drawDualRing(now);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1489,6 +1591,7 @@ export function StringField({
       const lane = laneAt(focusIdx);
       if (!lane) return;
       clearHold();
+      clearLinkTarget();
       dualNow = true;
       dualStartedAt = performance.now();
       dualLaneIndex = focusIdx;
@@ -1588,6 +1691,7 @@ export function StringField({
     function enterOverview(): void {
       if (modeNow === 'overview') return;
       clearHold();
+      clearLinkTarget();
       setModeUi('overview');
       chartTarget = 1;
       drag = null;
@@ -1824,10 +1928,27 @@ export function StringField({
       }
       if (event.code === 'Escape') {
         event.preventDefault();
+        if (linkTargetIndex !== null) {
+          clearLinkTarget();
+          return;
+        }
         toggleOverview();
         return;
       }
       if (modeNow === 'overview' || dualNow) return;
+      // 增删耦合：Shift+↑/↓ 选目标，Shift+Enter 切换关系。
+      if (event.shiftKey && (event.code === 'ArrowUp' || event.code === 'ArrowDown')) {
+        event.preventDefault();
+        cycleLinkTarget(event.code === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (event.shiftKey && event.code === 'Enter') {
+        event.preventDefault();
+        const info = linkTargetInfo();
+        const focusLane = laneAt(focusIdx);
+        if (info && focusLane) toggleCouplingRef.current?.(focusLane.id, info.id);
+        return;
+      }
       // 同类多根弦：←/→ 切换实例（只换 App 的 selected，不改焦点类别、不拨弦）。
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
         event.preventDefault();
@@ -2050,6 +2171,7 @@ export function StringField({
     function resetField(): void {
       audio.reset();
       clearHold();
+      clearLinkTarget();
       for (let i = 0; i < sims.length; i += 1) {
         if (sims[i]) sims[i] = new StringSim(STRING_N, LOGICAL_W);
       }
@@ -2222,6 +2344,7 @@ export function StringField({
           heldMs: Math.round(performance.now() - hold.startedAt),
         };
       },
+      linkTarget: () => linkTargetInfo(),
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
@@ -2310,6 +2433,7 @@ export function StringField({
       data-pulling={pulling ? 'true' : 'false'}
       data-holding={holding ? 'true' : 'false'}
       data-held-amplitude={heldAmplitude.toFixed(1)}
+      data-link-target={linkTargetName}
       data-resting={resting ? 'true' : 'false'}
       data-key-count={46}
       data-overview-rows={mode === 'overview' ? KIND_ORDER.length : 0}

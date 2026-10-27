@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
+  addCoupling,
   compileText,
   patchWorldText,
+  removeCoupling,
   setCouplingStrengthBetween,
   setStringBaseline,
   setStringThreshold,
@@ -115,11 +117,49 @@ describe('源文本行级写回（保留注释与排版）', () => {
     expect(result.text).toBe(text);
   });
 
-  it('结构性变化（增删耦合）拒绝 patch', () => {
+  it('删除普通耦合：整行删除，注释保留', () => {
+    const { text, ir } = loadTuner();
+    const removed = removeCoupling(ir, '信任', '恐惧');
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    const result = patchWorldText(text, ir, removed.ir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain('耦合 信任 → 恐惧');
+    expect(commentLines(result.text)).toBe(commentLines(text));
+    const compiled = compileText(result.text, 'removed.nro');
+    expect(compiled.ok).toBe(true);
+    expect(compiled.ir.couplings.some((c) => c.from === '信任' && c.to === '恐惧')).toBe(false);
+  });
+
+  it('新增后再删除（连续两次 patch）仍保持注释', () => {
+    const { text, ir } = loadTuner();
+    // 第一次：新增 信任→步态
+    const added = addCoupling(ir, '信任', '步态');
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const first = patchWorldText(text, ir, added.ir);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const firstCompiled = compileText(first.text, 'first.nro');
+    expect(firstCompiled.ok).toBe(true);
+    // 第二次：在写回后的文本/图上删除它
+    const removed = removeCoupling(added.ir, '信任', '步态');
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    const second = patchWorldText(first.text, firstCompiled.ir, removed.ir);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.text).not.toContain('耦合 信任 → 步态');
+    expect(second.text).toBe(text);
+    expect(commentLines(second.text)).toBe(commentLines(text));
+  });
+
+  it('回路里的耦合不能单独删除（拒绝 patch）', () => {
     const { text, ir } = loadTuner();
     const edited: WorldIR = {
       ...ir,
-      couplings: ir.couplings.slice(1),
+      couplings: ir.couplings.filter((c) => !(c.from === '信任' && c.to === '色温')),
     };
     const result = patchWorldText(text, ir, edited);
     expect(result.ok).toBe(false);

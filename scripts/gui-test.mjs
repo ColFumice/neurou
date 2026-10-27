@@ -551,6 +551,47 @@ if (trustColorMark) {
   check('撤销后耦合文件回到上一版', readFileSync(WORLD_PATH, 'utf8') === couplingPreText);
 }
 
+// ============ 8a. 增删耦合：Shift+↑/↓ 选目标，Shift+Enter 切换 ============
+await page.waitForTimeout(300);
+const linkPreFile = readFileSync(WORLD_PATH, 'utf8');
+const linkPreCount = (await couplingsOf()).length;
+check('初始没有 信任→步态 耦合', !(await couplingsOf()).some((c) => c.from === '信任' && c.to === '步态'));
+// 其它 lanes 的顺序：色温、步态、重力……（信任为焦点）
+await page.keyboard.press('Shift+ArrowDown');
+await page.keyboard.press('Shift+ArrowDown');
+await page.waitForTimeout(120);
+check('Shift+ArrowDown 选中耦合目标「步态」', (await attr('data-link-target')) === '步态', String(await attr('data-link-target')));
+const linkTarget = await page.evaluate(() => window.__neurouString.linkTarget());
+check('linkTarget 给出目标与是否已有耦合', linkTarget?.name === '步态' && linkTarget.existing === false, JSON.stringify(linkTarget));
+await page.screenshot({ path: 'artifacts/98-string-link.png' });
+await page.keyboard.press('Shift+Enter');
+await page.waitForTimeout(180);
+let linkList = await couplingsOf();
+check('Shift+Enter 新增耦合 信任→步态', linkList.length === linkPreCount + 1 && linkList.some((c) => c.from === '信任' && c.to === '步态'), `${linkPreCount} → ${linkList.length}`);
+check('data-coupling-adds 计数', Number((await appAttr('data-coupling-adds')) ?? 0) >= 1, String(await appAttr('data-coupling-adds')));
+await page.waitForTimeout(1700);
+const linkAddedText = readFileSync(WORLD_PATH, 'utf8');
+check('新增耦合写回文件', linkAddedText.includes('耦合 信任 → 步态 同向 0.2'));
+check('新增耦合保留注释', commentCount(linkAddedText) === originalCommentCount);
+check('新增耦合走行级 patch', (await appAttr('data-save-mode')) === 'patch', String(await appAttr('data-save-mode')));
+await page.keyboard.press('Shift+Enter');
+await page.waitForTimeout(180);
+linkList = await couplingsOf();
+check('再次 Shift+Enter 删除耦合', linkList.length === linkPreCount && !linkList.some((c) => c.from === '信任' && c.to === '步态'), `${linkList.length}`);
+await page.waitForTimeout(1700);
+const linkRemovedText = readFileSync(WORLD_PATH, 'utf8');
+check('删除耦合写回文件（行消失）', !linkRemovedText.includes('耦合 信任 → 步态'));
+check('删除后文件恢复原排版', linkRemovedText === linkPreFile);
+// 回路边删除被拒绝
+await page.keyboard.press('Shift+ArrowUp');
+await page.waitForTimeout(120);
+check('目标切回「色温」', (await attr('data-link-target')) === '色温', String(await attr('data-link-target')));
+const loopBefore = (await couplingsOf()).length;
+await page.keyboard.press('Shift+Enter');
+await page.waitForTimeout(300);
+check('回路边删除被 App 拒绝', (await couplingsOf()).length === loopBefore && String(await appAttr('data-save-error')).length > 0, String(await appAttr('data-save-error')));
+await page.keyboard.press('Escape');
+
 // ============ 8b. 撤销缓动（不是闪回） ============
 await page.waitForTimeout(300);
 const easingPreFile = readFileSync(WORLD_PATH, 'utf8');
@@ -778,6 +819,12 @@ const summary = {
     restored,
   },
   hold: { heldAmplitude: heldAmp, movedPin: pinMoved },
+  links: {
+    target: linkTarget?.name ?? null,
+    before: linkPreCount,
+    afterAdd: linkPreCount + 1,
+    afterRemove: linkPreCount,
+  },
   easing: {
     from: easEdited,
     mid1: easMid1,
