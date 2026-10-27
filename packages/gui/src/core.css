@@ -38,4 +38,13 @@ body {
   color: var(--ink);
   user-select: none;
   touch-action: none;
+  transition:
+    background-color 280ms cubic-bezier(0.22, 0.8, 0.2, 1),
+    color 280ms cubic-bezier(0.22, 0.8, 0.2, 1);
+}
+
+/* v2.2 关系谱：黑底白字的极简矩阵模式（低饱和、无彩色）。 */
+.ink-app[data-screen='matrix'] {
+  background: #0a0a0a;
+  color: #f5f5f5;
 }

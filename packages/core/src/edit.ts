@@ -209,7 +209,16 @@ export function removeString(ir: WorldIR, id: string): EditResult {
   return { ok: true, ir: candidate };
 }
 
-/** 改一条谱的某个段值（v1.9 GUI 拖动写回）；不 clamp，越界由界面先夹取。 */
+/** 改一条关系谱的某个格子（v2.2 GUI 拖动/滚轮写回）。 */
+export function setMatrixCell(ir: WorldIR, id: string, row: number, col: number, value: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!Number.isInteger(row) || row < 0 || row >= matrix.rows.length) return fail(`关系谱「${id}」没有第 ${row} 行`);
+  if (!Number.isInteger(col) || col < 0 || col >= matrix.cols.length) return fail(`关系谱「${id}」没有第 ${col} 列`);
+  if (!Number.isFinite(value)) return fail('关系值必须是有限数字');
+  const values = matrix.values.map((line, r) => (r === row ? line.map((v, c) => (c === col ? round(value) : v)) : line));
+  return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, values } : m)) } };
+}
 export function setSpectrumBand(ir: WorldIR, id: string, index: number, value: number): EditResult {
   const spectrum = ir.spectra.find((s) => s.id === id);
   if (!spectrum) return fail(`没有谱「${id}」`);

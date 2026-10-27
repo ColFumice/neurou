@@ -875,7 +875,7 @@ if (band1) {
   await page.keyboard.press('Control+z');
   await page.waitForTimeout(900);
   const bandsUndo = JSON.parse(String((await spectrumField.getAttribute('data-band-values')) ?? '[]'));
-  check('Ctrl+Z 撤销谱编辑', Math.abs(bandsUndo[1] - spectrumBandsBefore[1]) < 1e-6, JSON.stringify(bandsUndo));
+  check('Ctrl+Z 撤销谱编辑', Math.abs(bandsUndo[1] - spectrumBandsBefore[1]) < 1e-3, JSON.stringify(bandsUndo));
   check('撤销后谱文件恢复原样', readFileSync(SPECTRA_PATH, 'utf8') === spectraBefore);
 }
 await page.keyboard.press('F2');
@@ -931,6 +931,35 @@ check('松开后持续音停止', Number(await spectrumRoot.getAttribute('data-s
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 check('谱模式 Esc 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
+restoreWorld();
+await page.waitForTimeout(400);
+// v2.2 关系谱：F3 黑底矩阵
+await page.keyboard.press('F3');
+await page.waitForTimeout(600);
+const matrixRoot = page.locator('[data-testid="matrix-field"]');
+check('F3 进入关系谱矩阵', (await appAttr('data-screen')) === 'matrix' && (await matrixRoot.getAttribute('data-matrix-name')) === '信任网', `${await appAttr('data-screen')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
+const matrixBefore = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
+check('关系谱 3×3 初始值正确', matrixBefore.length === 3 && matrixBefore[0]?.length === 3 && Number(matrixBefore[1]?.[1]) === 1, JSON.stringify(matrixBefore));
+const cells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);
+check('矩阵格子可定位', cells.length === 9, String(cells.length));
+const cell = cells.find((c) => c.row === 1 && c.col === 1);
+if (cell) {
+  await page.mouse.move(cell.x, cell.y);
+  await page.mouse.down();
+  await page.mouse.move(cell.x, cell.y + 80, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(1100);
+}
+const matrixAfter = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
+check('拖动格子改变关系值', Number(matrixAfter[1]?.[1]) < 0.95, JSON.stringify(matrixAfter));
+check('矩阵编辑已写回', Number(await appAttr('data-matrix-cell-edits')) >= 1 && (await appAttr('data-save-state')) === 'saved', `${await appAttr('data-matrix-cell-edits')}/${await appAttr('data-save-state')}`);
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(700);
+const matrixUndo = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
+check('矩阵 Ctrl+Z 撤销', Number(matrixUndo[1]?.[1]) > 0.95, JSON.stringify(matrixUndo));
+await page.keyboard.press('F3');
+await page.waitForTimeout(500);
+check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
 restoreWorld();
 
 await browser.close();

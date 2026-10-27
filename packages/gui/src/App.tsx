@@ -11,12 +11,14 @@ import {
   setCouplingStrengthBetween,
   setStringThreshold,
   setSpectrumBand,
+  setMatrixCell,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import { SpectrumField, type SpectrumView } from './SpectrumField.js';
+import { MatrixField, type MatrixView } from './MatrixField.js';
 import type { Lane, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
@@ -176,11 +178,13 @@ export function App() {
   const [couplingRemoves, setCouplingRemoves] = useState(0);
   const [stringAdds, setStringAdds] = useState(0);
   const [stringRemoves, setStringRemoves] = useState(0);
-  /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑。 */
-  const [screen, setScreen] = useState<'strings' | 'spectrum'>('strings');
+  /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
+  const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
   const [spectrumIndex, setSpectrumIndex] = useState(0);
+  const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);
-  const screenRef = useRef<'strings' | 'spectrum'>('strings');
+  const [matrixEdits, setMatrixEdits] = useState(0);
+  const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
   /** 撤销/重做的缓动状态。 */
@@ -409,7 +413,7 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    if (screenRef.current === 'spectrum') apply(previous);
+    if (screenRef.current !== 'strings') apply(previous);
     else if (!beginTransition(previous, 'undo')) await reload();
   };
 
@@ -428,7 +432,7 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    if (screenRef.current === 'spectrum') apply(next);
+    if (screenRef.current !== 'strings') apply(next);
     else if (!beginTransition(next, 'redo')) await reload();
   };
   actions.current = { undo, redo };
@@ -459,6 +463,20 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // F3：从八弦进入关系谱矩阵（世界里至少有关系谱）。矩阵内的 F3/Esc 由 MatrixField 处理。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'F3' || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (screenRef.current !== 'strings') return;
+      if ((worldIRRef.current?.matrices.length ?? 0) === 0) return;
+      event.preventDefault();
+      setMatrixIndex(0);
+      setScreen('matrix');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const shell = (children: ReactNode | null, loading: boolean) => (
     <div
       className="ink-app"
@@ -479,6 +497,9 @@ export function App() {
       data-spectrum-index={spectrumIndex}
       data-spectrum-count={worldIR?.spectra.length ?? 0}
       data-spectrum-band-edits={bandEdits}
+      data-matrix-index={matrixIndex}
+      data-matrix-count={worldIR?.matrices.length ?? 0}
+      data-matrix-cell-edits={matrixEdits}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -521,6 +542,14 @@ export function App() {
     loop: s.loop,
     mode: s.mode,
     articulation: s.articulation,
+  }));
+
+  const matrices: MatrixView[] = worldIR.matrices.map((m) => ({
+    id: m.id,
+    name: m.name,
+    rows: [...m.rows],
+    cols: [...m.cols],
+    values: m.values.map((row) => [...row]),
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
@@ -658,8 +687,33 @@ export function App() {
 
   const exitSpectrum = (): void => setScreen('strings');
 
+  /** 矩阵模式：改一个格（persist 时 debounce 写回，patch 只改对应 `段` 行的数字）。 */
+  const onEditMatrixCell = (matrixId: string, row: number, col: number, value: number, persist = false): void => {
+    if (transitionRef.current) return;
+    const result = setMatrixCell(worldIR, matrixId, row, col, value);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
   return shell(
-    screen === 'spectrum' && spectra.length > 0 ? (
+    screen === 'matrix' && matrices.length > 0 ? (
+      <MatrixField
+        matrices={matrices}
+        index={Math.min(matrixIndex, matrices.length - 1)}
+        onCycleMatrix={(dir) =>
+          setMatrixIndex((current) => ((current + dir) % matrices.length + matrices.length) % matrices.length)
+        }
+        onEditCell={onEditMatrixCell}
+        onExit={() => setScreen('strings')}
+      />
+    ) : screen === 'spectrum' && spectra.length > 0 ? (
       <SpectrumField
         spectra={spectra}
         index={Math.min(spectrumIndex, spectra.length - 1)}

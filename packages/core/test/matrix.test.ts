@@ -426,7 +426,7 @@ ${segments}
     });
   });
 
-  it('patch 的结构签名包含关系谱：改矩阵值必须回退整图序列化', () => {
+  it('patch 能行级改关系谱格子值（v2.2）', () => {
     const source = WORLD + MATRIX;
     const base = compileText(source, 'matrix-patch.nro');
     expect(base.ok).toBe(true);
@@ -441,8 +441,9 @@ ${segments}
     expect(edited.matrices[0]?.values[0]?.[1]).toBe(0.9);
 
     const result = patchWorldText(source, base.ir, edited);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain('结构变化');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changed).toContain(`${edited.matrices[0]!.id}.values`);
+    expect(result.text).toContain('0.9');
   });
 });

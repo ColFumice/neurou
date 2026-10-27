@@ -1,4 +1,4 @@
-import type { IRCoupling, IRSpectrum, IRString, WorldIR } from './ir.js';
+import type { IRCoupling, IRMatrix, IRSpectrum, IRString, WorldIR } from './ir.js';
 import { stringBlockLines } from './serialize.js';
 
 /**
@@ -89,13 +89,12 @@ function structuralSignature(ir: WorldIR): string {
       articulation: s.articulation,
       bandCount: s.bands.length,
     })),
-    // 关系谱没有行级编辑：任何矩阵变化都必须回退整图序列化。
+    // 关系谱的格子值可做行级 patch；行/列结构变化仍会因签名不同而回退。
     matrices: ir.matrices.map((m) => ({
       id: m.id,
       name: m.name,
       rows: m.rows,
       cols: m.cols,
-      values: m.values,
     })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
@@ -133,6 +132,43 @@ function deleteStringEdit(text: string, string: IRString): TextEdit | { error: s
   const last = lines[lines.length - 1];
   if (!first || !last) return { error: `弦「${string.id}」所在块无法识别` };
   return { start: first.start, end: last.end, text: '' };
+}
+
+/** 关系谱格子值：按行替换 `段` 行的数字，保留缩进/空白/注释。 */
+function matrixValuesEdits(text: string, base: IRMatrix, edited: IRMatrix): TextEdit[] | { error: string } {
+  if (!base.span) return { error: `关系谱「${base.id}」没有源位置` };
+  const lines = linesIn(text, base.span.start.offset, base.span.end.offset);
+  const segmentLines = lines.filter((item) => /^\s*段(?=\s|$)/.test(contentOf(text, item)));
+  if (segmentLines.length !== base.rows.length || segmentLines.length !== edited.rows.length) {
+    return { error: `关系谱「${base.id}」的段行数与行数不一致` };
+  }
+  const edits: TextEdit[] = [];
+  for (let r = 0; r < segmentLines.length; r++) {
+    const baseRow = base.values[r] ?? [];
+    const editedRow = edited.values[r] ?? [];
+    if (baseRow.length !== editedRow.length) return { error: `关系谱「${base.id}」第 ${r + 1} 行宽度变化` };
+    let differs = false;
+    for (let c = 0; c < baseRow.length; c++) {
+      if (Math.abs((baseRow[c] ?? 0) - (editedRow[c] ?? 0)) > 1e-9) differs = true;
+    }
+    if (!differs) continue;
+    const line = segmentLines[r]!;
+    const content = contentOf(text, line);
+    const prefix = /^(\s*段\s+)/.exec(content)?.[1];
+    if (!prefix) return { error: `关系谱「${base.id}」的段行格式无法识别` };
+    const bodyStart = prefix.length;
+    const body = content.slice(bodyStart);
+    const matches = [...body.matchAll(/-?\d+(?:\.\d+)?/g)];
+    if (matches.length !== baseRow.length) return { error: `关系谱「${base.id}」的段行数字个数不一致` };
+    let nextBody = body;
+    for (let c = matches.length - 1; c >= 0; c--) {
+      const match = matches[c]!;
+      const at = match.index ?? 0;
+      nextBody = nextBody.slice(0, at) + formatNumber(editedRow[c]!) + nextBody.slice(at + match[0].length);
+    }
+    edits.push({ start: line.contentStart + bodyStart, end: line.contentEnd, text: nextBody });
+  }
+  return edits;
 }
 
 /** 在最后一块弦声明之后插入新弦块。 */
@@ -381,6 +417,25 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
     if ('error' in result) return { ok: false, reason: result.error };
     edits.push(result);
     changed.push(`${edited.id}.bands`);
+  }
+
+  for (const edited of editedIR.matrices) {
+    const base = baseIR.matrices.find((m) => m.id === edited.id);
+    if (!base) return { ok: false, reason: `关系谱「${edited.id}」是新增的，需要回退规范序列化` };
+    let differs = false;
+    for (let r = 0; r < edited.values.length; r++) {
+      const row = edited.values[r] ?? [];
+      const before = base.values[r] ?? [];
+      if (row.length !== before.length) differs = true;
+      for (let c = 0; c < row.length; c++) {
+        if (Math.abs((row[c] ?? 0) - (before[c] ?? 0)) > 1e-9) differs = true;
+      }
+    }
+    if (!differs) continue;
+    const result = matrixValuesEdits(normalized, base, edited);
+    if ('error' in result) return { ok: false, reason: result.error };
+    for (const edit of result) edits.push(edit);
+    changed.push(`${edited.id}.values`);
   }
 
   const baseCouplings = new Map(baseIR.couplings.map((c) => [couplingKey(c), c]));

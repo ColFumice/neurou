@@ -33,6 +33,7 @@ export {
   addString,
   removeString,
   setSpectrumBand,
+  setMatrixCell,
   findCoupling,
   type ThresholdName,
   type EditResult,
