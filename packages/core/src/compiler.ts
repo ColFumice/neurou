@@ -334,10 +334,12 @@ class Compiler {
   // ---------- 关系谱 ----------
 
   /**
-   * v2.1c：关系谱是静态矩阵。校验标签数量/唯一性、段的条数与宽度、
-   * 以及所有值都是有限数字；出错时仍把原值放进 IR，供编辑器预览。
+   * v2.1c：关系谱是静态矩阵；v2.3a 起格子可以带运行时时间曲线。
+   * 校验标签数量/唯一性、段的条数与宽度、所有值都是有限数字，以及每一条
+   * 曲线的行列标签、音段数（1..64）、有限性和重复；出错时仍把原值放进 IR，
+   * 供编辑器预览。
    *
-   * 诊断码：形状/标签错误沿用谱的 NRO2100（NRO2103 已被力迫「先于」环占用），
+   * 诊断码：形状/标签/曲线错误沿用谱的 NRO2100（NRO2103 已被力迫「先于」环占用），
    * 重名用 NRO2004，语法/未知字段由 parser 报 NRO1100。
    */
   private declareMatrix(d: MatrixDecl): void {
@@ -399,12 +401,66 @@ class Compiler {
       }
     }
 
+    // 曲线是 v2.3a 的追加数据：标量「段」仍是必填的回退值。
+    const seenCurves = new Set<string>();
+    for (const curve of d.curves) {
+      const span = curve.span ?? d.span;
+      const rowIndex = d.rows.indexOf(curve.row);
+      if (rowIndex < 0) {
+        const hint = suggestName(curve.row, d.rows);
+        this.error('NRO2100', `关系谱「${d.name}」的「曲线」引用了不存在的行标签「${curve.row}」。`, span, {
+          hint: hint ? `你是不是想写「${hint}」？` : d.rows.length > 0 ? `可用的行：${d.rows.join('、')}。` : '先写「行」标签，再给格子加曲线。',
+        });
+      }
+      const colIndex = d.cols.indexOf(curve.col);
+      if (colIndex < 0) {
+        const hint = suggestName(curve.col, d.cols);
+        this.error('NRO2100', `关系谱「${d.name}」的「曲线」引用了不存在的列标签「${curve.col}」。`, span, {
+          hint: hint ? `你是不是想写「${hint}」？` : d.cols.length > 0 ? `可用的列：${d.cols.join('、')}。` : '先写「列」标签，再给格子加曲线。',
+        });
+      }
+      if (curve.bands.length === 0) {
+        this.error('NRO2100', `关系谱「${d.name}」的曲线「${curve.row} × ${curve.col}」没有任何音段值。`, span, {
+          hint: '一条曲线至少要有 1 个数字；没有曲线就删掉这一行。',
+        });
+      } else if (curve.bands.length > 64) {
+        this.error(
+          'NRO2100',
+          `关系谱「${d.name}」的曲线「${curve.row} × ${curve.col}」有 ${curve.bands.length} 个音段值，超过了上限 64。`,
+          span,
+          { hint: '一条曲线最多 64 个采样点；更密的曲线请先降采样。' },
+        );
+      }
+      for (let i = 0; i < curve.bands.length; i++) {
+        if (!Number.isFinite(curve.bands[i]!)) {
+          this.error(
+            'NRO2100',
+            `关系谱「${d.name}」的曲线「${curve.row} × ${curve.col}」第 ${i + 1} 个音段值不是有限数字。`,
+            span,
+            { hint: '曲线音段值必须是有限的十进制数字（可以带负号）。' },
+          );
+        }
+      }
+      if (rowIndex >= 0 && colIndex >= 0) {
+        const cell = `${curve.row}\u0000${curve.col}`;
+        if (seenCurves.has(cell)) {
+          this.error('NRO2100', `关系谱「${d.name}」的格子「${curve.row} × ${curve.col}」声明了多条曲线。`, span, {
+            hint: '一个格子只允许一条时间曲线；把采样点合并到同一行「曲线」里。',
+          });
+        }
+        seenCurves.add(cell);
+      }
+    }
+
     const matrix: IRMatrix = {
       id: d.name,
       name: d.name,
       rows: [...d.rows],
       cols: [...d.cols],
       values: d.values.map((row) => [...row]),
+      curves: d.curves.map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
+      interpolation: d.interpolation,
+      loop: d.loop,
       span: d.span,
     };
     this.matrices.push(matrix);
@@ -752,13 +808,15 @@ class Compiler {
             };
           }
           case '查关系谱': {
+            // v2.3a：三参数是编译期标量查表；四参数在有曲线时下降成
+            // 运行时采样调用，没有曲线时仍折叠成标量（位置被忽略）。
             // 诊断沿用「查谱」：引用不存在用 NRO2101，参数形态用 NRO2003。
-            if (e.args.length !== 3) {
+            if (e.args.length !== 3 && e.args.length !== 4) {
               this.error(
                 'NRO2003',
-                `函数「查关系谱」需要三个参数：矩阵名、行名、列名（都是字符串），现在给了 ${e.args.length} 个。`,
+                `函数「查关系谱」需要三个参数（矩阵名、行名、列名）或四个参数（再加位置），现在给了 ${e.args.length} 个。`,
                 e.span,
-                { hint: '例如：查关系谱("势力网", "信任", "色温")。' },
+                { hint: '例如：查关系谱("势力网", "信任", "色温") 或 查关系谱("势力网", "信任", "色温", 0.5)。' },
               );
               return { expr: { k: 'const', v: 0 }, type: 'number' };
             }
@@ -801,7 +859,35 @@ class Compiler {
               });
               return { expr: { k: 'const', v: 0 }, type: 'number' };
             }
-            // 矩阵是静态作者数据：查表直接折叠成常量，不产生运行时读取。
+
+            const position = e.args.length === 4 ? args[3]! : undefined;
+            if (position && argTypes[3] !== 'number' && argTypes[3] !== 'any') {
+              this.error(
+                'NRO2003',
+                `「查关系谱」的位置参数必须是数字，这里是${typeLabel(argTypes[3]!)}。`,
+                e.args[3]!.span,
+                { hint: '位置是 0..1 的归一化坐标；省略位置时读取「段」的标量值。' },
+              );
+            }
+            const hasCurve = matrix.curves.some((curve) => curve.row === rowArg.v && curve.col === colArg.v);
+            if (position && hasCurve) {
+              return {
+                expr: {
+                  k: 'call',
+                  fn: '查关系谱',
+                  args: [
+                    { k: 'const', v: matrix.name },
+                    { k: 'const', v: rowArg.v },
+                    { k: 'const', v: colArg.v },
+                    position.expr,
+                  ],
+                },
+                type: 'number',
+              };
+            }
+            // 三参数，或四参数但该格子没有曲线：矩阵的「段」是静态作者
+            // 数据，直接折叠成常量；四参数的位置表达式没有可采样的曲线，
+            // 因此被忽略（文档语义：无曲线的格子回退到标量值）。
             const cell = matrix.values[rowIndex]?.[colIndex];
             return {
               expr: { k: 'const', v: typeof cell === 'number' && Number.isFinite(cell) ? cell : 0 },

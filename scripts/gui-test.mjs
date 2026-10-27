@@ -940,6 +940,32 @@ const matrixRoot = page.locator('[data-testid="matrix-field"]');
 check('F3 进入关系谱矩阵', (await appAttr('data-screen')) === 'matrix' && (await matrixRoot.getAttribute('data-matrix-name')) === '信任网', `${await appAttr('data-screen')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
 const matrixBefore = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
 check('关系谱 3×3 初始值正确', matrixBefore.length === 3 && matrixBefore[0]?.length === 3 && Number(matrixBefore[1]?.[1]) === 1, JSON.stringify(matrixBefore));
+// v2.3：选中带曲线的格子，底部出现曲线编辑器
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(520);
+const selectedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+const selectedCurve = selectedCurveRaw ? JSON.parse(selectedCurveRaw) : [];
+check('选中曲线格出现底部曲线编辑器', Array.isArray(selectedCurve) && selectedCurve.length === 3, JSON.stringify(selectedCurve));
+const curvePoints = await page.evaluate(() => window.__neurouMatrix?.curvePositions() ?? []);
+const midPoint = curvePoints.find((p) => p.index === 1);
+if (midPoint) {
+  await page.mouse.move(midPoint.x, midPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(midPoint.x, midPoint.y - 36, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(900);
+}
+const curveAfter = JSON.parse(String((await matrixRoot.getAttribute('data-selected-curve')) ?? '[]'));
+check('拖动曲线段点改值并写回', Number(curveAfter[1]) > Number(selectedCurve[1]) + 0.1 && Number(await appAttr('data-matrix-curve-edits')) >= 1, `${JSON.stringify(selectedCurve)}→${JSON.stringify(curveAfter)}`);
+check('曲线改段落盘为行级 patch', /曲线 信任 色温 0\.2 [0-9.]+ 0\.3/.test(readFileSync(WORLD_PATH, 'utf8')), '');
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(800);
+const curveUndo = JSON.parse(String((await matrixRoot.getAttribute('data-selected-curve')) ?? '[]'));
+check('曲线 Ctrl+Z 撤销', Math.abs(Number(curveUndo[1]) - Number(selectedCurve[1])) < 1e-3, JSON.stringify(curveUndo));
+await page.keyboard.press('ArrowLeft');
+await page.waitForTimeout(300);
+await page.mouse.move(720, 450);
+await page.waitForTimeout(300);
 await page.mouse.move(720, 450);
 await page.waitForTimeout(400);
 const sfxCells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);

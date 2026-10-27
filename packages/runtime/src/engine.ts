@@ -18,8 +18,10 @@ import {
   type TimelineEvent,
   clampString,
   cloneState,
+  createMatrixState,
   createSpectrumState,
   createState,
+  sampleMatrixCurve,
   sampleSpectrum,
 } from './state.js';
 
@@ -155,6 +157,7 @@ export class Universe {
     }
     this.state = createState(world, opts.seed ?? 1, opts.log ?? false);
     this.ensureSpectrumState();
+    this.ensureMatrixState();
     this.logEnabled = opts.log ?? false;
     this.prevValues = { ...this.state.values };
     if (this.logEnabled) this.log({ tick: 0, kind: 'ending', id: 'world.start' });
@@ -244,6 +247,31 @@ export class Universe {
     const st = this.state.spectra?.[id];
     if (!ir || !st) return undefined;
     return sampleSpectrum(st, position);
+  }
+
+  /**
+   * 读取关系谱的一个格子（v2.3a，供 GUI/测试与 `查关系谱` 共用语义）。
+   *
+   * - 省略 `position`：返回静态 `段` 标量值；
+   * - 给出 `position`：格子有曲线时按 0..1 采样（线性/平滑、夹住/回绕由
+   *   矩阵级元数据决定），没有曲线时回退到标量值；
+   * - 未知矩阵、行或列返回 undefined；曲线为空或位置非有限时也回退到
+   *   标量值（标量非法则为 0）。
+   */
+  getMatrixCell(name: string, row: string, col: string, position?: number): number | undefined {
+    const ir = this.ir.matrices.find((m) => m.id === name);
+    const st = this.state.matrices?.[name] ?? (ir ? createMatrixState(ir) : undefined);
+    if (!st) return undefined;
+    const rowIndex = st.rows.indexOf(row);
+    const colIndex = st.cols.indexOf(col);
+    if (rowIndex < 0 || colIndex < 0) return undefined;
+    const cell = st.values[rowIndex]?.[colIndex];
+    const scalar = typeof cell === 'number' && Number.isFinite(cell) ? cell : 0;
+    if (position === undefined) return scalar;
+    const curve = st.curves.find((c) => c.row === row && c.col === col);
+    if (!curve) return scalar;
+    const sampled = sampleMatrixCurve(curve, position, st.interpolation, st.loop);
+    return sampled === undefined ? scalar : sampled;
   }
 
   // ---------- 操作 ----------
@@ -532,9 +560,11 @@ export class Universe {
 
   restore(s: WorldState): void {
     this.state = cloneState(s);
-    // 旧快照可能没有 spectra：用 IR 里的作者数据补齐，避免恢复后谱凭空消失。
-    // 旧快照的谱条目也可能缺少 v2.1a 的采样元数据，用 IR 覆盖回退值。
+    // 旧快照可能没有 spectra / matrices：用 IR 里的作者数据补齐，避免恢复后
+    // 谱或关系谱凭空消失。旧快照的谱条目也可能缺少 v2.1a 的采样元数据，
+    // 关系谱则整体是 v2.3a 新增的字段，统一从 IR 重写元数据/静态数据。
     this.ensureSpectrumState(true);
+    this.ensureMatrixState(true);
   }
 
   /** 从当前状态分叉出一个新宇宙（力迫的 V[G]）。 */
@@ -542,6 +572,7 @@ export class Universe {
     const u = new Universe(this.ir, { seed: this.state.rng, log: this.logEnabled });
     u.state = cloneState(this.state);
     u.ensureSpectrumState(true);
+    u.ensureMatrixState(true);
     // 尚未 tick 的谱调制也是「当下状态」的一部分；分叉时一起带走。
     u.pendingSpectrumModulations = this.pendingSpectrumModulations.map((m) => ({ ...m }));
     if (label) u.state.branch = label;
@@ -586,6 +617,22 @@ export class Universe {
       if (typeof st.max !== 'number' || !Number.isFinite(st.max)) st.max = ir.max;
       if (st.interpolation !== '线性' && st.interpolation !== '平滑') st.interpolation = ir.interpolation;
       if (typeof st.loop !== 'boolean') st.loop = ir.loop;
+    }
+  }
+
+  /**
+   * 确保每条 IR 关系谱在当前状态里都有静态数据槽位（v2.3a）。
+   *
+   * 关系谱数据在运行时不可变，所以 `rebuildFromIR` 时直接从 IR 整体重建：
+   * restore / branch 拿到旧快照（没有 `matrices`）时，曲线和采样元数据
+   * 不会凭空消失。普通构造只补缺失的条目，不覆盖已有副本。
+   */
+  private ensureMatrixState(rebuildFromIR = false): void {
+    if (!this.state.matrices) this.state.matrices = {};
+    for (const ir of this.ir.matrices) {
+      if (rebuildFromIR || !this.state.matrices[ir.id]) {
+        this.state.matrices[ir.id] = createMatrixState(ir);
+      }
     }
   }
 

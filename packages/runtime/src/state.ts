@@ -1,4 +1,4 @@
-import type { IRSpectrum, IRString, WorldIR } from '@neurou/core';
+import type { IRMatrix, IRSpectrum, IRString, WorldIR } from '@neurou/core';
 
 /**
  * 运行时状态。
@@ -51,36 +51,131 @@ export function createSpectrumState(ir: IRSpectrum): SpectrumState {
   };
 }
 
+/** 关系谱里一条格子曲线在一局里的不可变副本（v2.3a）。 */
+export interface MatrixCurveState {
+  row: string;
+  col: string;
+  /** 1..64 个采样值，位置 0..1 均匀分布。 */
+  bands: number[];
+}
+
 /**
- * 采样一条谱的当前曲线（v2.1a 起由 Universe.getSpectrumAt 与 `查谱` 共用）。
+ * 关系谱在一局里的静态数据（v2.3a）。
+ *
+ * 矩阵作者数据不随拍变化，但规则/结局的 `evalExpr` 只拿到 WorldState，
+ * 因此把整张矩阵复制进状态。`rows` / `cols` 是标签到下标的索引，用于
+ * 四参数查表在缺曲线时回退到 `values` 的标量值，也供 Universe.getMatrixCell
+ * 直接按标签读取。旧快照没有这个字段；Universe.restore 会从 IR 重建。
+ */
+export interface MatrixState {
+  rows: string[];
+  cols: string[];
+  values: number[][];
+  curves: MatrixCurveState[];
+  interpolation: SpectrumInterpolation;
+  loop: boolean;
+}
+
+/** 从 IR 的作者数据生成一份初始矩阵状态（深拷贝，避免共享可变数组）。 */
+export function createMatrixState(ir: IRMatrix): MatrixState {
+  return {
+    rows: [...ir.rows],
+    cols: [...ir.cols],
+    values: ir.values.map((row) => [...row]),
+    curves: (ir.curves ?? []).map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
+    interpolation: ir.interpolation === '平滑' ? '平滑' : '线性',
+    loop: ir.loop === true,
+  };
+}
+
+function normalizeMatrixState(s: MatrixState): MatrixState {
+  const rows = Array.isArray(s.rows) ? s.rows.map(String) : [];
+  const cols = Array.isArray(s.cols) ? s.cols.map(String) : [];
+  const values = Array.isArray(s.values)
+    ? s.values.map((row) =>
+        Array.isArray(row) ? row.map((v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)) : [],
+      )
+    : [];
+  const curves = Array.isArray(s.curves)
+    ? s.curves.map((curve) => ({
+        row: String(curve.row),
+        col: String(curve.col),
+        bands: Array.isArray(curve.bands)
+          ? curve.bands.map((b) => (typeof b === 'number' && Number.isFinite(b) ? b : 0))
+          : [],
+      }))
+    : [];
+  return {
+    rows,
+    cols,
+    values,
+    curves,
+    interpolation: s.interpolation === '平滑' ? '平滑' : '线性',
+    loop: s.loop === true,
+  };
+}
+
+/**
+ * 采样一条曲线（谱与关系谱共用的底层实现）。
  *
  * - 线性：相邻段之间直线插值；段 i 落在 i / (n - 1)；
  * - 平滑：余弦插值 t' = (1 - cos(πt)) / 2，中点和线性一致，段点处导数为 0；
  * - `loop` 为 false 时位置夹到 [0, 1]；为 true 时按周期 [0, 1) 回绕
  *   （position = 1 等价于 0，负数同样回绕）；
- * - min / max 只约束 `values` 的范围，不改变插值形状。
+ * - 单段曲线在任意有限位置都返回该段。
  *
- * 空谱或非有限位置返回 undefined。
+ * 空曲线或非有限位置返回 undefined。
  */
-export function sampleSpectrum(st: SpectrumState, position: number): number | undefined {
+function sampleBands(
+  bands: readonly number[],
+  position: number,
+  interpolation: SpectrumInterpolation | undefined,
+  loop: boolean,
+): number | undefined {
   if (!Number.isFinite(position)) return undefined;
-  const n = st.values.length;
+  const n = bands.length;
   if (n === 0) return undefined;
 
-  const p = st.loop === true ? ((position % 1) + 1) % 1 : Math.min(1, Math.max(0, position));
-  if (n === 1) return st.values[0]!;
+  const p = loop ? ((position % 1) + 1) % 1 : Math.min(1, Math.max(0, position));
+  if (n === 1) return bands[0]!;
 
   const x = p * (n - 1);
   const i = Math.floor(x);
-  if (i >= n - 1) return st.values[n - 1]!;
-  const a = st.values[i]!;
-  const b = st.values[i + 1]!;
+  if (i >= n - 1) return bands[n - 1]!;
+  const a = bands[i]!;
+  const b = bands[i + 1]!;
   const t = x - i;
-  if (st.interpolation === '平滑') {
+  if (interpolation === '平滑') {
     const eased = (1 - Math.cos(Math.PI * t)) / 2;
     return a + (b - a) * eased;
   }
   return a + (b - a) * t;
+}
+
+/**
+ * 采样一条关系谱格子曲线（v2.3a）。
+ *
+ * 语义和 `查谱` / `sampleSpectrum` 完全一致：位置 0..1、线性或平滑、
+ * 非循环夹到 [0, 1]、循环按 [0, 1) 回绕；n = 1 时恒为该段值。
+ * 曲线不存在（空数组）或位置非有限时返回 undefined，由调用方决定
+ * 回退到标量 `段` 还是 0。
+ */
+export function sampleMatrixCurve(
+  curve: Pick<MatrixCurveState, 'bands'>,
+  position: number,
+  interpolation: SpectrumInterpolation = '线性',
+  loop = false,
+): number | undefined {
+  return sampleBands(curve.bands, position, interpolation, loop);
+}
+
+/**
+ * 采样一条谱的当前曲线（v2.1a 起由 Universe.getSpectrumAt 与 `查谱` 共用）。
+ *
+ * min / max 只约束 `values` 的范围，不改变插值形状；其余语义见 sampleBands。
+ */
+export function sampleSpectrum(st: SpectrumState, position: number): number | undefined {
+  return sampleBands(st.values, position, st.interpolation, st.loop === true);
 }
 
 export interface PendingDelta {
@@ -124,6 +219,11 @@ export interface WorldState {
    * 这样快照形状对「有没有谱」保持稳定。
    */
   spectra?: Record<string, SpectrumState>;
+  /**
+   * 关系谱的静态数据（v2.3a）。和 spectra 一样保持「无矩阵也有空对象」的
+   * 稳定形状；旧快照没有该字段时由 Universe.restore 从 IR 重建。
+   */
+  matrices?: Record<string, MatrixState>;
 }
 
 export function initialValues(world: WorldIR): Record<string, RuntimeValue> {
@@ -182,6 +282,18 @@ function cloneSpectra(spectra: Record<string, SpectrumState>): Record<string, Sp
   return out;
 }
 
+function initialMatrices(world: WorldIR): Record<string, MatrixState> {
+  const out: Record<string, MatrixState> = {};
+  for (const m of world.matrices) out[m.id] = createMatrixState(m);
+  return out;
+}
+
+function cloneMatrices(matrices: Record<string, MatrixState>): Record<string, MatrixState> {
+  const out: Record<string, MatrixState> = {};
+  for (const [id, m] of Object.entries(matrices)) out[id] = normalizeMatrixState(m);
+  return out;
+}
+
 export function createState(world: WorldIR, seed = 1, log = false): WorldState {
   return {
     tick: 0,
@@ -198,6 +310,7 @@ export function createState(world: WorldIR, seed = 1, log = false): WorldState {
     rng: seed >>> 0 || 1,
     branch: 'root',
     spectra: initialSpectra(world),
+    matrices: initialMatrices(world),
   };
 }
 
@@ -219,6 +332,7 @@ export function cloneState(s: WorldState): WorldState {
     rng: s.rng,
     branch: s.branch,
     ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
+    ...(s.matrices ? { matrices: cloneMatrices(s.matrices) } : {}),
   };
 }
 
@@ -238,6 +352,8 @@ export interface SerializedState {
   branch: string;
   /** 与 WorldState.spectra 同形；旧存档可能没有。 */
   spectra?: Record<string, SpectrumState>;
+  /** 与 WorldState.matrices 同形；旧存档可能没有。 */
+  matrices?: Record<string, MatrixState>;
 }
 
 export function serializeState(s: WorldState): SerializedState {
@@ -257,6 +373,7 @@ export function serializeState(s: WorldState): SerializedState {
     rng: s.rng,
     branch: s.branch,
     ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
+    ...(s.matrices ? { matrices: cloneMatrices(s.matrices) } : {}),
   };
 }
 
@@ -278,6 +395,7 @@ export function deserializeState(s: SerializedState): WorldState {
     rng: s.rng,
     branch: s.branch,
     ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
+    ...(s.matrices ? { matrices: cloneMatrices(s.matrices) } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileText, patchWorldText, setMatrixCell } from '../src/index.js';
+import { compileText, patchWorldText, setMatrixCell, setMatrixCurveBand } from '../src/index.js';
 
 const SOURCE = `世界 矩阵写回
 关系谱 势力网
@@ -50,6 +50,25 @@ describe('关系谱：GUI 写回', () => {
     expect(again.ok).toBe(true);
     if (!again.ok) return;
     expect(again.ir.matrices[0]?.values[1]).toEqual([0.42, 1]);
+  });
+
+  it('关系谱曲线段值可改且行级写回', () => {
+    const source = SOURCE.replace(
+      '  段 0.3 1',
+      '  段 0.3 1\n  曲线 信任 色温 0.2 0.5 0.3\n  插值 平滑',
+    );
+    const base = compileS(source);
+    const edited = setMatrixCurveBand(base, '势力网', '信任', '色温', 1, 0.8);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    expect(edited.ir.matrices[0]?.curves?.[0]?.bands).toEqual([0.2, 0.8, 0.3]);
+    const patched = patchWorldText(source, base, edited.ir);
+    expect(patched.ok).toBe(true);
+    if (!patched.ok) return;
+    expect(patched.changed).toContain('势力网.curves');
+    expect(patched.text).toContain('  曲线 信任 色温 0.2 0.8 0.3');
+    expect(patched.text).toContain('# 保留这行注释');
+    expect(setMatrixCurveBand(base, '势力网', '信任', '色温', 9, 0.2).ok).toBe(false);
   });
 
   it('行列越界/非有限值报错', () => {

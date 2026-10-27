@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { compileText, patchWorldText, serialize, type WorldIR } from '../src/index.js';
 
 /**
- * v2.1c：关系谱 —— 静态「行 × 列」数值矩阵 + 编译期查表 `查关系谱(...)`。
+ * v2.1c：关系谱 —— 「行 × 列」数值矩阵 + 查表 `查关系谱(...)`。
+ * v2.3a：格子可带时间曲线，四参数版本在运行时采样。
  *
- * 矩阵值不进入运行时：查表在编译期折叠成常量。行列标签只是作者可读的
- * 坐标名，不要求是弦名。
+ * 标量「段」始终保留，是无曲线格子的回退值；三参数查表仍是编译期常量。
  */
 
 const WORLD = `世界 关系谱测试
@@ -23,6 +23,17 @@ const MATRIX = `关系谱 势力网
   段 0.3 0
 `;
 
+const CURVED_MATRIX = `关系谱 势力网
+  行 信任 色温
+  列 信任 色温
+  段 1 0.3
+  段 0.3 0
+  曲线 信任 色温 0.1 0.5 0.9 0.4
+  曲线 色温 信任 0.8 0.3
+  插值 平滑
+  循环 是
+`;
+
 function compileWorld(body: string) {
   return compileText(WORLD + body, 'matrix.nro');
 }
@@ -34,6 +45,9 @@ function matrixShape(ir: WorldIR) {
     rows: m.rows,
     cols: m.cols,
     values: m.values,
+    curves: m.curves,
+    interpolation: m.interpolation,
+    loop: m.loop,
   }));
 }
 
@@ -56,6 +70,9 @@ describe('关系谱：解析、编译与验证', () => {
         [1, 0.2],
         [0.2, 1],
       ],
+      curves: [{ row: '情绪强度', col: '余温', bands: [0.1, 0.6, 0.2] }],
+      interpolation: '平滑',
+      loop: false,
     });
     expect(matrix.span).toBeDefined();
   });
@@ -71,6 +88,8 @@ describe('关系谱：解析、编译与验证', () => {
     expect(out).toContain('  列 情绪强度 余温');
     expect(out).toContain('  段 1 0.2');
     expect(out).toContain('  段 0.2 1');
+    expect(out).toContain('  曲线 情绪强度 余温 0.1 0.6 0.2');
+    expect(out).toContain('  插值 平滑');
 
     const again = compileText(out, 'matrix-roundtrip.nro');
     expect(again.ok).toBe(true);
@@ -102,6 +121,166 @@ describe('关系谱：解析、编译与验证', () => {
     expect(text.indexOf('关系谱 势力网')).toBeLessThan(text.indexOf('耦合 信任 → 色温'));
   });
 
+  it('解析格子曲线、矩阵级插值/循环，并按规范顺序序列化', () => {
+    const r = compileWorld(CURVED_MATRIX);
+    expect(r.ok).toBe(true);
+
+    expect(r.ir.matrices[0]).toMatchObject({
+      curves: [
+        { row: '信任', col: '色温', bands: [0.1, 0.5, 0.9, 0.4] },
+        { row: '色温', col: '信任', bands: [0.8, 0.3] },
+      ],
+      interpolation: '平滑',
+      loop: true,
+    });
+
+    const text = serialize(r.ir);
+    const curve1 = text.indexOf('  曲线 信任 色温 0.1 0.5 0.9 0.4');
+    const curve2 = text.indexOf('  曲线 色温 信任 0.8 0.3');
+    const interp = text.indexOf('  插值 平滑');
+    const loop = text.indexOf('  循环 是');
+    expect(curve1).toBeGreaterThan(text.indexOf('  段 0.3 0'));
+    expect(curve2).toBeGreaterThan(curve1);
+    expect(interp).toBeGreaterThan(curve2);
+    expect(loop).toBeGreaterThan(interp);
+
+    const again = compileText(text, 'matrix-curves-roundtrip.nro');
+    expect(again.ok).toBe(true);
+    expect(matrixShape(again.ir)).toEqual(matrixShape(r.ir));
+    expect(serialize(again.ir)).toBe(text);
+    expect(serialize(r.ir)).toBe(text);
+  });
+
+  it('没有曲线/插值/循环时 IR 使用默认值，序列化不写多余行', () => {
+    const r = compileWorld(MATRIX);
+    expect(r.ok).toBe(true);
+    expect(r.ir.matrices[0]).toMatchObject({ curves: [], interpolation: '线性', loop: false });
+
+    const text = serialize(r.ir);
+    expect(text).not.toContain('  曲线 ');
+    expect(text).not.toContain('  插值 ');
+    expect(text).not.toContain('  循环 ');
+  });
+
+  it('行、列、段、曲线、插值、循环可以任意顺序出现', () => {
+    const r = compileWorld(`关系谱 乱序网
+  曲线 甲 乙 0 1
+  插值 平滑
+  段 0.5
+  循环 是
+  列 乙
+  行 甲
+`);
+    expect(r.ok).toBe(true);
+    expect(r.ir.matrices[0]).toMatchObject({
+      rows: ['甲'],
+      cols: ['乙'],
+      values: [[0.5]],
+      curves: [{ row: '甲', col: '乙', bands: [0, 1] }],
+      interpolation: '平滑',
+      loop: true,
+    });
+  });
+
+  it('重复曲线、缺失行列标签、音段数/有限性错误都有诊断', () => {
+    const duplicate = compileWorld(`关系谱 重曲线
+  行 甲 乙
+  列 甲 乙
+  段 1 0
+  段 0 1
+  曲线 甲 甲 0 1
+  曲线 甲 甲 0.5 0.5
+`);
+    expect(duplicate.ok).toBe(false);
+    expect(
+      duplicate.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('声明了多条曲线'),
+      ),
+    ).toBe(true);
+
+    const missingRow = compileWorld(`关系谱 缺行标签
+  行 甲 乙
+  列 甲 乙
+  段 1 0
+  段 0 1
+  曲线 丙 甲 0 1
+`);
+    expect(missingRow.ok).toBe(false);
+    expect(
+      missingRow.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('不存在的行标签「丙」'),
+      ),
+    ).toBe(true);
+
+    const missingCol = compileWorld(`关系谱 缺列标签
+  行 甲 乙
+  列 甲 乙
+  段 1 0
+  段 0 1
+  曲线 甲 丙 0 1
+`);
+    expect(missingCol.ok).toBe(false);
+    expect(
+      missingCol.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('不存在的列标签「丙」'),
+      ),
+    ).toBe(true);
+
+    const empty = compileWorld(`关系谱 空曲线
+  行 甲
+  列 甲
+  段 1
+  曲线 甲 甲
+`);
+    expect(empty.ok).toBe(false);
+    expect(
+      empty.diagnostics.errors.some(
+        (d) => d.code === 'NRO1100' && d.message.includes('至少需要一个音段值'),
+      ),
+    ).toBe(true);
+
+    const tooManyBands = Array.from({ length: 65 }, () => '0').join(' ');
+    const tooMany = compileWorld(`关系谱 长曲线
+  行 甲
+  列 甲
+  段 1
+  曲线 甲 甲 ${tooManyBands}
+`);
+    expect(tooMany.ok).toBe(false);
+    expect(
+      tooMany.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('65 个音段值') && d.message.includes('64'),
+      ),
+    ).toBe(true);
+
+    const huge = '9'.repeat(400);
+    const nonFinite = compileWorld(`关系谱 巨曲线
+  行 甲
+  列 甲
+  段 1
+  曲线 甲 甲 ${huge}
+`);
+    expect(nonFinite.ok).toBe(false);
+    expect(
+      nonFinite.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('不是有限数字'),
+      ),
+    ).toBe(true);
+
+    const malformed = compileWorld(`关系谱 坏曲线
+  行 甲
+  列 甲
+  段 1
+  曲线 甲 甲 0 x
+`);
+    expect(malformed.ok).toBe(false);
+    expect(
+      malformed.diagnostics.errors.some(
+        (d) => d.code === 'NRO1100' && d.message.includes('音段值只能是数字'),
+      ),
+    ).toBe(true);
+  });
+
   it('查关系谱在规则守卫、效果与结局里折叠成常量（与声明顺序无关）', () => {
     const r = compileWorld(`力迫 推
   当 查关系谱("势力网", "信任", "色温") >= 0.3
@@ -126,6 +305,84 @@ ${MATRIX}`);
       l: { k: 'const', v: 1 },
       r: { k: 'const', v: 0.5 },
     });
+  });
+
+  it('三参数查表在有曲线的格子上仍是编译期标量常量', () => {
+    const r = compileWorld(`${CURVED_MATRIX}结局 稳: 当 查关系谱("势力网", "信任", "色温") > 0.2`);
+    expect(r.ok).toBe(true);
+    expect(r.ir.endings[0]!.guard).toEqual({
+      k: 'bin',
+      op: '>',
+      l: { k: 'const', v: 0.3 },
+      r: { k: 'const', v: 0.2 },
+    });
+  });
+
+  it('四参数查关系谱：有曲线时下降成运行时采样，位置可以是数值表达式', () => {
+    const r = compileWorld(`力迫 推
+  当 查关系谱("势力网", "信任", "色温", 信任) >= 0.3
+  效果
+    信任 += 查关系谱("势力网", "信任", "色温", 0.25)
+
+${CURVED_MATRIX}`);
+    expect(r.ok).toBe(true);
+
+    const rule = r.ir.rules.find((x) => x.kind === 'forcing')!;
+    expect(rule.guard).toEqual({
+      k: 'bin',
+      op: '>=',
+      l: {
+        k: 'call',
+        fn: '查关系谱',
+        args: [
+          { k: 'const', v: '势力网' },
+          { k: 'const', v: '信任' },
+          { k: 'const', v: '色温' },
+          { k: 'read', id: '信任' },
+        ],
+      },
+      r: { k: 'const', v: 0.3 },
+    });
+    expect(rule.effects[0]).toEqual({
+      k: 'add',
+      id: '信任',
+      value: {
+        k: 'call',
+        fn: '查关系谱',
+        args: [
+          { k: 'const', v: '势力网' },
+          { k: 'const', v: '信任' },
+          { k: 'const', v: '色温' },
+          { k: 'const', v: 0.25 },
+        ],
+      },
+    });
+  });
+
+  it('四参数查关系谱：格子没有曲线时折叠成标量，位置被忽略', () => {
+    const r = compileWorld(
+      `${CURVED_MATRIX}结局 稳: 当 查关系谱("势力网", "信任", "信任", 信任) > 0.5`,
+    );
+    expect(r.ok).toBe(true);
+    // 信任 × 信任 没有曲线，标量「段」是 1；位置表达式不进入 IR。
+    expect(r.ir.endings[0]!.guard).toEqual({
+      k: 'bin',
+      op: '>',
+      l: { k: 'const', v: 1 },
+      r: { k: 'const', v: 0.5 },
+    });
+  });
+
+  it('四参数的位置必须是数字（NRO2003）', () => {
+    const r = compileWorld(
+      `${CURVED_MATRIX}结局 稳: 当 查关系谱("势力网", "信任", "色温", "0.5") > 0.5`,
+    );
+    expect(r.ok).toBe(false);
+    expect(
+      r.diagnostics.errors.some(
+        (d) => d.code === 'NRO2003' && d.message.includes('位置参数必须是数字'),
+      ),
+    ).toBe(true);
   });
 
   it('查表结果是常量，不会给任何弦制造读取', () => {
@@ -186,10 +443,11 @@ ${MATRIX}`);
     }
   });
 
-  it('参数个数不是 3 时报 NRO2003', () => {
+  it('参数个数不是 3 或 4 时报 NRO2003', () => {
     for (const expr of [
+      '查关系谱()',
       '查关系谱("势力网", "信任")',
-      '查关系谱("势力网", "信任", "信任", 1)',
+      '查关系谱("势力网", "信任", "信任", 1, 2)',
     ]) {
       const r = compileWorld(`${MATRIX}结局 稳: 当 ${expr} > 0.5`);
       expect(r.ok).toBe(false);
@@ -254,6 +512,19 @@ ${MATRIX}`);
           d.code === 'NRO2100' &&
           d.message.includes('第 1 条「段」有 1 个数') &&
           d.message.includes('2 个标签'),
+      ),
+    ).toBe(true);
+
+    // 曲线不能代替标量「段」：没有曲线的格子仍需要回退值。
+    const onlyCurve = compileWorld(`关系谱 只有曲线
+  行 甲
+  列 甲
+  曲线 甲 甲 0 1
+`);
+    expect(onlyCurve.ok).toBe(false);
+    expect(
+      onlyCurve.diagnostics.errors.some(
+        (d) => d.code === 'NRO2100' && d.message.includes('需要 1 条「段」') && d.message.includes('写了 0 条'),
       ),
     ).toBe(true);
   });
@@ -445,5 +716,58 @@ ${segments}
     if (!result.ok) return;
     expect(result.changed).toContain(`${edited.matrices[0]!.id}.values`);
     expect(result.text).toContain('0.9');
+  });
+
+  it('带曲线的矩阵仍可行级 patch 标量段值，并保留曲线行', () => {
+    const source = WORLD + CURVED_MATRIX;
+    const base = compileText(source, 'matrix-curved-patch.nro');
+    expect(base.ok).toBe(true);
+
+    const edited: WorldIR = {
+      ...base.ir,
+      matrices: base.ir.matrices.map((matrix) => ({
+        ...matrix,
+        values: matrix.values.map((row, i) => row.map((value, j) => (i === 0 && j === 1 ? 0.7 : value))),
+      })),
+    };
+    const result = patchWorldText(source, base.ir, edited);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toContain('  段 1 0.7');
+    expect(result.text).toContain('  曲线 信任 色温 0.1 0.5 0.9 0.4');
+    expect(result.text).toContain('  插值 平滑');
+    expect(result.text).toContain('  循环 是');
+
+    const again = compileText(result.text, 'matrix-curved-patched.nro');
+    expect(again.ok).toBe(true);
+    expect(again.ir.matrices[0]?.values[0]).toEqual([1, 0.7]);
+    expect(again.ir.matrices[0]?.curves).toEqual(base.ir.matrices[0]?.curves);
+  });
+
+  it('曲线或矩阵结构变化会让 patch 回退规范序列化（v2.3a 尚无曲线编辑）', () => {
+    const source = WORLD + CURVED_MATRIX;
+    const base = compileText(source, 'matrix-curve-fallback.nro');
+    expect(base.ok).toBe(true);
+
+    const editedCurve: WorldIR = {
+      ...base.ir,
+      matrices: base.ir.matrices.map((matrix) => ({
+        ...matrix,
+        curves: matrix.curves.map((curve, i) => (i === 0 ? { ...curve, bands: [0, 0.5, 1] } : curve)),
+      })),
+    };
+    const curveResult = patchWorldText(source, base.ir, editedCurve);
+    expect(curveResult.ok).toBe(false);
+    if (curveResult.ok) return;
+    expect(curveResult.reason).toContain('结构变化');
+
+    const renamed: WorldIR = {
+      ...base.ir,
+      matrices: base.ir.matrices.map((matrix) => ({ ...matrix, name: '新势力网', id: '新势力网' })),
+    };
+    const nameResult = patchWorldText(source, base.ir, renamed);
+    expect(nameResult.ok).toBe(false);
+    if (nameResult.ok) return;
+    expect(nameResult.reason).toContain('结构变化');
   });
 });

@@ -219,6 +219,29 @@ export function setMatrixCell(ir: WorldIR, id: string, row: number, col: number,
   const values = matrix.values.map((line, r) => (r === row ? line.map((v, c) => (c === col ? round(value) : v)) : line));
   return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, values } : m)) } };
 }
+/** 改关系谱某格曲线的一个段值（v2.3 GUI 曲线编辑用）。 */
+export function setMatrixCurveBand(
+  ir: WorldIR,
+  id: string,
+  row: string,
+  col: string,
+  index: number,
+  value: number,
+): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  const curve = matrix.curves?.find((c) => c.row === row && c.col === col);
+  if (!curve) return fail(`关系谱「${id}」的「${row} × ${col}」没有曲线`);
+  if (!Number.isInteger(index) || index < 0 || index >= curve.bands.length) {
+    return fail(`「${row} × ${col}」没有第 ${index} 段（共 ${curve.bands.length} 段）`);
+  }
+  if (!Number.isFinite(value)) return fail('段值必须是有限数字');
+  const curves = (matrix.curves ?? []).map((c) =>
+    c.row === row && c.col === col ? { ...c, bands: c.bands.map((b, i) => (i === index ? round(value) : b)) } : c,
+  );
+  return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, curves } : m)) } };
+}
+
 export function setSpectrumBand(ir: WorldIR, id: string, index: number, value: number): EditResult {
   const spectrum = ir.spectra.find((s) => s.id === id);
   if (!spectrum) return fail(`没有谱「${id}」`);

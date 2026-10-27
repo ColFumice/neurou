@@ -205,11 +205,22 @@ export interface SpectrumDecl extends DeclBase {
   articulation: '拨弦' | '持续';
 }
 
+/** 关系谱里一个格子的时间曲线（v2.3a）。 */
+export interface MatrixCurveAst {
+  row: string;
+  col: string;
+  /** 1..64 个有限采样值，位置 0..1 均匀分布。 */
+  bands: number[];
+  span?: Span;
+}
+
 /**
- * 关系谱：一张静态的「行 × 列」数值矩阵（v2.1c）。
+ * 关系谱：一张「行 × 列」数值矩阵（v2.1c），v2.3a 起每个格子可以再带一条
+ * 时间曲线。
  *
- * 行列标签是创作者自己定的名字（不必是弦名），矩阵值在编译期就是常量；
- * 本版本只支持用 `查关系谱` 做编译期查表，没有运行时调制。
+ * 行列标签是创作者自己定的名字（不必是弦名）。`values` 里的 `段` 永远是
+ * 编译期常量，也是没有曲线时的回退值；带 `curves` 的格子可以用四参数
+ * `查关系谱(矩阵, 行, 列, 位置)` 在运行时采样。
  */
 export interface MatrixDecl extends DeclBase {
   k: 'matrix';
@@ -217,6 +228,11 @@ export interface MatrixDecl extends DeclBase {
   rows: string[];
   cols: string[];
   values: number[][];
+  curves: MatrixCurveAst[];
+  /** 矩阵级插值方式，默认「线性」。 */
+  interpolation: '线性' | '平滑';
+  /** 矩阵级循环开关，默认 false。 */
+  loop: boolean;
 }
 
 export type Decl =

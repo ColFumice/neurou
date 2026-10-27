@@ -89,12 +89,20 @@ function structuralSignature(ir: WorldIR): string {
       articulation: s.articulation,
       bandCount: s.bands.length,
     })),
-    // 关系谱的格子值可做行级 patch；行/列结构变化仍会因签名不同而回退。
+    // 关系谱的格子值可做行级 patch；行/列结构、曲线或采样元数据变化
+    // 都会因签名不同而回退到规范序列化（v2.3a 还没有曲线编辑手势）。
     matrices: ir.matrices.map((m) => ({
       id: m.id,
       name: m.name,
       rows: m.rows,
       cols: m.cols,
+      curves: (m.curves ?? []).map((curve) => ({
+        row: curve.row,
+        col: curve.col,
+        bandCount: curve.bands.length,
+      })),
+      interpolation: m.interpolation ?? '线性',
+      loop: m.loop === true,
     })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
@@ -169,6 +177,48 @@ function matrixValuesEdits(text: string, base: IRMatrix, edited: IRMatrix): Text
     edits.push({ start: line.contentStart + bodyStart, end: line.contentEnd, text: nextBody });
   }
   return edits;
+}
+
+/** 关系谱曲线的段值：按行替换 `曲线 行 列 ...` 里的数字，保留行内其余内容。 */
+function matrixCurveBandsEdits(text: string, base: IRMatrix, edited: IRMatrix): TextEdit[] | { error: string } {
+  if (!base.span) return { error: `关系谱「${base.id}」没有源位置` };
+  const lines = linesIn(text, base.span.start.offset, base.span.end.offset);
+  const curveLines = lines.filter((item) => /^\s*曲线(?=\s|$)/.test(contentOf(text, item)));
+  const edits: TextEdit[] = [];
+  for (const editedCurve of edited.curves ?? []) {
+    const baseCurve = (base.curves ?? []).find((c) => c.row === editedCurve.row && c.col === editedCurve.col);
+    if (!baseCurve || baseCurve.bands.length !== editedCurve.bands.length) continue;
+    let differs = false;
+    for (let i = 0; i < baseCurve.bands.length; i++) {
+      if (Math.abs((baseCurve.bands[i] ?? 0) - (editedCurve.bands[i] ?? 0)) > 1e-9) differs = true;
+    }
+    if (!differs) continue;
+    const line = curveLines.find((item) => {
+      const tokens = contentOf(text, item).trim().split(/\s+/);
+      return tokens[1] === editedCurve.row && tokens[2] === editedCurve.col;
+    });
+    if (!line) return { error: `关系谱「${base.id}」的曲线行无法定位` };
+    const content = contentOf(text, line);
+    const tokens = content.trim().split(/\s+/);
+    const prefix = new RegExp(`^(\\s*曲线\\s+${escapeRegExp(tokens[1]!)}\\s+${escapeRegExp(tokens[2]!)}\\s+)`);
+    const head = prefix.exec(content)?.[1];
+    if (!head) return { error: `关系谱「${base.id}」的曲线行格式无法识别` };
+    const body = content.slice(head.length);
+    const matches = [...body.matchAll(/-?\d+(?:\.\d+)?/g)];
+    if (matches.length !== baseCurve.bands.length) return { error: `关系谱「${base.id}」的曲线段数不一致` };
+    let nextBody = body;
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const match = matches[i]!;
+      const at = match.index ?? 0;
+      nextBody = nextBody.slice(0, at) + formatNumber(editedCurve.bands[i]!) + nextBody.slice(at + match[0].length);
+    }
+    edits.push({ start: line.contentStart + head.length, end: line.contentEnd, text: nextBody });
+  }
+  return edits;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** 在最后一块弦声明之后插入新弦块。 */
@@ -422,20 +472,39 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   for (const edited of editedIR.matrices) {
     const base = baseIR.matrices.find((m) => m.id === edited.id);
     if (!base) return { ok: false, reason: `关系谱「${edited.id}」是新增的，需要回退规范序列化` };
-    let differs = false;
+    let valuesDiffer = false;
     for (let r = 0; r < edited.values.length; r++) {
       const row = edited.values[r] ?? [];
       const before = base.values[r] ?? [];
-      if (row.length !== before.length) differs = true;
+      if (row.length !== before.length) valuesDiffer = true;
       for (let c = 0; c < row.length; c++) {
-        if (Math.abs((row[c] ?? 0) - (before[c] ?? 0)) > 1e-9) differs = true;
+        if (Math.abs((row[c] ?? 0) - (before[c] ?? 0)) > 1e-9) valuesDiffer = true;
       }
     }
-    if (!differs) continue;
-    const result = matrixValuesEdits(normalized, base, edited);
-    if ('error' in result) return { ok: false, reason: result.error };
-    for (const edit of result) edits.push(edit);
-    changed.push(`${edited.id}.values`);
+    let curvesDiffer = false;
+    for (const curve of edited.curves ?? []) {
+      const before = (base.curves ?? []).find((c) => c.row === curve.row && c.col === curve.col);
+      if (!before || before.bands.length !== curve.bands.length) {
+        curvesDiffer = true;
+        continue;
+      }
+      for (let i = 0; i < before.bands.length; i++) {
+        if (Math.abs((before.bands[i] ?? 0) - (curve.bands[i] ?? 0)) > 1e-9) curvesDiffer = true;
+      }
+    }
+    if (!valuesDiffer && !curvesDiffer) continue;
+    if (valuesDiffer) {
+      const result = matrixValuesEdits(normalized, base, edited);
+      if ('error' in result) return { ok: false, reason: result.error };
+      for (const edit of result) edits.push(edit);
+      changed.push(`${edited.id}.values`);
+    }
+    if (curvesDiffer) {
+      const result = matrixCurveBandsEdits(normalized, base, edited);
+      if ('error' in result) return { ok: false, reason: result.error };
+      for (const edit of result) edits.push(edit);
+      changed.push(`${edited.id}.curves`);
+    }
   }
 
   const baseCouplings = new Map(baseIR.couplings.map((c) => [couplingKey(c), c]));

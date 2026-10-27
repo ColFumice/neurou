@@ -12,6 +12,7 @@ import {
   setStringThreshold,
   setSpectrumBand,
   setMatrixCell,
+  setMatrixCurveBand,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
@@ -184,6 +185,7 @@ export function App() {
   const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);
   const [matrixEdits, setMatrixEdits] = useState(0);
+  const [matrixCurveEdits, setMatrixCurveEdits] = useState(0);
   const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
@@ -500,6 +502,7 @@ export function App() {
       data-matrix-index={matrixIndex}
       data-matrix-count={worldIR?.matrices.length ?? 0}
       data-matrix-cell-edits={matrixEdits}
+      data-matrix-curve-edits={matrixCurveEdits}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -550,6 +553,9 @@ export function App() {
     rows: [...m.rows],
     cols: [...m.cols],
     values: m.values.map((row) => [...row]),
+    curves: (m.curves ?? []).map((c) => ({ row: c.row, col: c.col, bands: [...c.bands] })),
+    interpolation: m.interpolation,
+    loop: m.loop,
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
@@ -702,6 +708,28 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  /** 矩阵曲线：拖动某段后写回，patch 只改 `曲线` 行的数字。 */
+  const onEditMatrixCurveBand = (
+    matrixId: string,
+    row: string,
+    col: string,
+    index: number,
+    value: number,
+    persist = false,
+  ): void => {
+    if (transitionRef.current) return;
+    const result = setMatrixCurveBand(worldIR, matrixId, row, col, index, value);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixCurveEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
       <MatrixField
@@ -711,6 +739,7 @@ export function App() {
           setMatrixIndex((current) => ((current + dir) % matrices.length + matrices.length) % matrices.length)
         }
         onEditCell={onEditMatrixCell}
+        onEditCurveBand={onEditMatrixCurveBand}
         onExit={() => setScreen('strings')}
       />
     ) : screen === 'spectrum' && spectra.length > 0 ? (

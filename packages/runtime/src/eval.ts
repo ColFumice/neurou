@@ -1,5 +1,5 @@
 import type { LExpr } from '@neurou/core';
-import { sampleSpectrum, type RuntimeValue, type WorldState } from './state.js';
+import { sampleMatrixCurve, sampleSpectrum, type MatrixState, type RuntimeValue, type WorldState } from './state.js';
 
 /** 求值：把图上的表达式还原成一次具体的判断或数值。 */
 export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
@@ -59,6 +59,25 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           const sampled = sampleSpectrum(st, asNumber(args[1] ?? null));
           return sampled === undefined ? 0 : sampled;
         }
+        case '查关系谱': {
+          // 三参数读取「段」的标量值；四参数在有曲线时按位置采样。
+          // 编译期已经校验矩阵/标签并把无曲线格子折叠成常量；这里保留
+          // 完整回退路径，方便旧快照或直接构造 LExpr 的工具。
+          if (args.length < 3) return 0;
+          const name = args[0];
+          const row = args[1];
+          const col = args[2];
+          if (typeof name !== 'string' || typeof row !== 'string' || typeof col !== 'string') return 0;
+          const matrix = state.matrices?.[name];
+          if (!matrix) return 0;
+          const scalar = matrixScalar(matrix, row, col);
+          if (args.length < 4) return scalar;
+          const curve = matrix.curves.find((c) => c.row === row && c.col === col);
+          if (!curve) return scalar;
+          const sampled = sampleMatrixCurve(curve, asNumber(args[3] ?? null), matrix.interpolation, matrix.loop);
+          // 非有限位置或空曲线：回退到静态标量（没有标量才是 0）。
+          return sampled === undefined ? scalar : sampled;
+        }
         default:
           return null;
       }
@@ -66,6 +85,15 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
     default:
       return null;
   }
+}
+
+/** 关系谱某个格子的静态标量值（`段`）；标签不存在或值非有限时为 0。 */
+function matrixScalar(matrix: MatrixState, row: string, col: string): number {
+  const r = matrix.rows.indexOf(row);
+  const c = matrix.cols.indexOf(col);
+  if (r < 0 || c < 0) return 0;
+  const value = matrix.values[r]?.[c];
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 export function binary(op: string, l: RuntimeValue, r: RuntimeValue): RuntimeValue {

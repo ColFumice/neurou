@@ -615,15 +615,29 @@ class Parser {
    *   列 甲 乙
    *   段 0 0.3
    *   段 0.3 0
+   *   曲线 甲 乙 0.1 0.5 0.9
+   *   插值 平滑
+   *   循环 是
    *
-   * 「行/列」各是一行标签，「段」按行重复。标签是否重复、条数是否对得上、
-   * 每行数字个数是否等于列数，都留给编译器——这样诊断能指向整张矩阵，
-   * 并且错误时 IR 仍保留作者写的原值供预览。
+   * 「行/列」各是一行标签，「段」按行重复，条数必须和行数一致。曲线是
+   * v2.3a 的格子级时间曲线：前两个 token 是行列标签，其余是数字。
+   * 标签是否存在、是否重复、曲线重复、音段个数在 1..64、数字是否有限，
+   * 都留给编译器——这样诊断能指向具体曲线，同时 IR 仍保留作者写的原值。
    */
   private parseMatrix(): MatrixDecl {
     const start = this.advance(); // 关键字
     const name = this.readName('关系谱名');
-    const decl: MatrixDecl = { k: 'matrix', name, rows: [], cols: [], values: [], span: this.spanFrom(start) };
+    const decl: MatrixDecl = {
+      k: 'matrix',
+      name,
+      rows: [],
+      cols: [],
+      values: [],
+      curves: [],
+      interpolation: '线性',
+      loop: false,
+      span: this.spanFrom(start),
+    };
     this.finishLine();
 
     let sawRows = false;
@@ -677,8 +691,73 @@ class Parser {
             decl.values.push(row);
             break;
           }
+          case '曲线': {
+            // 前两个 token 是标签（标识符），其余全是数字；标签不会被误读成
+            // 数字，因为词法器已经按 token 类型区分。
+            const rowLabel = this.readName('行标签');
+            const colLabel = this.readName('列标签');
+            const bands: number[] = [];
+            let bad = false;
+            while (!this.atLineEnd()) {
+              const t = this.peek();
+              if (t.kind === 'number' || (t.kind === 'op' && (t.text === '-' || t.text === '+'))) {
+                bands.push(this.readNumber('曲线音段值'));
+              } else {
+                this.fail(
+                  `「曲线」的音段值只能是数字，但读到了「${t.text}」。`,
+                  t.span,
+                  '先写行标签、列标签，再写空格分隔的数字，例如「曲线 信任 色温 0.1 0.5 0.9」。',
+                );
+                bad = true;
+                break;
+              }
+            }
+            if (bad) {
+              this.skipToLineEnd();
+              break;
+            }
+            const span = this.spanFrom(fieldStart);
+            this.finishLine();
+            if (bands.length === 0) {
+              this.fail(
+                `关系谱「${name}」的「曲线」至少需要一个音段值。`,
+                span,
+                '例如「曲线 信任 色温 0.1 0.5 0.9」。',
+              );
+            } else {
+              decl.curves.push({ row: rowLabel, col: colLabel, bands, span });
+            }
+            break;
+          }
+          case '插值': {
+            const valueStart = this.peek();
+            const value = this.readName('插值方式');
+            if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
+              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑。');
+            } else {
+              decl.interpolation = value as MatrixDecl['interpolation'];
+            }
+            this.finishLine();
+            break;
+          }
+          case '循环': {
+            if (this.atIdent('是')) {
+              this.advance();
+              decl.loop = true;
+            } else if (this.atIdent('否')) {
+              this.advance();
+              decl.loop = false;
+            } else {
+              const t = this.peek();
+              this.fail(`「循环」只能写「是」或「否」，但读到了「${t.text}」。`, t.span);
+              this.skipToLineEnd();
+              break;
+            }
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段。');
+            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环。');
             this.skipToLineEnd();
         }
       }

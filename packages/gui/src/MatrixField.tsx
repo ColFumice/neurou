@@ -15,12 +15,21 @@ import { getStringAudio } from './stringAudio.js';
  * Props / 数据契约
  * ------------------------------------------------------------------ */
 
+export interface MatrixCurveView {
+  row: string;
+  col: string;
+  bands: number[];
+}
+
 export interface MatrixView {
   id: string;
   name: string;
   rows: string[];
   cols: string[];
   values: number[][];
+  curves: MatrixCurveView[];
+  interpolation: '线性' | '平滑';
+  loop: boolean;
 }
 
 export interface MatrixFieldProps {
@@ -28,6 +37,14 @@ export interface MatrixFieldProps {
   index: number;
   onCycleMatrix: (dir: 1 | -1) => void;
   onEditCell: (matrixId: string, row: number, col: number, value: number, persist?: boolean) => void;
+  onEditCurveBand: (
+    matrixId: string,
+    row: string,
+    col: string,
+    index: number,
+    value: number,
+    persist?: boolean,
+  ) => void;
   onExit: () => void;
 }
 
@@ -67,6 +84,8 @@ interface MatrixDebugState {
   crosshair: number;
   hoverSfx: number;
   navSfx: number;
+  selectedCurve: { row: string; col: string; bands: number[] } | null;
+  curveBandEdits: number;
 }
 
 declare global {
@@ -74,6 +93,7 @@ declare global {
     __neurouMatrix?: {
       state: () => MatrixDebugState;
       cellPositions: () => CellPosition[];
+      curvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
       setCell: (row: number, col: number, value: number) => void;
     };
   }
@@ -158,6 +178,22 @@ const HIT_TOLERANCE_PX = 10;
 const SELECTION_RING_PADDING = 9;
 const SELECTION_RING_WIDTH = 2;
 const SELECTION_RING_RADIUS_EXTRA = 4;
+
+/** 每格曲线：格内极淡 sparkline + 选中曲线格底部无面板编辑器。 */
+const CURVE_EDITOR_LEFT = 240;
+const CURVE_EDITOR_RIGHT = 1200;
+const CURVE_EDITOR_TOP = 790;
+const CURVE_EDITOR_BOTTOM = 850;
+const CURVE_EDITOR_FADE_MS = 200;
+const CURVE_EDITOR_SAMPLES = 120;
+const CURVE_SPARK_SAMPLES = 24;
+const CURVE_SPARK_ALPHA = 0.22;
+const CURVE_SPARK_HOVER_ALPHA = 0.3;
+const CURVE_LINE_ALPHA = 0.42;
+const CURVE_POINT_ALPHA = 0.7;
+const CURVE_POINT_RADIUS = 2.6;
+const CURVE_POINT_SELECTED_RADIUS = 4.2;
+const CURVE_VALUE_EASE_TAU_S = 0.12;
 
 /** 伪 3D：越白的格子略大（0.94..1.05），且视差移动更快（0.78..1.22 × 组 offset）。 */
 const CELL_VALUE_SCALE_MIN = 0.94;
@@ -296,18 +332,27 @@ function cellCenter(layout: MatrixLayout, row: number, col: number): { x: number
  * 组件
  * ------------------------------------------------------------------ */
 
-export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit }: MatrixFieldProps): JSX.Element {
+export function MatrixField({
+  matrices,
+  index,
+  onCycleMatrix,
+  onEditCell,
+  onEditCurveBand,
+  onExit,
+}: MatrixFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const matricesRef = useRef<MatrixView[]>(matrices);
   const indexRef = useRef<number>(index);
   const cycleRef = useRef(onCycleMatrix);
   const editRef = useRef(onEditCell);
+  const curveEditRef = useRef(onEditCurveBand);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
   cycleRef.current = onCycleMatrix;
   editRef.current = onEditCell;
+  curveEditRef.current = onEditCurveBand;
   exitRef.current = onExit;
 
   const matrixCount = matrices.length;
@@ -326,6 +371,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
   const [crosshairUi, setCrosshairUi] = useState(1);
   const [hoverSfxUi, setHoverSfxUi] = useState(0);
   const [navSfxUi, setNavSfxUi] = useState(0);
+  const [selectedCurveUi, setSelectedCurveUi] = useState<number[] | null>(null);
+  const [curveBandEditsUi, setCurveBandEditsUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -335,6 +382,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
   ]);
   const cursorAttr =
     cursorUi === null ? '' : `${Math.round(cursorUi.x)},${Math.round(cursorUi.y)}`;
+  const curveCount = current?.curves?.length ?? 0;
+  const selectedCurveAttr =
+    selectedCurveUi === null ? '' : JSON.stringify(selectedCurveUi.map((value) => round4(value)));
 
   useEffect(() => {
     const hostElement = hostRef.current;
@@ -379,6 +429,28 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     /** hover / nav 音效计数。 */
     let hoverSfxNow = 0;
     let navSfxNow = 0;
+    /** 每格曲线：当前选中格的曲线数据 + 底部编辑器动画/拖拽状态。 */
+    let curveIdentity = '';
+    let curveMatrixId = '';
+    let curveRow = '';
+    let curveCol = '';
+    let curveBands: number[] = [];
+    let curveTargets: number[] = [];
+    let curveActive = false;
+    let curveAlpha = 0;
+    let curveFadeStart = 0;
+    let curveFadeTarget = 0;
+    let curveDrag: {
+      pointerId: number;
+      index: number;
+      startY: number;
+      startValue: number;
+      moved: boolean;
+    } | null = null;
+    let curveSelectedIndex: number | null = null;
+    let curvePointScales: Spring[] = [];
+    let curveBandEditsNow = 0;
+    let curveUiNow: number[] | null = null;
     /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
     let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
@@ -504,6 +576,158 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     function bumpNavSfx(): void {
       navSfxNow += 1;
       setNavSfxUi(navSfxNow);
+    }
+
+    /* —— 每格曲线 —— */
+    function smoothstep(t: number): number {
+      const value = clamp(t, 0, 1);
+      return value * value * (3 - 2 * value);
+    }
+
+    function sampleCurveBands(matrix: MatrixView, bands: readonly number[], t: number): number {
+      const count = bands.length;
+      if (count === 0) return 0;
+      if (count === 1) return clampValue(bands[0] ?? 0);
+      if (matrix.loop) {
+        const scaled = clamp(t, 0, 1) * count;
+        const i0 = Math.floor(scaled) % count;
+        const i1 = (i0 + 1) % count;
+        const raw = scaled - Math.floor(scaled);
+        const u = matrix.interpolation === '平滑' ? smoothstep(raw) : raw;
+        const a = bands[i0] ?? 0;
+        const b = bands[i1] ?? 0;
+        return clampValue(a + (b - a) * u);
+      }
+      const pos = clamp(t, 0, 1) * (count - 1);
+      const i0 = Math.min(count - 1, Math.floor(pos));
+      const i1 = Math.min(count - 1, i0 + 1);
+      const raw = pos - i0;
+      const u = matrix.interpolation === '平滑' ? smoothstep(raw) : raw;
+      const a = bands[i0] ?? 0;
+      const b = bands[i1] ?? 0;
+      return clampValue(a + (b - a) * u);
+    }
+
+    function selectedCurveInfo(matrix: MatrixView | null): MatrixCurveView | null {
+      if (!matrix || !selected) return null;
+      const row = matrix.rows[selected.row] ?? '';
+      const col = matrix.cols[selected.col] ?? '';
+      return matrix.curves?.find((curve) => curve.row === row && curve.col === col) ?? null;
+    }
+
+    function curveForCell(matrix: MatrixView, row: string, col: string): MatrixCurveView | null {
+      return matrix.curves?.find((curve) => curve.row === row && curve.col === col) ?? null;
+    }
+
+    function curvePointX(matrix: MatrixView, index: number, count: number): number {
+      if (count <= 1) return (CURVE_EDITOR_LEFT + CURVE_EDITOR_RIGHT) / 2;
+      const ratio = matrix.loop ? index / count : index / (count - 1);
+      return lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, clamp(ratio, 0, 1));
+    }
+
+    function curveValueToY(value: number): number {
+      return lerp(CURVE_EDITOR_BOTTOM, CURVE_EDITOR_TOP, clamp(value, 0, 1));
+    }
+
+    function curveEditorContains(point: { x: number; y: number }): boolean {
+      return (
+        point.x >= CURVE_EDITOR_LEFT &&
+        point.x <= CURVE_EDITOR_RIGHT &&
+        point.y >= CURVE_EDITOR_TOP - 6 &&
+        point.y <= CURVE_EDITOR_BOTTOM + 6
+      );
+    }
+
+    function pushCurveUi(force = false): void {
+      const next = curveActive && curveBands.length > 0 ? curveBands.map((value) => round4(value)) : null;
+      const same = JSON.stringify(next) === JSON.stringify(curveUiNow);
+      if (same && !force) return;
+      curveUiNow = next;
+      setSelectedCurveUi(next);
+    }
+
+    function bumpCurveBandEdits(): void {
+      curveBandEditsNow += 1;
+      setCurveBandEditsUi(curveBandEditsNow);
+    }
+
+    /** 选中格曲线出现/消失/外部更新：维护底部编辑器数据与 200ms 淡入淡出。 */
+    function syncCurveEditor(now: number, matrix: MatrixView | null): void {
+      const desired = selectedCurveInfo(matrix);
+      if (matrix && desired && desired.bands.length > 0) {
+        const identity = `${matrix.id}|${desired.row}|${desired.col}`;
+        if (!curveActive || identity !== curveIdentity) {
+          curveIdentity = identity;
+          curveMatrixId = matrix.id;
+          curveRow = desired.row;
+          curveCol = desired.col;
+          curveTargets = desired.bands.map((value) => clampValue(value));
+          curveBands = curveTargets.slice();
+          curveSelectedIndex = null;
+          curvePointScales = curveTargets.map(() => new Spring(1));
+          curveFadeStart = now;
+          curveFadeTarget = 1;
+          curveActive = true;
+          curveAlpha = Math.max(curveAlpha, 0);
+          pushCurveUi(true);
+        } else if (!curveDrag && desired.bands.length === curveTargets.length) {
+          let changed = false;
+          for (let i = 0; i < desired.bands.length; i += 1) {
+            const next = clampValue(desired.bands[i] ?? 0);
+            if (Math.abs(next - (curveTargets[i] ?? next)) > 1e-6) {
+              curveTargets[i] = next;
+              changed = true;
+            }
+          }
+          if (changed) pushCurveUi();
+        }
+      } else if (curveActive) {
+        curveActive = false;
+        curveFadeStart = now;
+        curveFadeTarget = 0;
+        pushCurveUi(true);
+      }
+    }
+
+    /** 每帧：曲线淡入淡出、数值缓动与段点 spring。 */
+    function stepCurveEditor(now: number, dt: number): void {
+      if (curveActive || curveAlpha > 0.001 || curveFadeTarget > 0) {
+        const t = clamp((now - curveFadeStart) / CURVE_EDITOR_FADE_MS, 0, 1);
+        curveAlpha = curveFadeTarget === 1 ? easeOutCubic(t) : 1 - easeOutCubic(t);
+        if (curveFadeTarget === 0 && curveAlpha <= 0.001) {
+          curveAlpha = 0;
+          curveBands = [];
+          curveTargets = [];
+          curveIdentity = '';
+          curveSelectedIndex = null;
+          curvePointScales = [];
+        }
+      }
+      if (curveBands.length > 0) {
+        const factor = 1 - Math.exp(-dt / CURVE_VALUE_EASE_TAU_S);
+        let changed = false;
+        for (let i = 0; i < curveTargets.length; i += 1) {
+          const currentValue = curveBands[i] ?? 0;
+          const targetValue = curveTargets[i] ?? currentValue;
+          const delta = targetValue - currentValue;
+          if (Math.abs(delta) < 0.0002) {
+            if (currentValue !== targetValue) {
+              curveBands[i] = targetValue;
+              changed = true;
+            }
+          } else {
+            curveBands[i] = currentValue + delta * factor;
+            changed = true;
+          }
+        }
+        if (changed) pushCurveUi();
+        for (let i = 0; i < curvePointScales.length; i += 1) {
+          const spring = curvePointScales[i];
+          if (!spring) continue;
+          spring.target = i === curveSelectedIndex ? 1.35 : 1;
+          spring.step(dt);
+        }
+      }
     }
 
     function resetScales(rows: number, cols: number): void {
@@ -659,6 +883,42 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cursorFade = 1;
       expandCursor();
       updateCursorUi(point);
+      // 底部曲线编辑器：只有编辑器区域内的 pointerdown 才拦截矩阵手势。
+      const curve = selectedCurveInfo(matrix);
+      if (curve && curveEditorContains(point)) {
+        event.preventDefault();
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          /* ignore */
+        }
+        syncCurveEditor(performance.now(), matrix);
+        if (curveTargets.length === 0) {
+          curveTargets = curve.bands.map((value) => clampValue(value));
+          curveBands = curveTargets.slice();
+          curvePointScales = curveTargets.map(() => new Spring(1));
+        }
+        const count = curveTargets.length;
+        let best = 0;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < count; i += 1) {
+          const distance = Math.abs(point.x - curvePointX(matrix, i, count));
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = i;
+          }
+        }
+        curveSelectedIndex = best;
+        curveDrag = {
+          pointerId: event.pointerId,
+          index: best,
+          startY: point.y,
+          startValue: curveTargets[best] ?? 0,
+          moved: false,
+        };
+        pushCurveUi(true);
+        return;
+      }
       const cell = cellAtPointer(point.x, point.y);
       event.preventDefault();
       try {
@@ -693,6 +953,14 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cursorFade = 1;
       expandCursor();
       updateCursorUi(point);
+      // 拖动曲线段点：垂直改该段 0..1。
+      if (curveDrag && event.pointerId === curveDrag.pointerId) {
+        if (Math.abs(point.y - curveDrag.startY) > 2) curveDrag.moved = true;
+        const value = clampValue((CURVE_EDITOR_BOTTOM - point.y) / (CURVE_EDITOR_BOTTOM - CURVE_EDITOR_TOP));
+        curveTargets[curveDrag.index] = value;
+        pushCurveUi(true);
+        return;
+      }
       if (!drag) {
         const cell = cellAtPointer(point.x, point.y);
         if (!sameCell(cell, hover)) {
@@ -728,6 +996,21 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     }
 
     function onPointerUp(event: PointerEvent): void {
+      if (curveDrag && event.pointerId === curveDrag.pointerId) {
+        const session = curveDrag;
+        curveDrag = null;
+        try {
+          if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        } catch {
+          /* ignore */
+        }
+        if (session.moved) {
+          const value = clampValue(curveTargets[session.index] ?? session.startValue);
+          curveEditRef.current?.(curveMatrixId, curveRow, curveCol, session.index, value, true);
+          bumpCurveBandEdits();
+        }
+        return;
+      }
       if (!drag || event.pointerId !== drag.pointerId) return;
       const matrix = currentMatrix();
       const session = drag;
@@ -745,6 +1028,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
 
     function onPointerCancel(event: PointerEvent): void {
       if (drag && event.pointerId === drag.pointerId) drag = null;
+      if (curveDrag && event.pointerId === curveDrag.pointerId) curveDrag = null;
     }
 
     /** 双击格子 → 归零（persist）。 */
@@ -866,13 +1150,43 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     }
 
     /* —— 绘制 —— */
-    function drawCell(centerX: number, centerY: number, value: number, scale: number, selectedCell: boolean): void {
+    function drawCell(
+      centerX: number,
+      centerY: number,
+      value: number,
+      scale: number,
+      selectedCell: boolean,
+      curve: MatrixCurveView | null,
+      hovered: boolean,
+      matrix: MatrixView,
+    ): void {
       const size = layout.cell * scale;
       const radius = layout.radius * (0.85 + scale * 0.15);
       ctx.fillStyle = cellGrey(value);
       ctx.beginPath();
       ctx.roundRect(centerX - size / 2, centerY - size / 2, size, size, radius);
       ctx.fill();
+      // 格内底部极淡 sparkline（不改变填充/尺寸/图层/差速）。
+      if (curve && curve.bands.length > 1) {
+        const x0 = centerX - size * 0.3;
+        const x1 = centerX + size * 0.3;
+        const y0 = centerY + size * 0.38;
+        const y1 = centerY + size * 0.2;
+        ctx.strokeStyle = rgba(LABEL_RGB, hovered ? CURVE_SPARK_HOVER_ALPHA : CURVE_SPARK_ALPHA);
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (let step = 0; step <= CURVE_SPARK_SAMPLES; step += 1) {
+          const t = step / CURVE_SPARK_SAMPLES;
+          const sample = sampleCurveBands(matrix, curve.bands, t);
+          const x = lerp(x0, x1, t);
+          const y = lerp(y0, y1, sample);
+          if (step === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
       if (selectedCell) {
         ctx.strokeStyle = rgba(LABEL_RGB, 0.55);
         ctx.lineWidth = 1.4;
@@ -937,6 +1251,52 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.restore();
     }
 
+    /** 选中曲线格 → 矩阵下方无面板曲线编辑器（淡入淡出 200ms、段点 spring）。 */
+    function drawCurveEditor(matrix: MatrixView, now: number, contentAlpha: number): void {
+      if (curveAlpha <= 0.004 || curveBands.length < 2) return;
+      const editorAlpha = clamp(contentAlpha * curveAlpha, 0, 1);
+      if (editorAlpha <= 0.004) return;
+      const t = clamp((now - curveFadeStart) / CURVE_EDITOR_FADE_MS, 0, 1);
+      const editorScale = lerp(0.98, 1, easeOutCubic(t));
+      const centerX = (CURVE_EDITOR_LEFT + CURVE_EDITOR_RIGHT) / 2;
+      const centerY = (CURVE_EDITOR_TOP + CURVE_EDITOR_BOTTOM) / 2;
+      ctx.save();
+      ctx.globalAlpha = editorAlpha;
+      ctx.translate(centerX, centerY);
+      ctx.scale(editorScale, editorScale);
+      ctx.translate(-centerX, -centerY);
+
+      // 极淡曲线
+      ctx.strokeStyle = rgba(LABEL_RGB, CURVE_LINE_ALPHA);
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
+        const ratio = step / CURVE_EDITOR_SAMPLES;
+        const x = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, ratio);
+        const y = curveValueToY(sampleCurveBands(matrix, curveBands, ratio));
+        if (step === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // 段点（选中点更大，spring 缩放）
+      const count = curveBands.length;
+      for (let i = 0; i < count; i += 1) {
+        const x = curvePointX(matrix, i, count);
+        const y = curveValueToY(curveBands[i] ?? 0);
+        const spring = curvePointScales[i];
+        const scaleValue = spring?.value ?? 1;
+        const radius = (i === curveSelectedIndex ? CURVE_POINT_SELECTED_RADIUS : CURVE_POINT_RADIUS) * scaleValue;
+        ctx.fillStyle = rgba(LABEL_RGB, CURVE_POINT_ALPHA);
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     function draw(matrix: MatrixView | null, now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = rgbGrey(BG_RGB[0]);
@@ -989,7 +1349,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
       cells.sort((a, b) => a.size - b.size || a.row - b.row || a.col - b.col);
       for (const cell of cells) {
-        drawCell(cell.centerX, cell.centerY, cell.value, cell.size / layout.cell, cell.isSelected);
+        const curve = curveForCell(matrix, matrix.rows[cell.row] ?? '', matrix.cols[cell.col] ?? '');
+        const hovered = hover !== null && hover.row === cell.row && hover.col === cell.col;
+        drawCell(cell.centerX, cell.centerY, cell.value, cell.size / layout.cell, cell.isSelected, curve, hovered, matrix);
       }
 
       // 选中框：所有格子之后画（即使被大格盖住也能看见）；difference 白描边适配深浅底；
@@ -1008,6 +1370,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         ctx.stroke();
         ctx.restore();
       }
+
+      // 选中的曲线格：矩阵下方出现无面板的底部曲线编辑器。
+      drawCurveEditor(matrix, now, alpha);
 
       // 行标签（左侧）：跟组 offset
       ctx.font = `${ROW_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
@@ -1073,6 +1438,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const matrix = syncMatrix(now);
       const rows = targets.length;
       const cols = targets[0]?.length ?? 0;
+      syncCurveEditor(now, matrix);
+      stepCurveEditor(now, dt);
 
       // 数值缓动（约 180ms）
       if (rows > 0) {
@@ -1194,6 +1561,11 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         crosshair: Math.round(crosshairScale * 1000) / 1000,
         hoverSfx: hoverSfxNow,
         navSfx: navSfxNow,
+        selectedCurve:
+          curveActive && curveBands.length > 0
+            ? { row: curveRow, col: curveCol, bands: curveBands.map((value) => round4(value)) }
+            : null,
+        curveBandEdits: curveBandEditsNow,
       };
     }
 
@@ -1223,6 +1595,17 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
           }
         }
         return result;
+      },
+      curvePositions: () => {
+        const matrix = currentMatrix();
+        if (!matrix || curveBands.length < 2) return [];
+        const count = curveBands.length;
+        return curveBands.map((value, index) => ({
+          index,
+          x: Math.round(curvePointX(matrix, index, count) * 100) / 100,
+          y: Math.round(curveValueToY(value) * 100) / 100,
+          value: round4(value),
+        }));
       },
       setCell: (row: number, col: number, value: number) => {
         const matrix = currentMatrix();
@@ -1297,6 +1680,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       data-crosshair={crosshairUi.toFixed(2)}
       data-hover-sfx={hoverSfxUi}
       data-nav-sfx={navSfxUi}
+      data-curve-count={curveCount}
+      data-selected-curve={selectedCurveAttr}
+      data-curve-band-edits={curveBandEditsUi}
       style={{
         position: 'absolute',
         inset: 0,

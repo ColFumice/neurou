@@ -173,11 +173,21 @@ export interface IRSpectrum {
   span?: Span;
 }
 
+/** 关系谱里一个格子的时间曲线（v2.3a）；标签定位到 rows/cols。 */
+export interface IRMatrixCurve {
+  row: string;
+  col: string;
+  /** 1..64 个有限采样值，位置 0..1 均匀分布。 */
+  bands: number[];
+}
+
 /**
- * 关系谱：一张静态的「行 × 列」数值矩阵（v2.1c）。
+ * 关系谱：一张「行 × 列」数值矩阵（v2.1c），v2.3a 起格子可以带时间曲线。
  *
- * 值是编译期数据，不进入运行时状态；`查关系谱` 会在编译期把查表结果
- * 下降成常量。行列标签只是作者可读的坐标名，不要求是弦。
+ * `values`（`段`）始终保留，是所有格子的标量回退值；没有曲线的格子由
+ * `查关系谱` 在编译期折叠成该值（三参数恒如此，四参数也如此），有曲线的
+ * 格子由四参数版本在运行时采样。曲线和采样元数据随 WorldState 复制，
+ * 保证规则/结局只凭状态就能求值。
  */
 export interface IRMatrix {
   id: string;
@@ -185,6 +195,9 @@ export interface IRMatrix {
   rows: string[];
   cols: string[];
   values: number[][];
+  curves: IRMatrixCurve[];
+  interpolation: '线性' | '平滑';
+  loop: boolean;
   span?: Span;
 }
 
