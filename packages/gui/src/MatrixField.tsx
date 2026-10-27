@@ -9,6 +9,7 @@
  * 组件只负责画布与输入：值真正写回由 App 的 onEditCell 处理。
  */
 import { useEffect, useRef, useState } from 'react';
+import { getStringAudio } from './stringAudio.js';
 
 /* ------------------------------------------------------------------ *
  * Props / 数据契约
@@ -62,6 +63,10 @@ interface MatrixDebugState {
   cellEdits: number;
   cursor: { x: number; y: number } | null;
   offset: { x: number; y: number };
+  cursorVisible: boolean;
+  crosshair: number;
+  hoverSfx: number;
+  navSfx: number;
 }
 
 declare global {
@@ -143,6 +148,9 @@ const CURSOR_THICK_WIDTH = 3;
 const CURSOR_LINE_ALPHA = 0.5;
 const CURSOR_RETICLE_ALPHA = 1;
 const CURSOR_FADE_MS = 160;
+/** 方向键移动时十字光标收拢 220ms；鼠标再动时展开 260ms。 */
+const CURSOR_COLLAPSE_MS = 220;
+const CURSOR_EXPAND_MS = 260;
 /** 命中容差：视差弹簧还没追上时也能稳定点到目标格。 */
 const HIT_TOLERANCE_PX = 10;
 
@@ -314,6 +322,10 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     y: LOGICAL_H / 2,
   });
   const [offsetUi, setOffsetUi] = useState({ x: 0, y: 0 });
+  const [cursorVisibleUi, setCursorVisibleUi] = useState(true);
+  const [crosshairUi, setCrosshairUi] = useState(1);
+  const [hoverSfxUi, setHoverSfxUi] = useState(0);
+  const [navSfxUi, setNavSfxUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -334,6 +346,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     const host = hostElement;
     const canvas = canvasElement;
     const ctx = ctxMaybe;
+    const audio = getStringAudio();
 
     /* —— 可变状态 —— */
     let displayed: number[][] = [];
@@ -358,6 +371,14 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     let cursorUiNow: { x: number; y: number } | null = { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
     let cursorActive = true;
     let cursorFade = 1;
+    /** 十字光标展开/收拢比例（0 = 隐藏，1 = 全屏）。 */
+    let crosshairScale = 1;
+    let crosshairAnim: { from: number; to: number; start: number; duration: number } | null = null;
+    let cursorVisible = true;
+    let crosshairUiNow = 1;
+    /** hover / nav 音效计数。 */
+    let hoverSfxNow = 0;
+    let navSfxNow = 0;
     /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
     let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
@@ -436,6 +457,53 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
       cursorUiNow = { x: point.x, y: point.y };
       setCursorUi(cursorUiNow);
+    }
+
+    function setCursorVisibleState(value: boolean): void {
+      if (cursorVisible === value) return;
+      cursorVisible = value;
+      setCursorVisibleUi(value);
+    }
+
+    function pushCrosshairUi(): void {
+      const rounded = Math.round(crosshairScale * 100) / 100;
+      if (Math.abs(rounded - crosshairUiNow) < 0.005) return;
+      crosshairUiNow = rounded;
+      setCrosshairUi(rounded);
+    }
+
+    function animateCrosshair(to: number, duration: number, now: number): void {
+      crosshairAnim = { from: crosshairScale, to, start: now, duration };
+      if (to > 0) setCursorVisibleState(true);
+    }
+
+    /** 鼠标移动/点击：十字光标从当前位置展开恢复（0→1，约 260ms）。 */
+    function expandCursor(): void {
+      cursorActive = true;
+      cursorFade = 1;
+      if (crosshairAnim && crosshairAnim.to > 0.999) return;
+      if (!cursorVisible || crosshairScale < 0.999) {
+        animateCrosshair(1, CURSOR_EXPAND_MS, performance.now());
+      } else {
+        setCursorVisibleState(true);
+      }
+    }
+
+    /** 方向键移动选中：十字光标以当前光标位置为中心收拢（1→0，约 220ms）后隐藏。 */
+    function collapseCursor(): void {
+      if (!cursorVisible && crosshairScale <= 0.002) return;
+      if (crosshairAnim && crosshairAnim.to <= 0.001) return;
+      animateCrosshair(0, CURSOR_COLLAPSE_MS, performance.now());
+    }
+
+    function bumpHoverSfx(): void {
+      hoverSfxNow += 1;
+      setHoverSfxUi(hoverSfxNow);
+    }
+
+    function bumpNavSfx(): void {
+      navSfxNow += 1;
+      setNavSfxUi(navSfxNow);
     }
 
     function resetScales(rows: number, cols: number): void {
@@ -589,6 +657,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cursor = point;
       cursorActive = true;
       cursorFade = 1;
+      expandCursor();
       updateCursorUi(point);
       const cell = cellAtPointer(point.x, point.y);
       event.preventDefault();
@@ -622,12 +691,19 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cursor = point;
       cursorActive = true;
       cursorFade = 1;
+      expandCursor();
       updateCursorUi(point);
       if (!drag) {
         const cell = cellAtPointer(point.x, point.y);
         if (!sameCell(cell, hover)) {
           hover = cell;
           pushUi();
+          if (cell) {
+            // 鼠标进入不同格子：轻音一次性（同格内不重复）。
+            const value = displayed[cell.row]?.[cell.col] ?? 0;
+            audio.matrixTick('hover', value);
+            bumpHoverSfx();
+          }
         }
         return;
       }
@@ -641,8 +717,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     }
 
     function onPointerLeave(): void {
-      // 指针离开页面：十字线淡出（位置停在最后处），视差回中；data-cursor 置空。
+      // 指针离开页面：十字线收拢淡出（位置停在最后处），视差回中；data-cursor 置空。
       cursorActive = false;
+      collapseCursor();
       updateCursorUi(null);
       if (hover !== null) {
         hover = null;
@@ -696,6 +773,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       cursor = point;
       cursorActive = true;
       cursorFade = 1;
+      expandCursor();
       updateCursorUi(point);
       const target = cellAtPointer(point.x, point.y) ?? hover ?? selected;
       if (!target) return;
@@ -761,8 +839,16 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         else if (event.code === 'ArrowRight') next = { row: current.row, col: Math.min(cols - 1, current.col + 1) };
         else if (event.code === 'ArrowUp') next = { row: Math.max(0, current.row - 1), col: current.col };
         else next = { row: Math.min(rows - 1, current.row + 1), col: current.col };
+        const moved = !sameCell(next, current);
         selected = next;
         pushUi();
+        if (moved) {
+          // 方向键切换选中：十字光标收拢隐藏 + nav 音效。
+          collapseCursor();
+          const value = displayed[next.row]?.[next.col] ?? 0;
+          audio.matrixTick('nav', value);
+          bumpNavSfx();
+        }
         return;
       }
       if (event.code === 'Equal' || event.code === 'NumpadAdd') {
@@ -810,12 +896,16 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       );
     }
 
-    /** 自定义光标：全屏 1px 十字 + 22px/3px 粗准星（中心 4px 空隙）；difference 自动反色。 */
-    function drawCursor(pos: { x: number; y: number }, fade: number): void {
+    /** 自定义光标：全屏 1px 十字 + 22px/3px 粗准星（中心 4px 空隙）；difference 自动反色。
+     *  spread 0..1：方向键移动时以光标位置为中心收拢（长度 1→0）。 */
+    function drawCursor(pos: { x: number; y: number }, fade: number, spread: number): void {
+      const spreadValue = clamp(spread, 0, 1);
+      if (spreadValue <= 0.002) return;
       // 对齐物理像素中心，避免 1px 线跨两行抗锯齿后 only 50% 强度（difference 会变成半灰）。
       const snappedX = (Math.floor(pos.x * scaleX) + scaleX / 2) / scaleX;
       const snappedY = (Math.floor(pos.y * scaleY) + scaleY / 2) / scaleY;
-      const gap = CURSOR_CENTER_GAP_PX / 2;
+      const arm = CURSOR_ARM_PX * spreadValue;
+      const gap = (CURSOR_CENTER_GAP_PX / 2) * spreadValue;
       ctx.save();
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       ctx.globalCompositeOperation = 'difference';
@@ -824,24 +914,26 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.lineWidth = CURSOR_THIN_WIDTH;
       ctx.lineCap = 'butt';
       ctx.beginPath();
-      ctx.moveTo(0, snappedY);
-      ctx.lineTo(LOGICAL_W, snappedY);
-      ctx.moveTo(snappedX, 0);
-      ctx.lineTo(snappedX, LOGICAL_H);
+      ctx.moveTo(snappedX - snappedX * spreadValue, snappedY);
+      ctx.lineTo(snappedX + (LOGICAL_W - snappedX) * spreadValue, snappedY);
+      ctx.moveTo(snappedX, snappedY - snappedY * spreadValue);
+      ctx.lineTo(snappedX, snappedY + (LOGICAL_H - snappedY) * spreadValue);
       ctx.stroke();
       // 准星满强度，只有贯穿线是半透明。
-      ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_RETICLE_ALPHA;
-      ctx.lineWidth = CURSOR_THICK_WIDTH;
-      ctx.beginPath();
-      ctx.moveTo(snappedX - CURSOR_ARM_PX, snappedY);
-      ctx.lineTo(snappedX - gap, snappedY);
-      ctx.moveTo(snappedX + gap, snappedY);
-      ctx.lineTo(snappedX + CURSOR_ARM_PX, snappedY);
-      ctx.moveTo(snappedX, snappedY - CURSOR_ARM_PX);
-      ctx.lineTo(snappedX, snappedY - gap);
-      ctx.moveTo(snappedX, snappedY + gap);
-      ctx.lineTo(snappedX, snappedY + CURSOR_ARM_PX);
-      ctx.stroke();
+      if (arm > 0.4) {
+        ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_RETICLE_ALPHA;
+        ctx.lineWidth = CURSOR_THICK_WIDTH;
+        ctx.beginPath();
+        ctx.moveTo(snappedX - arm, snappedY);
+        ctx.lineTo(snappedX - Math.min(gap, arm), snappedY);
+        ctx.moveTo(snappedX + Math.min(gap, arm), snappedY);
+        ctx.lineTo(snappedX + arm, snappedY);
+        ctx.moveTo(snappedX, snappedY - arm);
+        ctx.lineTo(snappedX, snappedY - Math.min(gap, arm));
+        ctx.moveTo(snappedX, snappedY + Math.min(gap, arm));
+        ctx.lineTo(snappedX, snappedY + arm);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -969,7 +1061,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.restore();
 
       // 自定义光标画在最上层，不受矩阵视差影响（difference 反色）。
-      if (cursor && (cursorActive || cursorFade > 0)) drawCursor(cursor, cursorFade);
+      if (cursor && cursorVisible && (cursorActive || cursorFade > 0)) drawCursor(cursor, cursorFade, crosshairScale);
     }
 
     /* —— 每帧 —— */
@@ -1058,6 +1150,17 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
       // 指针离开后十字线淡出。
       if (!cursorActive) cursorFade = Math.max(0, cursorFade - dt / (CURSOR_FADE_MS / 1000));
+      // 十字光标收拢/展开（方向键 220ms 收拢后隐藏；鼠标再动 260ms 展开）。
+      if (crosshairAnim) {
+        const t = clamp((now - crosshairAnim.start) / crosshairAnim.duration, 0, 1);
+        crosshairScale = lerp(crosshairAnim.from, crosshairAnim.to, easeOutCubic(t));
+        if (t >= 1) {
+          crosshairScale = crosshairAnim.to;
+          crosshairAnim = null;
+          if (crosshairScale <= 0.002) setCursorVisibleState(false);
+        }
+        pushCrosshairUi();
+      }
 
       draw(matrix, now);
 
@@ -1087,6 +1190,10 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         cellEdits: cellEditsNow,
         cursor: cursor && cursorActive ? { x: Math.round(cursor.x * 10) / 10, y: Math.round(cursor.y * 10) / 10 } : null,
         offset: { x: Math.round(parallaxX.value * 10) / 10, y: Math.round(parallaxY.value * 10) / 10 },
+        cursorVisible,
+        crosshair: Math.round(crosshairScale * 1000) / 1000,
+        hoverSfx: hoverSfxNow,
+        navSfx: navSfxNow,
       };
     }
 
@@ -1186,6 +1293,10 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       data-cell-edits={cellEditsUi}
       data-matrix-offset={offsetAttr}
       data-cursor={cursorAttr}
+      data-cursor-visible={cursorVisibleUi ? 'true' : 'false'}
+      data-crosshair={crosshairUi.toFixed(2)}
+      data-hover-sfx={hoverSfxUi}
+      data-nav-sfx={navSfxUi}
       style={{
         position: 'absolute',
         inset: 0,

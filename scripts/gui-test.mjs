@@ -940,6 +940,23 @@ const matrixRoot = page.locator('[data-testid="matrix-field"]');
 check('F3 进入关系谱矩阵', (await appAttr('data-screen')) === 'matrix' && (await matrixRoot.getAttribute('data-matrix-name')) === '信任网', `${await appAttr('data-screen')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
 const matrixBefore = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
 check('关系谱 3×3 初始值正确', matrixBefore.length === 3 && matrixBefore[0]?.length === 3 && Number(matrixBefore[1]?.[1]) === 1, JSON.stringify(matrixBefore));
+await page.mouse.move(720, 450);
+await page.waitForTimeout(400);
+const sfxCells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);
+for (const index of [0, 4, 8]) {
+  const target = sfxCells[index];
+  if (target) {
+    await page.mouse.move(target.x, target.y);
+    await page.waitForTimeout(120);
+  }
+}
+check('鼠标掠过格子有悬停音效', Number(await matrixRoot.getAttribute('data-hover-sfx')) >= 2, String(await matrixRoot.getAttribute('data-hover-sfx')));
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(420);
+check('方向键切换有音效且光标收拢隐藏', Number(await matrixRoot.getAttribute('data-nav-sfx')) >= 1 && (await matrixRoot.getAttribute('data-cursor-visible')) === 'false', `${await matrixRoot.getAttribute('data-nav-sfx')}/${await matrixRoot.getAttribute('data-cursor-visible')}`);
+await page.mouse.move(760, 470);
+await page.waitForTimeout(420);
+check('鼠标再动光标重新展开', (await matrixRoot.getAttribute('data-cursor-visible')) === 'true' && Number(await matrixRoot.getAttribute('data-crosshair')) > 0.8, `${await matrixRoot.getAttribute('data-crosshair')}`);
 await page.mouse.move(1100, 300);
 await page.waitForTimeout(700);
 const offsetRight = JSON.parse(String((await matrixRoot.getAttribute('data-matrix-offset')) ?? '[0,0]'));

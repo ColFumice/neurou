@@ -165,6 +165,46 @@ export class StringAudioEngine {
     this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale, timbre);
   }
 
+  /** v2.2.6：关系谱矩阵的极轻交互音（悬停/方向键切换）。 */
+  matrixTick(style: 'hover' | 'nav', value: number): void {
+    if (this.failed) return;
+    const play = (): void => {
+      const ctx = this.ctx;
+      const master = this.master;
+      if (!ctx || !master) return;
+      const v = clamp(value, 0, 1);
+      const nav = style === 'nav';
+      const freq = nav ? 430 + v * 380 : 980 + v * 420;
+      const osc = ctx.createOscillator();
+      osc.type = nav ? 'triangle' : 'sine';
+      osc.frequency.value = freq;
+      const gain = ctx.createGain();
+      const target = nav ? 0.045 : 0.012;
+      const attack = nav ? 0.006 : 0.004;
+      const decay = nav ? 0.1 : 0.05;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(target, ctx.currentTime + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + attack + decay);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start();
+      osc.stop(ctx.currentTime + attack + decay + 0.02);
+      osc.onended = () => {
+        try {
+          gain.disconnect();
+        } catch {
+          /* ignore */
+        }
+      };
+    };
+    if (!this.ctx) {
+      void this.ensureStarted().then(play);
+      return;
+    }
+    void this.ctx.resume().catch(() => undefined);
+    play();
+  }
+
   /** v2.0：谱模式里按下一个键，用当前谱作为音色试听。 */
   previewSpectrum(
     bands: readonly number[],
