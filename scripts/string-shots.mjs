@@ -1,10 +1,24 @@
 /**
- * 生成 docs/images/string-*.png：八弦调律台 v0.8（接回真实世界）的文档截图。
+ * 生成 docs/images/string-*.png：八弦调律台 v1.1 的文档截图。
+ *
+ * 注意：脚本里的真实手势会让调律台写回 examples/tuner.nro。
+ * 结束时用 git 恢复该文件（文档截图不需要留下副作用）。
  *
  * 运行：node scripts/string-shots.mjs（需要 127.0.0.1:5188 的 dev server）
  */
 import { chromium } from 'playwright';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
+
+const WORLD_FILE = 'examples/tuner.nro';
+const restoreWorld = () => {
+  try {
+    execFileSync('git', ['checkout', '--', WORLD_FILE], { stdio: 'ignore' });
+  } catch {
+    /* ignore */
+  }
+};
+process.on('exit', restoreWorld);
 
 mkdirSync('docs/images', { recursive: true });
 const browser = await chromium.launch({
@@ -82,5 +96,17 @@ await page.screenshot({ path: 'docs/images/string-overview.png' });
 
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
+
+// 9. 打开任意世界 + 同类多根弦（v1.1）
+await page.goto('http://127.0.0.1:5188/?world=examples/rain-slice.nro', { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]');
+await page.waitForTimeout(1400);
+await page.screenshot({ path: 'docs/images/string-worlds.png' });
+// 雨循环里叙事弦有多根：方向键切到同类下一根
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(400);
+await page.screenshot({ path: 'docs/images/string-instance.png' });
+
 await browser.close();
+restoreWorld();
 console.log('docs/images/string-*.png');

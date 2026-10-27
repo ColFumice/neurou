@@ -194,6 +194,8 @@ export interface StringFieldProps {
   onInject: (kind: StringKind, value: number, persist?: boolean) => void;
   /** 拖动焦点弦的悬崖/安全刻度 → 改 IR 阈值（App 会编译校验 + 写回）。 */
   onEditThreshold?: (kind: StringKind, which: ThresholdName, value: number, persist?: boolean) => void;
+  /** 同类多根弦：←/→ 在同类实例间切换（App 维护 selected 并回传新 lane）。 */
+  onCycleString?: (kind: StringKind, dir: 1 | -1) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -314,15 +316,17 @@ declare global {
  * 组件
  * ------------------------------------------------------------------ */
 
-export function StringField({ view, onInject, onEditThreshold }: StringFieldProps): JSX.Element {
+export function StringField({ view, onInject, onEditThreshold, onCycleString }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
   const thresholdEditRef = useRef(onEditThreshold);
+  const cycleRef = useRef(onCycleString);
   viewRef.current = view;
   injectRef.current = onInject;
   thresholdEditRef.current = onEditThreshold;
+  cycleRef.current = onCycleString;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
@@ -1493,6 +1497,13 @@ export function StringField({ view, onInject, onEditThreshold }: StringFieldProp
         return;
       }
       if (modeNow === 'overview' || dualNow) return;
+      // 同类多根弦：←/→ 切换实例（只换 App 的 selected，不改焦点类别、不拨弦）。
+      if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+        event.preventDefault();
+        if (drag !== null) return;
+        cycleRef.current?.(kindOf(focusIdx), event.code === 'ArrowRight' ? 1 : -1);
+        return;
+      }
       const key = keyByCode(keys, event.code);
       if (!key) return;
       event.preventDefault();

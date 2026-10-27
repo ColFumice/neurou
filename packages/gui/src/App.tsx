@@ -3,18 +3,31 @@ import { compileText, serialize, setStringThreshold, type StringKind, type World
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { WorldView } from './stringMath.js';
-import { collectLanes, withCurrentBaselines } from './worldView.js';
+import { collectLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 const TICK_MS = 480;
-const WORLD_FILE = 'examples/tuner.nro';
+const DEFAULT_WORLD_FILE = 'examples/tuner.nro';
 const SAVE_DEBOUNCE_MS = 700;
 const DEV = import.meta.env.DEV;
 
+/**
+ * 用 `?world=examples/xxx.nro` 打开任意示例世界（仅 dev；生产包固定默认世界）。
+ * 只认 examples/ 下的一层 .nro，避免路径穿越。
+ */
+function worldFileFromUrl(): string {
+  if (!DEV) return DEFAULT_WORLD_FILE;
+  const raw = new URLSearchParams(window.location.search).get('world');
+  if (raw && /^examples\/[^/\\]+\.nro$/.test(raw)) return raw;
+  return DEFAULT_WORLD_FILE;
+}
+
+const WORLD_FILE = worldFileFromUrl();
+
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 
-function fetchWorld(): Promise<string> {
-  return fetch(`/__neurou/world?file=${encodeURIComponent(WORLD_FILE)}`, { cache: 'no-store' }).then(
+function fetchWorld(file: string): Promise<string> {
+  return fetch(`/__neurou/world?file=${encodeURIComponent(file)}`, { cache: 'no-store' }).then(
     (response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.text();
@@ -26,13 +39,13 @@ function fetchWorld(): Promise<string> {
  * 世界源码：dev 下用 fetch 读文件（写回/撤销后能重新读取，不吃 Vite import 缓存）；
  * 生产包用构建时内联的 raw 文本。读不到时退回内联文本，页面不会白屏。
  */
-function useWorldSource(): { source: string | null; rev: number; reload: () => Promise<void> } {
+function useWorldSource(file: string): { source: string | null; rev: number; reload: () => Promise<void> } {
   const [source, setSource] = useState<string | null>(DEV ? null : bundledSource);
   const [rev, setRev] = useState(0);
   useEffect(() => {
     if (!DEV) return;
     let alive = true;
-    fetchWorld()
+    fetchWorld(file)
       .then((text) => {
         if (alive) setSource(text);
       })
@@ -42,11 +55,11 @@ function useWorldSource(): { source: string | null; rev: number; reload: () => P
     return () => {
       alive = false;
     };
-  }, []);
+  }, [file]);
   const reload = async (): Promise<void> => {
     if (!DEV) return;
     try {
-      const text = await fetchWorld();
+      const text = await fetchWorld(file);
       setSource(text);
       // 撤销可能把文件写回与当前 source 相同的文本；用 rev 强制重编译，
       // 否则 source 不变 → compiled 不重算 → worldIR/画布停在编辑后的状态。
@@ -63,11 +76,13 @@ function useWorldSource(): { source: string | null; rev: number; reload: () => P
  * 视图之外的逻辑（编译、逐拍、注入、结构编辑、写回、撤销）都在这层；画布只负责乐器。
  */
 export function App() {
-  const { source, rev, reload } = useWorldSource();
+  const { source, rev, reload } = useWorldSource(WORLD_FILE);
   const compiled = useMemo(() => (source ? compileText(source, WORLD_FILE) : null), [source, rev]);
   const [universe, setUniverse] = useState<Universe | null>(null);
   /** 编辑后的图（阈值等结构编辑在它上面生效），写回以它为准。 */
   const [worldIR, setWorldIR] = useState<WorldIR | null>(null);
+  /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
+  const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -89,6 +104,7 @@ export function App() {
     if (!compiled?.ok) return;
     setWorldIR(compiled.ir);
     setUniverse(new Universe(compiled.ir, { seed: 7 }));
+    setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
   }, [compiled, source]);
 
@@ -110,8 +126,8 @@ export function App() {
   );
 
   const lanes = useMemo(
-    () => (universe && worldIR ? collectLanes(universe, worldIR) : []),
-    [universe, worldIR, version],
+    () => (universe && worldIR ? collectLanes(universe, worldIR, selected) : []),
+    [universe, worldIR, version, selected],
   );
 
   const writeFile = async (text: string): Promise<boolean> => {
@@ -293,8 +309,22 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  /** 同类多根弦时，左右方向键切换这一类的哪一根（只切换视图，不改世界）。 */
+  const onCycleString = (kind: StringKind, dir: 1 | -1): void => {
+    const candidates = numericStringsByKind(worldIR)[kind];
+    if (!candidates || candidates.length <= 1) return;
+    const count = candidates.length;
+    const current = selected[kind] ?? 0;
+    setSelected({ ...selected, [kind]: ((current + dir) % count + count) % count });
+  };
+
   return shell(
-    <StringField view={view} onInject={onInject} onEditThreshold={onEditThreshold} />,
+    <StringField
+      view={view}
+      onInject={onInject}
+      onEditThreshold={onEditThreshold}
+      onCycleString={onCycleString}
+    />,
     false,
   );
 }

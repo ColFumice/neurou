@@ -1,11 +1,13 @@
 /**
- * 八弦调律台 v0.8 验收：GUI 接回真实世界。
+ * 八弦调律台 v1.1 验收：GUI 接回真实世界 + 写回 + 阈值编辑 + 任意世界/同类多根弦。
  *
  * 核心断言：
  *   - 8 根弦的值来自 examples/tuner.nro 的运行时，而不是本地演示数据；
  *   - 拖弦/拨弦通过 Universe.inject 写回世界，下一拍沿耦合传导；
  *   - 世界的逐拍变化会变成弦上的视觉波；
- *   - 共振点 = 接近悬崖/安全阈值，而不是预设的数字。
+ *   - 共振点 = 接近悬崖/安全阈值，而不是预设的数字；
+ *   - 阈值可拖、写回有编译闸门、Ctrl+Z 可撤销；
+ *   - `?world=` 打开任意示例世界，写回目标跟随；同类多根弦用左右方向键切换。
  *
  * 运行：node scripts/gui-test.mjs（需要 127.0.0.1:5188 的 dev server）
  * 结果：artifacts/string-test.json + artifacts/9x-*.png
@@ -13,12 +15,50 @@
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 
 mkdirSync('artifacts', { recursive: true });
 
 const URL = 'http://127.0.0.1:5188/';
 const WORLD_PATH = 'examples/tuner.nro';
+const TEMP_TUNER = 'examples/_acceptance-tuner.nro';
+const TEMP_TWO = 'examples/_acceptance-two.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO];
+const TWO_WORLD_SOURCE = `世界 双弦测试
+  版本 0.1
+
+实体 对手
+  是 角色
+
+叙事弦 甲
+  类型 数值 0..100
+  基线 40
+  悬崖 20
+  安全 80
+
+叙事弦 乙
+  类型 数值 0..100
+  基线 70
+  悬崖 20
+  安全 82
+
+关系弦 丙
+  类型 数值 0..1
+  基线 0.5
+  悬崖 0.8
+  安全 0.2
+  对象 对手
+`;
+const cleanupTempFiles = () => {
+  for (const file of TEMP_FILES) {
+    try {
+      unlinkSync(file);
+    } catch {
+      /* 不存在就算了 */
+    }
+  }
+};
+process.on('exit', cleanupTempFiles);
 const gitRestoreWorld = () => {
   try {
     execFileSync('git', ['checkout', '--', WORLD_PATH], { stdio: 'ignore' });
@@ -44,7 +84,8 @@ const results = [];
 const consoleErrors = [];
 
 const parseTrustBaseline = (text) => {
-  const match = /叙事弦 信任\n(?:[^\n]*\n)*?  基线 ([\d.]+)/.exec(text);
+  // 兼容 Windows autocrlf 读出来的 CRLF 与写回的 LF。
+  const match = /叙事弦 信任\r?\n(?:[^\r\n]*\r?\n)*?  基线 ([\d.]+)/.exec(text);
   return match ? Number(match[1]) : NaN;
 };
 
@@ -107,7 +148,9 @@ const normsOf = async () => JSON.parse(String((await attr('data-norms')) ?? '[]'
 const thresholdsOf = async () => JSON.parse(String((await attr('data-thresholds')) ?? '[]'));
 const readThresholdFromFile = (which) => {
   const text = readFileSync(WORLD_PATH, 'utf8');
-  const pattern = new RegExp(`叙事弦 信任\\n(?:[^\\n]*\\n)*?  ${which === 'verge' ? '悬崖' : '安全'} ([\\d.]+)`);
+  const pattern = new RegExp(
+    `叙事弦 信任\\r?\\n(?:[^\\r\\n]*\\r?\\n)*?  ${which === 'verge' ? '悬崖' : '安全'} ([\\d.]+)`,
+  );
   const match = pattern.exec(text);
   return match ? Number(match[1]) : NaN;
 };
@@ -466,7 +509,8 @@ check('恢复原文件后刷新回到原初值', restored.every((v, i) => Math.a
 
 // ============ 8. 声音 / 性能 / 错误 ============
 // 写回验收期间刷新过页面，AudioContext 需要一次手势才创建。
-await page.mouse.click(720, 300);
+// 这里用 debug pluckAt（会发声、但不落盘），避免在验收收尾时又写一次 tuner.nro。
+await page.evaluate(() => window.__neurouString.pluckAt(720, 300));
 await page
   .waitForFunction(
     () => {
@@ -502,6 +546,80 @@ check('堆内存可用', heap !== null, heap === null ? '未暴露' : `${heap}MB
 const worldName = String(await attr('data-world'));
 check('没有页面级报错', consoleErrors.length === 0, consoleErrors.join(' | '));
 
+// ============ 9. 任意世界 + 同类多根弦 ============
+// 先把 tuner.nro 恢复到干净状态，避免前面手势的 debounce 写回污染 §9 的副本。
+await page.waitForTimeout(900);
+restoreWorld();
+const tunerClean = readFileSync(WORLD_PATH, 'utf8');
+// 单实例世界里，左右方向键不应有任何副作用
+const lanesBeforeArrow = await page.evaluate(() => window.__neurouString.state().lanes.map((l) => l.name));
+const plucksBeforeArrow = Number(await attr('data-plucks'));
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(180);
+const lanesAfterArrow = await page.evaluate(() => window.__neurouString.state().lanes.map((l) => l.name));
+check(
+  '单实例世界里方向键无副作用',
+  JSON.stringify(lanesBeforeArrow) === JSON.stringify(lanesAfterArrow) &&
+    Number(await attr('data-plucks')) === plucksBeforeArrow,
+  `${lanesBeforeArrow.join(',')} / ${lanesAfterArrow.join(',')}`,
+);
+
+const gotoWorld = async (file) => {
+  await page.goto(`${URL}?world=${encodeURIComponent(file)}`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+  await page.waitForTimeout(1000);
+};
+
+// A. 打开一个世界副本，写回目标跟随当前文件
+copyFileSync(WORLD_PATH, TEMP_TUNER);
+const tunerBeforeOtherWorld = readFileSync(WORLD_PATH, 'utf8');
+await gotoWorld(TEMP_TUNER);
+check(
+  '?world= 打开任意世界',
+  (await appAttr('data-world-file')) === TEMP_TUNER && (await attr('data-world')) === '调律台',
+  String(await appAttr('data-world-file')),
+);
+check('该世界初值来自它的文件', JSON.stringify(await valuesOf()) === JSON.stringify(VALUES));
+const tempBaseY = valueToY((await valuesOf())[0], 0);
+await page.mouse.move(720, Math.round(tempBaseY));
+await page.mouse.down();
+await page.mouse.move(720, Math.round(tempBaseY) + 60, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(1700);
+const tempText = readFileSync(TEMP_TUNER, 'utf8');
+const tempTrust = parseTrustBaseline(tempText);
+check(
+  '写回目标是当前世界文件',
+  tempText.includes('由 neurou 序列化器生成') && Math.abs(tempTrust - (await valuesOf())[0]) < 2,
+  `file=${tempTrust} view=${(await valuesOf())[0].toFixed(2)}`,
+);
+check('原 tuner.nro 不被误写', readFileSync(WORLD_PATH, 'utf8') === tunerBeforeOtherWorld);
+
+// B. 同类多根弦：ArrowLeft/Right 切换
+writeFileSync(TEMP_TWO, TWO_WORLD_SOURCE, 'utf8');
+await gotoWorld(TEMP_TWO);
+check(
+  '双弦世界加载（2 类共 3 根弦，界面每类一根）',
+  (await attr('data-world')) === '双弦测试' && Number(await attr('data-lane-count')) === 2,
+  `${await attr('data-world')} / ${await attr('data-lane-count')}`,
+);
+const tmpLanes = () => page.evaluate(() => window.__neurouString.state().lanes.map((l) => ({ kind: l.kind, name: l.name, value: l.value })));
+const firstLane = (await tmpLanes())[0];
+check('默认显示每类第一根', firstLane.kind === '叙事' && firstLane.name === '甲' && Math.abs(firstLane.value - 40) < 1e-6, JSON.stringify(firstLane));
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(260);
+const secondLane = (await tmpLanes())[0];
+check(
+  'ArrowRight 切到同类下一根',
+  secondLane.name === '乙' && Math.abs(secondLane.value - 70) < 1e-6 && Number(await attr('data-plucks')) === 0,
+  JSON.stringify(secondLane),
+);
+await page.keyboard.press('ArrowLeft');
+await page.waitForTimeout(260);
+const backLane = (await tmpLanes())[0];
+check('ArrowLeft 切回同类上一根', backLane.name === '甲' && Math.abs(backLane.value - 40) < 1e-6, JSON.stringify(backLane));
+await page.screenshot({ path: 'artifacts/98-string-world-switch.png' });
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
@@ -532,6 +650,8 @@ const summary = {
     restored,
   },
   audio: { state: audioState, rms: finalRms },
+  worldSwitch: { file: TEMP_TUNER, trust: tempTrust, tunerUntouched: readFileSync(WORLD_PATH, 'utf8') === tunerBeforeOtherWorld },
+  instances: { first: firstLane.name, second: secondLane.name, back: backLane.name },
   fps,
   heapMB: heap,
   consoleErrors,

@@ -57,15 +57,18 @@ export interface KindVisualProfile {
  *   叙事 = 慢、宽、余音长；视觉 = 快、亮、碎；动画 = 规律涟漪；
  *   物理 = 重、低频、衰减慢；控制 = 紧、短促；空间 = 极宽、极慢；
  *   认知 = 细碎、即逝；关系 = 双点（两个波源）。
+ *
+ * v1.1 起整体放慢：波速约为原来的 0.6–0.65，阻尼同步降约 12%，
+ * 让波峰爬上爬下更从容、反射更柔和（用户反馈“速度放缓/柔和”）。
  */
 export const KIND_VISUAL: Record<StringKind, KindVisualProfile> = {
-  叙事: { kind: '叙事', label: '叙事', speed: 1300, damping: 0.55, restWidth: 1.8, peakWidth: 12, maxPull: 280, excitation: 'tent' },
-  视觉: { kind: '视觉', label: '视觉', speed: 2200, damping: 1.6, restWidth: 1.6, peakWidth: 10, maxPull: 320, excitation: 'double' },
-  动画: { kind: '动画', label: '动画', speed: 1800, damping: 0.9, restWidth: 1.7, peakWidth: 11, maxPull: 300, excitation: 'ripple' },
-  物理: { kind: '物理', label: '物理', speed: 1000, damping: 0.35, restWidth: 2.0, peakWidth: 15, maxPull: 330, excitation: 'tent' },
-  控制: { kind: '控制', label: '控制', speed: 1900, damping: 2.2, restWidth: 1.6, peakWidth: 9, maxPull: 240, excitation: 'double' },
-  空间: { kind: '空间', label: '空间', speed: 950, damping: 0.3, restWidth: 2.0, peakWidth: 13, maxPull: 340, excitation: 'tent' },
-  认知: { kind: '认知', label: '认知', speed: 2300, damping: 2.4, restWidth: 1.5, peakWidth: 8, maxPull: 220, excitation: 'ripple' },
+  叙事: { kind: '叙事', label: '叙事', speed: 820, damping: 0.48, restWidth: 1.8, peakWidth: 12, maxPull: 280, excitation: 'tent' },
+  视觉: { kind: '视觉', label: '视觉', speed: 1350, damping: 1.4, restWidth: 1.6, peakWidth: 10, maxPull: 320, excitation: 'double' },
+  动画: { kind: '动画', label: '动画', speed: 1120, damping: 0.8, restWidth: 1.7, peakWidth: 11, maxPull: 300, excitation: 'ripple' },
+  物理: { kind: '物理', label: '物理', speed: 620, damping: 0.31, restWidth: 2.0, peakWidth: 15, maxPull: 330, excitation: 'tent' },
+  控制: { kind: '控制', label: '控制', speed: 1200, damping: 1.95, restWidth: 1.6, peakWidth: 9, maxPull: 240, excitation: 'double' },
+  空间: { kind: '空间', label: '空间', speed: 590, damping: 0.27, restWidth: 2.0, peakWidth: 13, maxPull: 340, excitation: 'tent' },
+  认知: { kind: '认知', label: '认知', speed: 1420, damping: 2.1, restWidth: 1.5, peakWidth: 8, maxPull: 220, excitation: 'ripple' },
   关系: { kind: '关系', label: '关系', speed: 1500, damping: 0.8, restWidth: 1.8, peakWidth: 12, maxPull: 300, excitation: 'double' },
 };
 
@@ -583,7 +586,8 @@ export function resonanceOf(kind: StringKind, value: number): ResonanceInfo {
 /** 驻波/泛音的高频视觉偏移（-1..1），节点数 = harmonic，用于共振态。 */
 export function standingOvertone(x01: number, timeMs: number, harmonic = 5): number {
   const x = clamp(x01, 0, 1);
-  return Math.sin(Math.PI * harmonic * x) * Math.cos((timeMs / 1000) * Math.PI * 2 * 4.5);
+  // 2.8Hz（原 4.5Hz）：焦点弦的微颤与共振泛音更慢、更柔和。
+  return Math.sin(Math.PI * harmonic * x) * Math.cos((timeMs / 1000) * Math.PI * 2 * 2.8);
 }
 
 export interface CurveCrossing {

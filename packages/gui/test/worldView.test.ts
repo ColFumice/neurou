@@ -1,14 +1,50 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { compileText, type WorldIR } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
-import { collectLanes, laneRange, withCurrentBaselines } from '../src/worldView.js';
+import {
+  collectLanes,
+  laneRange,
+  numericStringsByKind,
+  withCurrentBaselines,
+} from '../src/worldView.js';
+
+/** 读示例文件；优先读 git HEAD，避免并行写回把工作区文件改脏时测试抖动。 */
+function readExample(file: string): string {
+  try {
+    return execFileSync('git', ['show', `HEAD:${file}`], { encoding: 'utf8' });
+  } catch {
+    return readFileSync(resolve(file), 'utf8');
+  }
+}
 
 function loadTuner(): { ir: WorldIR; universe: Universe } {
-  const text = readFileSync(resolve('examples/tuner.nro'), 'utf8');
-  const compiled = compileText(text, 'examples/tuner.nro');
+  const compiled = compileText(readExample('examples/tuner.nro'), 'examples/tuner.nro');
   if (!compiled.ok) throw new Error('tuner.nro 编译失败');
+  return { ir: compiled.ir, universe: new Universe(compiled.ir, { seed: 7 }) };
+}
+
+const TWO_STRINGS = `世界 双弦测试
+  版本 0.1
+
+叙事弦 甲
+  类型 数值 0..100
+  基线 40
+  悬崖 20
+  安全 80
+
+叙事弦 乙
+  类型 数值 0..100
+  基线 70
+  悬崖 20
+  安全 82
+`;
+
+function loadTwo(): { ir: WorldIR; universe: Universe } {
+  const compiled = compileText(TWO_STRINGS, 'two.nro');
+  if (!compiled.ok) throw new Error('双弦世界编译失败');
   return { ir: compiled.ir, universe: new Universe(compiled.ir, { seed: 7 }) };
 }
 
@@ -80,5 +116,33 @@ describe('世界 → 调律台投影', () => {
     const lanes = collectLanes(universe, empty);
     expect(lanes.map((lane) => lane.kind)).not.toContain('认知');
     expect(lanes).toHaveLength(7);
+  });
+
+  it('同类多根弦：默认取第一根，选中下标可切换并能绕回', () => {
+    const { ir, universe } = loadTwo();
+    const groups = numericStringsByKind(ir);
+    expect(groups['叙事'].map((s) => s.name)).toEqual(['甲', '乙']);
+    expect(groups['视觉']).toHaveLength(0);
+
+    const first = collectLanes(universe, ir);
+    expect(first).toHaveLength(1);
+    expect(first[0]!.name).toBe('甲');
+
+    const second = collectLanes(universe, ir, { 叙事: 1 });
+    expect(second[0]!.name).toBe('乙');
+    expect(second[0]!.value).toBe(70);
+
+    // 越界下标按候选数取模（-1 也能绕回最后一根）
+    expect(collectLanes(universe, ir, { 叙事: 5 })[0]!.name).toBe('乙');
+    expect(collectLanes(universe, ir, { 叙事: -1 })[0]!.name).toBe('乙');
+  });
+
+  it('同类多根弦：写回会冻结所有实例的基线，而不只是界面上选中的那根', () => {
+    const { ir, universe } = loadTwo();
+    universe.inject('甲', 33);
+    universe.inject('乙', 88);
+    const frozen = withCurrentBaselines(ir, universe);
+    expect(frozen.strings.find((s) => s.id === '甲')?.baseline).toBe(33);
+    expect(frozen.strings.find((s) => s.id === '乙')?.baseline).toBe(88);
   });
 });

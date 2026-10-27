@@ -1,13 +1,25 @@
 /**
- * 八弦调律台 v0.8 演示视频：真实世界驱动。
+ * 八弦调律台 v1.1 演示视频：真实世界驱动。
  * 默认八弦 → 拨动 → 拖弦写回世界 → 耦合波 → Tab 换焦点 → 阈值共振 → ESC 总谱。
+ *
+ * 注意：视频里的真实手势会写回 examples/tuner.nro；结束时用 git 恢复。
  *
  * 运行：node scripts/string-video.mjs
  * 产出：docs/media/string-9s.mp4（90 帧 × 100ms = 9s）
  */
 import { chromium } from 'playwright';
 import { mkdirSync, rmSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+
+const WORLD_FILE = 'examples/tuner.nro';
+const restoreWorld = () => {
+  try {
+    execFileSync('git', ['checkout', '--', WORLD_FILE], { stdio: 'ignore' });
+  } catch {
+    /* ignore */
+  }
+};
+process.on('exit', restoreWorld);
 
 mkdirSync('artifacts', { recursive: true });
 mkdirSync('docs/media', { recursive: true });
@@ -55,6 +67,7 @@ for (let i = 0; i < FRAMES; i++) {
 }
 
 await browser.close();
+restoreWorld();
 
 const args = [
   '-y',
