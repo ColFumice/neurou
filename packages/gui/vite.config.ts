@@ -88,7 +88,11 @@ export default defineConfig({
     },
     watch: {
       // 调律台写回 .nro 时不要刷新页面；下次手动刷新才读新基线。
-      ignored: ['**/*.nro', '**/*.nro.tmp'],
+      // 同时忽略编辑器/代理留下的临时文件；用 polling 避免 Windows 上
+      // 临时文件被占用（EBUSY）时把 fs.watch 搞崩。
+      usePolling: true,
+      interval: 400,
+      ignored: ['**/*.nro', '**/*.nro.tmp', '**/*.tmp', '**/.*.tmpdir/**', '**/*.tmpdir/**'],
     },
   },
 });

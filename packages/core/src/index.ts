@@ -22,3 +22,12 @@ export * from './ir.js';
 export { parse } from './parser.js';
 export { compile, compileText, kindSolver, suggestName, type CompileResult } from './compiler.js';
 export { serialize } from './serialize.js';
+export {
+  setStringBaseline,
+  setStringThreshold,
+  setCouplingStrength,
+  setCouplingStrengthBetween,
+  findCoupling,
+  type ThresholdName,
+  type EditResult,
+} from './edit.js';

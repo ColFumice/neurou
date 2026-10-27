@@ -12,7 +12,6 @@ import type { StringKind } from '@neurou/core';
 import { StringField } from './StringField.js';
 import { clamp, type Lane, type WorldView } from './stringMath.js';
 import './core.css';
-
 interface FakeLaneSpec {
   kind: StringKind;
   id: string;
@@ -48,8 +47,14 @@ function buildLanes(): Lane[] {
       max: spec.max,
       norm: clamp((spec.value - spec.min) / span, 0, 1),
     };
-    if (spec.verge !== undefined) lane.vergeNorm = clamp((spec.verge - spec.min) / span, 0, 1);
-    if (spec.safe !== undefined) lane.safeNorm = clamp((spec.safe - spec.min) / span, 0, 1);
+    if (spec.verge !== undefined) {
+      lane.verge = spec.verge;
+      lane.vergeNorm = clamp((spec.verge - spec.min) / span, 0, 1);
+    }
+    if (spec.safe !== undefined) {
+      lane.safe = spec.safe;
+      lane.safeNorm = clamp((spec.safe - spec.min) / span, 0, 1);
+    }
     return lane;
   });
 }
@@ -75,10 +80,24 @@ function StringDemo() {
       }),
     );
   };
+  // demo 页没有 IR：本地改阈值就够了（persist 参数忽略）。
+  const onEditThreshold = (kind: StringKind, which: 'verge' | 'safe', raw: number): void => {
+    setLanes((previous) =>
+      previous.map((lane) => {
+        if (lane.kind !== kind) return lane;
+        const value = clamp(raw, lane.min, lane.max);
+        const span = lane.max - lane.min || 1;
+        const norm = clamp((value - lane.min) / span, 0, 1);
+        return which === 'verge'
+          ? { ...lane, verge: value, vergeNorm: norm }
+          : { ...lane, safe: value, safeNorm: norm };
+      }),
+    );
+  };
 
   return (
     <div className="ink-app" data-testid="ink-app">
-      <StringField view={view} onInject={onInject} />
+      <StringField view={view} onInject={onInject} onEditThreshold={onEditThreshold} />
     </div>
   );
 }

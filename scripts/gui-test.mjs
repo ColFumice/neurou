@@ -104,6 +104,13 @@ const lastTouch = () => page.evaluate(() => window.__neurouString.lastTouch());
 const rms = () => page.evaluate(() => window.__neurouString.rms());
 const valuesOf = async () => JSON.parse(String((await attr('data-values')) ?? '[]'));
 const normsOf = async () => JSON.parse(String((await attr('data-norms')) ?? '[]'));
+const thresholdsOf = async () => JSON.parse(String((await attr('data-thresholds')) ?? '[]'));
+const readThresholdFromFile = (which) => {
+  const text = readFileSync(WORLD_PATH, 'utf8');
+  const pattern = new RegExp(`叙事弦 信任\\n(?:[^\\n]*\\n)*?  ${which === 'verge' ? '悬崖' : '安全'} ([\\d.]+)`);
+  const match = pattern.exec(text);
+  return match ? Number(match[1]) : NaN;
+};
 const hash = async () => createHash('sha256').update(await page.screenshot()).digest('hex').slice(0, 10);
 const resetLocal = async () => {
   await page.evaluate(() => window.__neurouString.reset());
@@ -192,6 +199,15 @@ check(
   '8 个值是 tuner.nro 的运行时初值',
   initialValues.every((v, i) => Math.abs(v - VALUES[i]) < 1e-6),
   JSON.stringify(initialValues),
+);
+const initialThresholds = await thresholdsOf();
+check(
+  'data-thresholds 是 8 条弦的悬崖/安全线',
+  initialThresholds.length === 8 &&
+    initialThresholds[0].verge === 25 &&
+    initialThresholds[0].safe === 75 &&
+    Math.abs(initialThresholds[0].vergeNorm - 0.25) < 1e-6,
+  JSON.stringify(initialThresholds[0]),
 );
 check('世界逐拍在走', Number(await attr('data-tick')) >= 0, `tick=${await attr('data-tick')}`);
 check('世界没有结束', (await attr('data-ended')) === '', String(await attr('data-ended')));
@@ -284,8 +300,10 @@ const pluckStats = await canvasStats();
 check('拨动后墨量增加（残影/拖尾）', restStats !== null && pluckStats !== null && pluckStats.ink > restStats.ink * 1.1, `${restStats?.ink} → ${pluckStats?.ink}`);
 await page.screenshot({ path: 'artifacts/92-string-pluck.png' });
 
-// 键盘：同样写回世界
+// 键盘：同样写回世界（先把信任放回 55，保证 A 键与基线的距离足够产生 >1 的变化）
 await resetLocal();
+await page.evaluate(() => window.__neurouString.setValue('叙事', 55));
+await page.waitForTimeout(150);
 const beforeKey = await valuesOf();
 await page.keyboard.press('a');
 await page.waitForTimeout(160);
@@ -354,7 +372,55 @@ await page.keyboard.press('Escape');
 await page.waitForTimeout(260);
 check('再按 ESC 回到八弦', (await attr('data-mode')) === 'strings');
 
-// ============ 7. 写回 .nro（GUI → 运行时 → IR → 文本） ============
+// ============ 7. 结构编辑：拖动阈值刻度 + 编译闸门 + 撤销/重做 ============
+await page.waitForTimeout(1300); // 结清前面的写回，让 savedText 与磁盘一致
+const thresholdPreText = readFileSync(WORLD_PATH, 'utf8');
+const thresholdPre = (await thresholdsOf())[0];
+check('拖动前：信任悬崖在 25', Math.abs(thresholdPre.verge - 25) < 1e-6, JSON.stringify(thresholdPre));
+const vergeY0 = valueToY(thresholdPre.verge, 0);
+const vergeY1 = valueToY(40, 0);
+await page.mouse.move(46, Math.round(vergeY0));
+await page.mouse.down();
+await page.mouse.move(46, Math.round(vergeY1), { steps: 10 });
+await page.mouse.up();
+await page.waitForTimeout(1700);
+const thresholdAfter = (await thresholdsOf())[0];
+check(
+  '拖动左侧悬崖刻度 → 阈值改变',
+  Math.abs(thresholdAfter.verge - 40) <= 1.5,
+  `25 → ${thresholdAfter.verge}`,
+);
+check('阈值编辑也会触发写回', (await appAttr('data-save-state')) === 'saved', String(await appAttr('data-save-state')));
+const vergeInFile = readThresholdFromFile('verge');
+check('文件里的悬崖线被重写', Math.abs(vergeInFile - thresholdAfter.verge) <= 0.01, `file=${vergeInFile}`);
+const thresholdPostText = readFileSync(WORLD_PATH, 'utf8');
+check('编辑后的世界文件仍是合法 .nro（写回闸门）', thresholdPostText.includes('由 neurou 序列化器生成'));
+await page.screenshot({ path: 'artifacts/96-string-threshold-edit.png' });
+
+// Ctrl+Z 撤销 → 回到上一次保存的文本；Ctrl+Shift+Z 重做（必须在刷新前，历史在内存里）
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(1200);
+const thresholdUndone = (await thresholdsOf())[0];
+check('Ctrl+Z 撤销阈值编辑', Math.abs(thresholdUndone.verge - 25) <= 0.01, `verge=${thresholdUndone.verge}`);
+check('撤销后磁盘文件回到上一版', readFileSync(WORLD_PATH, 'utf8') === thresholdPreText);
+await page.keyboard.press('Control+Shift+z');
+await page.waitForTimeout(1200);
+const thresholdRedone = (await thresholdsOf())[0];
+check('Ctrl+Shift+Z 重做阈值编辑', Math.abs(thresholdRedone.verge - thresholdAfter.verge) <= 0.01, `verge=${thresholdRedone.verge}`);
+check('重做后磁盘文件回到编辑版', readFileSync(WORLD_PATH, 'utf8') === thresholdPostText);
+
+// 刷新后阈值保持
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+const thresholdReloaded = (await thresholdsOf())[0];
+check(
+  '刷新后阈值保持（写回持久化）',
+  Math.abs(thresholdReloaded.verge - thresholdAfter.verge) <= 0.01,
+  `${thresholdAfter.verge} / ${thresholdReloaded.verge}`,
+);
+
+// ============ 8. 写回 .nro（GUI → 运行时 → IR → 文本） ============
 await page.waitForTimeout(1300); // 结清前面手势的 debounce 写回
 const preFile = readFileSync(WORLD_PATH, 'utf8');
 const preBaseline = parseTrustBaseline(preFile);
@@ -414,6 +480,7 @@ await page
   });
 const audioState = await attr('data-audio');
 check('音频引擎可用', audioState === 'running' || audioState === 'suspended', String(audioState));
+await page.waitForTimeout(240); // 等 pluck 真正进入 Analyser 窗口
 const finalRms = await rms();
 check('拨弦后有真实信号（rms>0.001）', finalRms > 0.001, finalRms.toFixed(6));
 const fps = await page.evaluate(
@@ -447,6 +514,14 @@ const summary = {
   drag: { before: beforeDrag[0], after: dragged[0], coupled: afterCoupling, changedOthers },
   pluck: { before: beforePluck[0], after: afterPluck[0], amplitude: pluckState.amplitude },
   threshold: { resonant: true },
+  thresholdEdit: {
+    pre: thresholdPre.verge,
+    after: thresholdAfter.verge,
+    inFile: vergeInFile,
+    undone: thresholdUndone.verge,
+    redone: thresholdRedone.verge,
+    reloaded: thresholdReloaded.verge,
+  },
   crossings,
   save: {
     beforeSaves: savesBefore,

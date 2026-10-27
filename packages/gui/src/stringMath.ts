@@ -509,6 +509,9 @@ export interface Lane {
   /** 悬崖线 / 安全线的归一化位置。 */
   vergeNorm?: number;
   safeNorm?: number;
+  /** 悬崖线 / 安全线的原始值（阈值编辑手势用）。 */
+  verge?: number;
+  safe?: number;
 }
 
 /** 调律台读取的一份世界切片。 */

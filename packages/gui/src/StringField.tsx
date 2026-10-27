@@ -166,7 +166,9 @@ interface CrossingTrailPoint {
   born: number;
 }
 
-type DragKind = 'value' | 'membrane' | 'pluck';
+type DragKind = 'value' | 'membrane' | 'pluck' | 'threshold';
+
+type ThresholdName = 'verge' | 'safe';
 
 interface PointerDrag {
   kind: DragKind;
@@ -178,6 +180,10 @@ interface PointerDrag {
   laneKind: StringKind;
   laneMin: number;
   laneMax: number;
+  /** 拖动开始时的焦点 lane 下标（阈值拖动按它反算 raw）。 */
+  laneIndex: number;
+  /** 阈值拖动：拖的是悬崖还是安全线。 */
+  thresholdWhich?: ThresholdName;
   side: -1 | 1;
   moved: boolean;
 }
@@ -186,6 +192,8 @@ export interface StringFieldProps {
   view: WorldView;
   /** persist=true 表示这是用户手势（拖弦松手/拨弦/对偶），App 会 debounce 写回 .nro。 */
   onInject: (kind: StringKind, value: number, persist?: boolean) => void;
+  /** 拖动焦点弦的悬崖/安全刻度 → 改 IR 阈值（App 会编译校验 + 写回）。 */
+  onEditThreshold?: (kind: StringKind, which: ThresholdName, value: number, persist?: boolean) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -288,6 +296,15 @@ declare global {
       setValue: (kind: StringKind, value: number) => void;
       setSpan: (span: number) => void;
       setMicro: (micro: number) => void;
+      /** 改焦点弦阈值（debug 注入，persist=false，不落盘）。 */
+      setThreshold: (kind: StringKind, which: ThresholdName, value: number) => void;
+      thresholds: () => Array<{
+        kind: StringKind;
+        verge: number | null;
+        safe: number | null;
+        vergeNorm: number | null;
+        safeNorm: number | null;
+      }>;
       rms: () => number;
     };
   }
@@ -297,13 +314,15 @@ declare global {
  * 组件
  * ------------------------------------------------------------------ */
 
-export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
+export function StringField({ view, onInject, onEditThreshold }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
+  const thresholdEditRef = useRef(onEditThreshold);
   viewRef.current = view;
   injectRef.current = onInject;
+  thresholdEditRef.current = onEditThreshold;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
@@ -378,6 +397,8 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
     let hoverNodeNow = false;
     let hoverCrossNow: CrossingHit | null = null;
     let hoverPairNow: { a: number; b: number } | null = null;
+    /** 鼠标悬停在焦点弦的哪条阈值刻线上（verge/safe）。 */
+    let hoverThresholdNow: ThresholdName | null = null;
     let hoverLatchUntil = 0;
     let ripples: Ripple[] = [];
     const ghostMarks: GhostMark[] = [];
@@ -822,17 +843,75 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       }
     }
 
-    function drawResonanceTicks(): void {
+    /** 阈值（悬崖/安全线）：原始值 + 归一化位置。 */
+    function thresholdInfoAt(index: number, which: ThresholdName): { raw: number; norm: number } | null {
+      const lane = laneAt(index);
+      if (!lane) return null;
+      const raw = which === 'verge' ? lane.verge : lane.safe;
+      const norm = which === 'verge' ? lane.vergeNorm : lane.safeNorm;
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+      if (typeof norm !== 'number' || !Number.isFinite(norm)) return null;
+      return { raw, norm };
+    }
+
+    /** 命中测试：左侧 x∈[30,66]、距刻度 y ±12 内，取最近的一条。 */
+    function thresholdHitAt(point: { x: number; y: number }): ThresholdName | null {
+      if (point.x < 30 || point.x > 66) return null;
+      let best: ThresholdName | null = null;
+      let bestDistance = 12;
+      for (const which of ['verge', 'safe'] as const) {
+        const info = thresholdInfoAt(focusIdx, which);
+        if (!info) continue;
+        const distance = Math.abs(point.y - valueToY(info.norm * 100));
+        if (distance <= bestDistance) {
+          bestDistance = distance;
+          best = which;
+        }
+      }
+      return best;
+    }
+
+    /** 屏幕 y → 新阈值 raw：clamp 到值域，且与另一条阈值至少留 0.5 个单位。 */
+    function thresholdRawFromY(index: number, screenY: number, which: ThresholdName): number {
+      const lane = laneAt(index);
+      if (!lane) return 0;
+      const norm = clamp(yToValue(clamp(screenY, 0, LOGICAL_H)) / 100, 0, 1);
+      let raw = clamp(lane.min + norm * (lane.max - lane.min), lane.min, lane.max);
+      const other = which === 'verge' ? lane.safe : lane.verge;
+      if (typeof other === 'number' && Number.isFinite(other)) {
+        const gap = 0.5;
+        if (Math.abs(raw - other) < gap) {
+          raw = raw >= other ? Math.min(other + gap, lane.max) : Math.max(other - gap, lane.min);
+        }
+      }
+      return raw;
+    }
+
+    function drawThresholds(): void {
       const lane = laneAt(focusIdx);
       if (!lane) return;
-      ctx.strokeStyle = rgba(ink, 0.18);
-      ctx.lineWidth = 1;
-      for (const threshold of [lane.vergeNorm, lane.safeNorm]) {
-        if (typeof threshold !== 'number' || !Number.isFinite(threshold)) continue;
-        const y = valueToY(threshold * 100);
+      for (const which of ['verge', 'safe'] as const) {
+        const info = thresholdInfoAt(focusIdx, which);
+        if (!info) continue;
+        const y = valueToY(info.norm * 100);
+        const hovered =
+          hoverThresholdNow === which || (drag !== null && drag.kind === 'threshold' && drag.thresholdWhich === which);
+        if (hovered) {
+          ctx.save();
+          ctx.setLineDash([4, 6]);
+          ctx.strokeStyle = rgba(ink, 0.05);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(LOGICAL_W, y);
+          ctx.stroke();
+          ctx.restore();
+        }
+        ctx.strokeStyle = rgba(ink, hovered ? 0.55 : 0.22);
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(40, y);
-        ctx.lineTo(52, y);
+        ctx.lineTo(56, y);
         ctx.stroke();
       }
     }
@@ -958,7 +1037,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       drawCrossings();
       drawRipples(now);
       drawStringLabels();
-      if (resonantNow) drawResonanceTicks();
+      drawThresholds();
       drawTextOverlays(now);
       if (dualNow) drawDualRing(now);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1284,6 +1363,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         laneKind: lane.kind,
         laneMin: lane.min,
         laneMax: lane.max,
+        laneIndex: focusIdx,
         moved: false,
       };
       try {
@@ -1292,7 +1372,15 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         /* ignore */
       }
       setPullingUi(true);
-      // 1) 焦点弦两端的 D-膜：横向拖动改 span。
+      // 1) 左侧阈值刻度（悬崖/安全线）：上下拖动改 IR 阈值。
+      if (thresholdEditRef.current) {
+        const which = thresholdHitAt(point);
+        if (which) {
+          drag = { ...common, kind: 'threshold', side: 1, thresholdWhich: which };
+          return;
+        }
+      }
+      // 2) 焦点弦两端的 D-膜：横向拖动改 span。
       const nearLeft = Math.abs(point.x - geom.xL) <= MEMBRANE_X_PX;
       const nearRight = Math.abs(point.x - geom.xR) <= MEMBRANE_X_PX;
       if ((nearLeft || nearRight) && Math.abs(point.y - baseline) <= MEMBRANE_Y_PX) {
@@ -1303,12 +1391,12 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         };
         return;
       }
-      // 2) 焦点弦曲线 ±16px：上下拖动改真实值；几乎没动则是点触。
+      // 3) 焦点弦曲线 ±16px：上下拖动改真实值；几乎没动则是点触。
       if (Math.abs(point.y - curveYAt(focusIdx, point.x)) <= VALUE_DRAG_PX) {
         drag = { ...common, kind: 'value', side: 1 };
         return;
       }
-      // 3) 其它位置：点触 = 拨弦。
+      // 4) 其它位置：点触 = 拨弦。
       drag = { ...common, kind: 'pluck', side: 1 };
     }
 
@@ -1336,6 +1424,11 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
           setSpanUi(spanNow);
           rebuildFocusSim();
         }
+      } else if (drag.kind === 'threshold') {
+        const which = drag.thresholdWhich ?? 'verge';
+        const raw = thresholdRawFromY(drag.laneIndex, point.y, which);
+        // 拖动过程中不落盘，松手时再 persist。
+        thresholdEditRef.current?.(kindOf(drag.laneIndex), which, raw, false);
       }
     }
 
@@ -1349,6 +1442,14 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         /* ignore */
       }
       setPullingUi(false);
+      // 阈值拖动：按松手时的最终坐标再提交一次，并标记为用户手势（要落盘）。
+      if (current.kind === 'threshold') {
+        const which = current.thresholdWhich ?? 'verge';
+        const point = pointToLogical(event.clientX, event.clientY);
+        const raw = thresholdRawFromY(current.laneIndex, point.y, which);
+        thresholdEditRef.current?.(kindOf(current.laneIndex), which, raw, true);
+        return;
+      }
       const elapsed = performance.now() - current.startedAt;
       const quickTap = !current.moved && elapsed < TAP_MS;
       if (quickTap) {
@@ -1434,8 +1535,10 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         hoverNodeNow = false;
         hoverCrossNow = null;
         hoverPairNow = null;
+        hoverThresholdNow = null;
         return;
       }
+      hoverThresholdNow = drag === null ? thresholdHitAt(pointerNow) : null;
       const geom = focusGeom();
       const nodeX = geom.xL + 0.62 * geom.width;
       const nodeY = curveYAt(focusIdx, nodeX);
@@ -1576,6 +1679,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       hoverNodeNow = false;
       hoverCrossNow = null;
       hoverPairNow = null;
+      hoverThresholdNow = null;
       hoverLatchUntil = 0;
       for (let i = 0; i < lastCouple.length; i += 1) lastCouple[i] = Number.NEGATIVE_INFINITY;
       lastTouchNow = null;
@@ -1670,6 +1774,19 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       },
       setSpan: (value: number) => setSpanValue(value),
       setMicro: (value: number) => setMicroValue(value),
+      setThreshold: (kind: StringKind, which: ThresholdName, value: number) => {
+        const lane = lanesNow.find((item) => item.kind === kind);
+        if (!lane) return;
+        thresholdEditRef.current?.(lane.kind, which, clamp(value, lane.min, lane.max), false);
+      },
+      thresholds: () =>
+        lanesNow.map((lane) => ({
+          kind: lane.kind,
+          verge: typeof lane.verge === 'number' ? round4(lane.verge) : null,
+          safe: typeof lane.safe === 'number' ? round4(lane.safe) : null,
+          vergeNorm: typeof lane.vergeNorm === 'number' ? round4(lane.vergeNorm) : null,
+          safeNorm: typeof lane.safeNorm === 'number' ? round4(lane.safeNorm) : null,
+        })),
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
@@ -1718,6 +1835,15 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
   const normsJson = JSON.stringify(view.lanes.map((lane) => round4(lane.norm)));
   const valuesJson = JSON.stringify(view.lanes.map((lane) => round4(lane.value)));
   const kindsJson = JSON.stringify(view.lanes.map((lane) => lane.kind));
+  const thresholdsJson = JSON.stringify(
+    view.lanes.map((lane) => ({
+      kind: lane.kind,
+      verge: typeof lane.verge === 'number' ? round4(lane.verge) : null,
+      safe: typeof lane.safe === 'number' ? round4(lane.safe) : null,
+      vergeNorm: typeof lane.vergeNorm === 'number' ? round4(lane.vergeNorm) : null,
+      safeNorm: typeof lane.safeNorm === 'number' ? round4(lane.safeNorm) : null,
+    })),
+  );
 
   return (
     <div
@@ -1734,6 +1860,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       data-values={valuesJson}
       data-norms={normsJson}
       data-kinds={kindsJson}
+      data-thresholds={thresholdsJson}
       data-lane-count={laneCount}
       data-span={spanUi.toFixed(2)}
       data-resonant={resonantUi ? 'true' : 'false'}
