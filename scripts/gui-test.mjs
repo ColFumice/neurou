@@ -883,6 +883,19 @@ await page.waitForTimeout(300);
 check('F2 退出谱模式回到八弦', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
 execFileSync('git', ['checkout', '--', SPECTRA_PATH], { stdio: 'ignore' });
 
+// 默认 tuner 现在也带一条示例谱：首屏 F2 即可进入
+await page.goto('http://127.0.0.1:5188/', { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]');
+await page.waitForTimeout(900);
+await page.keyboard.press('F2');
+await page.waitForTimeout(500);
+check('默认 tuner 的 F2 也能进入谱模式', (await appAttr('data-screen')) === 'spectrum', String(await appAttr('data-screen')));
+check('默认 tuner 的谱名为「情绪音色」', (await page.locator('[data-testid="spectrum-field"]').getAttribute('data-spectrum-name')) === '情绪音色', String(await page.locator('[data-testid="spectrum-field"]').getAttribute('data-spectrum-name')));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+check('谱模式 Esc 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
+restoreWorld();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

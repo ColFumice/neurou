@@ -103,6 +103,20 @@ class Parser {
     return { start: start.span.start, end: prev.span.end };
   }
 
+  /** 声明块的真实内容终点：跳过尾部空行/注释产生的 dedent/newline token。 */
+  private contentEnd(): Span['end'] {
+    let i = this.idx - 1;
+    while (i >= 0) {
+      const kind = this.tokens[i]?.kind;
+      if (kind === 'newline' || kind === 'indent' || kind === 'dedent' || kind === 'eof') {
+        i -= 1;
+        continue;
+      }
+      return this.tokens[i]!.span.end;
+    }
+    return this.tokens[0]!.span.end;
+  }
+
   private finishLine(): void {
     if (this.at('newline')) {
       this.advance();
@@ -567,7 +581,7 @@ class Parser {
       }
       this.exitBlock();
     }
-    decl.span = this.spanFrom(start);
+    decl.span = { start: start.span.start, end: this.contentEnd() };
     return decl;
   }
 
@@ -599,7 +613,7 @@ class Parser {
       }
       this.exitBlock();
     }
-    decl.span = this.spanFrom(start);
+    decl.span = { start: start.span.start, end: this.contentEnd() };
     return decl;
   }
 

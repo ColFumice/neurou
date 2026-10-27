@@ -137,7 +137,7 @@ function insertStringsEdit(
   const newline = text.indexOf('\n', pos);
   const at = newline === -1 ? text.length : newline + 1;
   const prefix = at === text.length && !text.endsWith('\n') ? eol : '';
-  const block = added.map((s) => stringBlockLines(s).join(eol)).join(eol + eol) + eol + eol;
+  const block = added.map((s) => stringBlockLines(s).join(eol)).join(eol + eol) + eol;
   return { start: at, end: at, text: `${prefix}${block}` };
 }
 
