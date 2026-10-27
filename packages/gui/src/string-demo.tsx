@@ -69,7 +69,10 @@ function StringDemo() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const view = useMemo<WorldView>(() => ({ name: '调律台·演示', tick, ended: null, lanes }), [lanes, tick]);
+  const view = useMemo<WorldView>(
+    () => ({ name: '调律台·演示', tick, ended: null, lanes, couplings: [] }),
+    [lanes, tick],
+  );
   const onInject = (kind: StringKind, raw: number): void => {
     setLanes((previous) =>
       previous.map((lane) => {

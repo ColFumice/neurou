@@ -1,6 +1,6 @@
 import { KIND_ORDER, type IRString, type StringKind, type WorldIR } from '@neurou/core';
 import type { Universe } from '@neurou/runtime';
-import { clamp, type Lane } from './stringMath.js';
+import { clamp, type CouplingLane, type Lane } from './stringMath.js';
 
 /**
  * 世界 ↔ 调律台的投影层。
@@ -85,4 +85,15 @@ export function withCurrentBaselines(ir: WorldIR, universe: Universe): WorldIR {
       return baseline === string.baseline ? string : { ...string, baseline };
     }),
   };
+}
+
+/** 把图里的耦合投影成画布可用的列表（两端是世界弦 id，供焦点弦耦合标记使用）。 */
+export function couplingLanes(ir: WorldIR): CouplingLane[] {
+  return ir.couplings.map((c) => ({
+    from: c.from,
+    to: c.to,
+    polarity: c.polarity,
+    strength: c.strength,
+    ...(c.loop ? { loop: c.loop } : {}),
+  }));
 }

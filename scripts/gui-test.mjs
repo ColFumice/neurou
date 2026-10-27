@@ -146,6 +146,13 @@ const rms = () => page.evaluate(() => window.__neurouString.rms());
 const valuesOf = async () => JSON.parse(String((await attr('data-values')) ?? '[]'));
 const normsOf = async () => JSON.parse(String((await attr('data-norms')) ?? '[]'));
 const thresholdsOf = async () => JSON.parse(String((await attr('data-thresholds')) ?? '[]'));
+const couplingsOf = async () => JSON.parse(String((await attr('data-couplings')) ?? '[]'));
+const readCouplingStrengthFromFile = (from, to) => {
+  const text = readFileSync(WORLD_PATH, 'utf8');
+  const pattern = new RegExp(`(?:耦合|边) ${from} → ${to}[^\\r\\n]*?(?:强度 )?([\\d.]+)`);
+  const match = pattern.exec(text);
+  return match ? Number(match[1]) : NaN;
+};
 const readThresholdFromFile = (which) => {
   const text = readFileSync(WORLD_PATH, 'utf8');
   const pattern = new RegExp(
@@ -463,7 +470,45 @@ check(
   `${thresholdAfter.verge} / ${thresholdReloaded.verge}`,
 );
 
-// ============ 8. 写回 .nro（GUI → 运行时 → IR → 文本） ============
+// ============ 8. 耦合编辑：焦点弦耦合标记 + 悬停滚轮 ============
+await page.waitForTimeout(800);
+const couplingList = await couplingsOf();
+check('data-couplings 包含世界里的 10 条耦合', couplingList.length === 10, String(couplingList.length));
+const colorCoupling = couplingList.find((c) => c.from === '信任' && c.to === '色温');
+check('耦合投影带两端 id 与强度', colorCoupling?.polarity === 1 && Math.abs(colorCoupling.strength - 0.5) < 1e-6, JSON.stringify(colorCoupling));
+const marks = await page.evaluate(() => window.__neurouString.couplingMarks());
+// 信任→恐惧 与 恐惧→信任 的中点重合；用 信任→色温（midY 唯一）避免命中歧义。
+const trustColorMark = marks.find((m) => m.from === '信任' && m.to === '色温');
+check('焦点弦画出了耦合标记', Boolean(trustColorMark), `${marks.length} 个`);
+const couplingPreText = readFileSync(WORLD_PATH, 'utf8');
+if (trustColorMark) {
+  await page.mouse.move(trustColorMark.x, trustColorMark.y);
+  await page.waitForTimeout(160);
+  await page.screenshot({ path: 'artifacts/97-string-coupling-edit.png' });
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.wheel(0, -100);
+    await page.waitForTimeout(90);
+  }
+  await page.waitForTimeout(300);
+  const after = (await couplingsOf()).find((c) => c.from === '信任' && c.to === '色温');
+  const delta = after ? after.strength - colorCoupling.strength : 0;
+  check('滚轮改变耦合强度（3 格 ≈ ±0.15）', Math.abs(delta) >= 0.1 && Math.abs(delta) <= 0.25, `${colorCoupling.strength} → ${after?.strength}`);
+  check('data-coupling-edits 计数增加', Number((await appAttr('data-coupling-edits')) ?? 0) >= 1, String(await appAttr('data-coupling-edits')));
+  const lastEdit = JSON.parse(String((await appAttr('data-last-coupling')) || '{}'));
+  check('data-last-coupling 指向被编辑的耦合', lastEdit.from === '信任' && lastEdit.to === '色温', JSON.stringify(lastEdit));
+  await page.waitForTimeout(1700);
+  const fileStrength = readCouplingStrengthFromFile('信任', '色温');
+  check('文件里的耦合强度被重写', Math.abs(fileStrength - (after?.strength ?? NaN)) <= 0.01, `file=${fileStrength}`);
+  check('耦合编辑写回状态 = saved', (await appAttr('data-save-state')) === 'saved', String(await appAttr('data-save-state')));
+  // Ctrl+Z 撤销耦合编辑
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(1200);
+  const undone = (await couplingsOf()).find((c) => c.from === '信任' && c.to === '色温');
+  check('Ctrl+Z 撤销耦合编辑', Math.abs((undone?.strength ?? NaN) - colorCoupling.strength) < 1e-6, `→ ${undone?.strength}`);
+  check('撤销后耦合文件回到上一版', readFileSync(WORLD_PATH, 'utf8') === couplingPreText);
+}
+
+// ============ 9. 写回 .nro（GUI → 运行时 → IR → 文本） ============
 await page.waitForTimeout(1300); // 结清前面手势的 debounce 写回
 const preFile = readFileSync(WORLD_PATH, 'utf8');
 const preBaseline = parseTrustBaseline(preFile);

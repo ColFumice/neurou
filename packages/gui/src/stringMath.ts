@@ -523,6 +523,18 @@ export interface WorldView {
   tick: number;
   ended: string | null;
   lanes: Lane[];
+  /** 世界里的耦合关系（只用于画布上编辑强度）。 */
+  couplings: CouplingLane[];
+}
+
+/** 一条耦合在界面上的投影：两端用世界弦 id 表示。 */
+export interface CouplingLane {
+  from: string;
+  to: string;
+  polarity: 1 | -1;
+  strength: number;
+  /** 属于哪条回路（若有）。 */
+  loop?: string;
 }
 
 /**

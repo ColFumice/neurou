@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { compileText, serialize, setStringThreshold, type StringKind, type WorldIR } from '@neurou/core';
+import {
+  compileText,
+  serialize,
+  setCouplingStrengthBetween,
+  setStringThreshold,
+  type StringKind,
+  type WorldIR,
+} from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { WorldView } from './stringMath.js';
-import { collectLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
+import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 const TICK_MS = 480;
@@ -89,10 +96,15 @@ export function App() {
   const [saveError, setSaveError] = useState('');
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
+  /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
+  const [couplingEdits, setCouplingEdits] = useState(0);
+  const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
 
   const saveTimer = useRef<number | null>(null);
   const saving = useRef(false);
   const savedText = useRef('');
+  /** doSave 在 debounce 计时器里执行，必须读「最新」的图，不能用本帧闭包里的旧值。 */
+  const worldIRRef = useRef<WorldIR | null>(null);
   const undoStack = useRef<string[]>([]);
   const redoStack = useRef<string[]>([]);
   const actions = useRef<{ undo: () => Promise<void>; redo: () => Promise<void> }>({
@@ -100,9 +112,14 @@ export function App() {
     redo: async () => {},
   });
 
+  const applyWorldIR = (next: WorldIR): void => {
+    worldIRRef.current = next;
+    setWorldIR(next);
+  };
+
   useEffect(() => {
     if (!compiled?.ok) return;
-    setWorldIR(compiled.ir);
+    applyWorldIR(compiled.ir);
     setUniverse(new Universe(compiled.ir, { seed: 7 }));
     setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
@@ -154,11 +171,12 @@ export function App() {
       setSaveState('disabled');
       return;
     }
-    if (!worldIR || !universe || saving.current) return;
+    const latestIR = worldIRRef.current;
+    if (!latestIR || !universe || saving.current) return;
     saving.current = true;
     setSaveState('saving');
     try {
-      const candidate = withCurrentBaselines(worldIR, universe);
+      const candidate = withCurrentBaselines(latestIR, universe);
       const text = serialize(candidate);
       const check = compileText(text, `${WORLD_FILE}.edit`);
       if (!check.ok) {
@@ -253,6 +271,8 @@ export function App() {
       data-save-error={saveError}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
+      data-coupling-edits={couplingEdits}
+      data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
@@ -280,6 +300,7 @@ export function App() {
     tick: universe.state.tick,
     ended: universe.state.ended?.name ?? null,
     lanes,
+    couplings: couplingLanes(worldIR),
   };
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
@@ -303,7 +324,7 @@ export function App() {
       setSaveError(result.error);
       return;
     }
-    setWorldIR(result.ir);
+    applyWorldIR(result.ir);
     setSaveError('');
     setVersion((v) => v + 1);
     if (persist) scheduleSave();
@@ -318,12 +339,29 @@ export function App() {
     setSelected({ ...selected, [kind]: ((current + dir) % count + count) % count });
   };
 
+  /** 滚轮调一条耦合的强度（0..2）；写回前同样走编译闸门。 */
+  const onEditCoupling = (from: string, to: string, strength: number, persist = false): void => {
+    const result = setCouplingStrengthBetween(worldIR, from, to, strength);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    const updated = result.ir.couplings.find((c) => c.from === from && c.to === to);
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setCouplingEdits((n) => n + 1);
+    setLastCoupling({ from, to, strength: updated?.strength ?? strength });
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
   return shell(
     <StringField
       view={view}
       onInject={onInject}
       onEditThreshold={onEditThreshold}
       onCycleString={onCycleString}
+      onEditCoupling={onEditCoupling}
     />,
     false,
   );

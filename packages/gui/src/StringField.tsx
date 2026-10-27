@@ -90,6 +90,16 @@ const COUPLE_AMP_MAX = 60;
 const COUPLE_U_MIN = 10;
 const RIPPLE_MS = 700;
 
+/** 焦点弦的耦合标记（画布左侧可滚轮调强度的竖线）。 */
+const COUPLING_X = 30;
+const COUPLING_SLOT_PX = 3.5;
+const COUPLING_HOVER_X_MIN = 18;
+const COUPLING_HOVER_X_MAX = 44;
+const COUPLING_HOVER_DY = 14;
+const COUPLING_STEP = 0.05;
+const COUPLING_MAX = 2;
+const COUPLING_INSET_PX = 10;
+
 /** 世界逐拍 → 视觉波。 */
 const TICK_WAVE_RATIO = 1.6;
 const TICK_WAVE_MIN = 6;
@@ -166,9 +176,22 @@ interface CrossingTrailPoint {
   born: number;
 }
 
-type DragKind = 'value' | 'membrane' | 'pluck' | 'threshold';
+type DragKind = 'value' | 'membrane' | 'pluck' | 'threshold' | 'coupling';
 
 type ThresholdName = 'verge' | 'safe';
+
+/** 焦点弦的一条耦合标记（内部几何）。 */
+interface CouplingMark {
+  from: string;
+  to: string;
+  strength: number;
+  partnerName: string;
+  x: number;
+  yTop: number;
+  yBottom: number;
+  midY: number;
+  focusY: number;
+}
 
 interface PointerDrag {
   kind: DragKind;
@@ -196,6 +219,8 @@ export interface StringFieldProps {
   onEditThreshold?: (kind: StringKind, which: ThresholdName, value: number, persist?: boolean) => void;
   /** 同类多根弦：←/→ 在同类实例间切换（App 维护 selected 并回传新 lane）。 */
   onCycleString?: (kind: StringKind, dir: 1 | -1) => void;
+  /** 滚轮调焦点弦的一条耦合强度（0..2，App 会 debounce 写回）。 */
+  onEditCoupling?: (from: string, to: string, strength: number, persist?: boolean) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -307,6 +332,17 @@ declare global {
         vergeNorm: number | null;
         safeNorm: number | null;
       }>;
+      /** 当前焦点弦的耦合标记（验收拿坐标用）。 */
+      couplingMarks: () => Array<{
+        from: string;
+        to: string;
+        strength: number;
+        x: number;
+        y: number;
+        partnerName: string;
+      }>;
+      /** 改一条耦合强度（debug 注入，persist=false，不落盘）。 */
+      setCoupling: (from: string, to: string, strength: number) => void;
       rms: () => number;
     };
   }
@@ -316,17 +352,25 @@ declare global {
  * 组件
  * ------------------------------------------------------------------ */
 
-export function StringField({ view, onInject, onEditThreshold, onCycleString }: StringFieldProps): JSX.Element {
+export function StringField({
+  view,
+  onInject,
+  onEditThreshold,
+  onCycleString,
+  onEditCoupling,
+}: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
   const thresholdEditRef = useRef(onEditThreshold);
   const cycleRef = useRef(onCycleString);
+  const couplingEditRef = useRef(onEditCoupling);
   viewRef.current = view;
   injectRef.current = onInject;
   thresholdEditRef.current = onEditThreshold;
   cycleRef.current = onCycleString;
+  couplingEditRef.current = onEditCoupling;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
@@ -403,6 +447,12 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
     let hoverPairNow: { a: number; b: number } | null = null;
     /** 鼠标悬停在焦点弦的哪条阈值刻线上（verge/safe）。 */
     let hoverThresholdNow: ThresholdName | null = null;
+    /** 焦点弦的耦合标记（每帧按 view.couplings + lanes 重建）。 */
+    let couplingMarksNow: CouplingMark[] = [];
+    /** 当前 hover 的耦合标记。 */
+    let hoverCouplingNow: CouplingMark | null = null;
+    /** 滚轮连续调强度时的本地暂存（快速滚轮可能早于 view 回传）。 */
+    let couplingPending: { from: string; to: string; value: number; at: number } | null = null;
     let hoverLatchUntil = 0;
     let ripples: Ripple[] = [];
     const ghostMarks: GhostMark[] = [];
@@ -418,6 +468,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
     let scaleX = 1;
     let scaleY = 1;
     let ink: Rgb = FALLBACK_INK;
+    let paper: Rgb = [250, 250, 250];
     let serif = DEFAULT_SERIF;
     let lastTouchNow: {
       x: number;
@@ -554,6 +605,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
     function readTheme(): void {
       const style = getComputedStyle(host);
       ink = parseCssColor(style.getPropertyValue('--ink')) ?? FALLBACK_INK;
+      paper = parseCssColor(style.getPropertyValue('--paper')) ?? paper;
       const serifValue = style.getPropertyValue('--serif').trim();
       serif = serifValue || DEFAULT_SERIF;
     }
@@ -920,14 +972,112 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
       }
     }
 
+    /** 焦点 lane 的耦合标记：每条 from/to 等于焦点 lane.id 的耦合画一条左侧竖线。 */
+    function buildCouplingMarks(): CouplingMark[] {
+      const current = viewRef.current;
+      const focusLane = laneAt(focusIdx);
+      if (!focusLane || !current.couplings || current.couplings.length === 0) return [];
+      const indexById = new Map<string, number>();
+      for (let i = 0; i < lanesNow.length; i += 1) indexById.set(lanesNow[i]!.id, i);
+      const focusY = baselineOf(focusIdx);
+      const marks: CouplingMark[] = [];
+      let slot = 0;
+      for (const coupling of current.couplings) {
+        let partnerId: string | null = null;
+        if (coupling.from === focusLane.id) partnerId = coupling.to;
+        else if (coupling.to === focusLane.id) partnerId = coupling.from;
+        if (!partnerId) continue;
+        const partnerIndex = indexById.get(partnerId);
+        if (partnerIndex === undefined) continue;
+        const partnerY = baselineOf(partnerIndex);
+        const top = Math.min(focusY, partnerY) + COUPLING_INSET_PX;
+        const bottom = Math.max(focusY, partnerY) - COUPLING_INSET_PX;
+        let yTop = top;
+        let yBottom = bottom;
+        if (yBottom <= yTop) {
+          const mid = (focusY + partnerY) / 2;
+          yTop = mid - 4;
+          yBottom = mid + 4;
+        }
+        const x = COUPLING_X + slot * COUPLING_SLOT_PX;
+        marks.push({
+          from: coupling.from,
+          to: coupling.to,
+          strength: coupling.strength,
+          partnerName: lanesNow[partnerIndex]!.name,
+          x,
+          yTop,
+          yBottom,
+          midY: (yTop + yBottom) / 2,
+          focusY,
+        });
+        slot += 1;
+      }
+      // view 已回传我们刚调到的强度 → 清掉本地暂存。
+      if (couplingPending !== null) {
+        const pending = couplingPending;
+        const matched = marks.find((mark) => mark.from === pending.from && mark.to === pending.to);
+        if (matched && Math.abs(matched.strength - pending.value) < 0.005) couplingPending = null;
+      }
+      return marks;
+    }
+
+    /** 命中耦合标记：x∈[18,44]、|y−中点|≤14，取最近的一条。 */
+    function couplingHitAt(point: { x: number; y: number }): CouplingMark | null {
+      if (point.x < COUPLING_HOVER_X_MIN || point.x > COUPLING_HOVER_X_MAX) return null;
+      let best: CouplingMark | null = null;
+      let bestDy = COUPLING_HOVER_DY;
+      for (const mark of couplingMarksNow) {
+        const dy = Math.abs(point.y - mark.midY);
+        if (dy <= bestDy) {
+          bestDy = dy;
+          best = mark;
+        }
+      }
+      return best;
+    }
+
+    function drawCouplings(): void {
+      for (const mark of couplingMarksNow) {
+        const hovered =
+          hoverCouplingNow !== null && hoverCouplingNow.from === mark.from && hoverCouplingNow.to === mark.to;
+        ctx.strokeStyle = rgba(ink, hovered ? 0.35 : 0.1);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(mark.x, mark.yTop);
+        ctx.lineTo(mark.x, mark.yBottom);
+        ctx.stroke();
+        // 焦点端的小圆点
+        ctx.fillStyle = rgba(ink, hovered ? 0.45 : 0.25);
+        ctx.beginPath();
+        ctx.arc(mark.x, mark.focusY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        if (hovered) {
+          ctx.font = `11px ${serif}`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          // 伙伴名压在左侧弦名标签附近：先用纸色描一圈，避免两段文字糊在一起。
+          ctx.strokeStyle = rgba(paper, 1);
+          ctx.lineWidth = 3;
+          ctx.strokeText(mark.partnerName, 50, mark.midY);
+          ctx.fillStyle = rgba(ink, 0.35);
+          ctx.fillText(mark.partnerName, 50, mark.midY);
+          ctx.textAlign = 'center';
+        }
+      }
+    }
+
     function drawStringLabels(): void {
       ctx.font = `${LABEL_FONT_PX}px ${serif}`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       for (let i = 0; i < lanesNow.length; i += 1) {
         const lane = lanesNow[i]!;
+        const labelY = baselineOf(i) - 7;
+        // 耦合 hover 时伙伴名（x≈50）会压到左侧弦名标签上：把重叠的那一行标签暂时让开。
+        if (hoverCouplingNow && Math.abs(labelY - hoverCouplingNow.midY) < LABEL_FONT_PX) continue;
         ctx.fillStyle = rgba(ink, i === focusIdx ? 0.55 : 0.2);
-        ctx.fillText(lane.name, LABEL_X, baselineOf(i) - 7);
+        ctx.fillText(lane.name, LABEL_X, labelY);
       }
       ctx.textAlign = 'center';
     }
@@ -1041,6 +1191,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
       drawCrossings();
       drawRipples(now);
       drawStringLabels();
+      drawCouplings();
       drawThresholds();
       drawTextOverlays(now);
       if (dualNow) drawDualRing(now);
@@ -1384,7 +1535,12 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
           return;
         }
       }
-      // 2) 焦点弦两端的 D-膜：横向拖动改 span。
+      // 2) 焦点弦的耦合标记：消费掉点击（滚轮调强度，点击不拨弦/不改值）。
+      if (couplingEditRef.current && couplingHitAt(point)) {
+        drag = { ...common, kind: 'coupling', side: 1 };
+        return;
+      }
+      // 3) 焦点弦两端的 D-膜：横向拖动改 span。
       const nearLeft = Math.abs(point.x - geom.xL) <= MEMBRANE_X_PX;
       const nearRight = Math.abs(point.x - geom.xR) <= MEMBRANE_X_PX;
       if ((nearLeft || nearRight) && Math.abs(point.y - baseline) <= MEMBRANE_Y_PX) {
@@ -1475,10 +1631,31 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
     }
 
     function onWheel(event: WheelEvent): void {
-      if (!hoverNodeNow || modeNow !== 'strings' || dualNow) return;
-      event.preventDefault();
-      const direction = event.deltaY > 0 ? 1 : -1;
-      setMicroValue(microNow + direction * MICRO_STEP);
+      if (modeNow !== 'strings' || dualNow) return;
+      // 结点滚轮优先。
+      if (hoverNodeNow) {
+        event.preventDefault();
+        const direction = event.deltaY > 0 ? 1 : -1;
+        setMicroValue(microNow + direction * MICRO_STEP);
+        return;
+      }
+      // 耦合标记：滚轮 ±0.05 调强度（clamp 0..2，两位小数），每次都是用户手势（persist=true）。
+      const mark = hoverCouplingNow;
+      if (mark && couplingEditRef.current) {
+        event.preventDefault();
+        const now = performance.now();
+        const base =
+          couplingPending !== null &&
+          couplingPending.from === mark.from &&
+          couplingPending.to === mark.to &&
+          now - couplingPending.at < 800
+            ? couplingPending.value
+            : clamp(mark.strength, 0, COUPLING_MAX);
+        const direction = event.deltaY > 0 ? -1 : 1;
+        const next = Math.round(clamp(base + direction * COUPLING_STEP, 0, COUPLING_MAX) * 100) / 100;
+        couplingPending = { from: mark.from, to: mark.to, value: next, at: now };
+        couplingEditRef.current(mark.from, mark.to, next, true);
+      }
     }
 
     function onKeyDown(event: KeyboardEvent): void {
@@ -1547,9 +1724,11 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
         hoverCrossNow = null;
         hoverPairNow = null;
         hoverThresholdNow = null;
+        hoverCouplingNow = null;
         return;
       }
       hoverThresholdNow = drag === null ? thresholdHitAt(pointerNow) : null;
+      hoverCouplingNow = drag === null ? couplingHitAt(pointerNow) : null;
       const geom = focusGeom();
       const nodeX = geom.xL + 0.62 * geom.width;
       const nodeY = curveYAt(focusIdx, nodeX);
@@ -1643,6 +1822,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
         crossingTrail = [];
         setCrossingsCount(0);
       }
+      couplingMarksNow = buildCouplingMarks();
       updateHoverState();
       const focusSim = sims[focusIdx];
       setRestingUi(focusSim ? focusSim.resting() : true);
@@ -1691,6 +1871,8 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
       hoverCrossNow = null;
       hoverPairNow = null;
       hoverThresholdNow = null;
+      hoverCouplingNow = null;
+      couplingPending = null;
       hoverLatchUntil = 0;
       for (let i = 0; i < lastCouple.length; i += 1) lastCouple[i] = Number.NEGATIVE_INFINITY;
       lastTouchNow = null;
@@ -1798,6 +1980,23 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
           vergeNorm: typeof lane.vergeNorm === 'number' ? round4(lane.vergeNorm) : null,
           safeNorm: typeof lane.safeNorm === 'number' ? round4(lane.safeNorm) : null,
         })),
+      couplingMarks: () =>
+        couplingMarksNow.map((mark) => ({
+          from: mark.from,
+          to: mark.to,
+          strength: round4(mark.strength),
+          x: Math.round(mark.x * 100) / 100,
+          y: Math.round(mark.midY * 100) / 100,
+          partnerName: mark.partnerName,
+        })),
+      setCoupling: (from: string, to: string, strength: number) => {
+        const exists = viewRef.current.couplings.some(
+          (coupling) =>
+            (coupling.from === from && coupling.to === to) || (coupling.from === to && coupling.to === from),
+        );
+        if (!exists) return;
+        couplingEditRef.current?.(from, to, Math.round(clamp(strength, 0, COUPLING_MAX) * 100) / 100, false);
+      },
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
@@ -1855,6 +2054,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
       safeNorm: typeof lane.safeNorm === 'number' ? round4(lane.safeNorm) : null,
     })),
   );
+  const couplingsJson = JSON.stringify(view.couplings ?? []);
 
   return (
     <div
@@ -1872,6 +2072,7 @@ export function StringField({ view, onInject, onEditThreshold, onCycleString }: 
       data-norms={normsJson}
       data-kinds={kindsJson}
       data-thresholds={thresholdsJson}
+      data-couplings={couplingsJson}
       data-lane-count={laneCount}
       data-span={spanUi.toFixed(2)}
       data-resonant={resonantUi ? 'true' : 'false'}

@@ -38,8 +38,25 @@ const focusBaselineY = () =>
     return 790 - norm * 680;
   });
 
-// 1. 首屏：一张白纸 + 世界驱动的八根弦（焦点信任）
+// 1. 首屏：一张白纸 + 世界驱动的八根弦（焦点信任，左侧有极淡的耦合标记）
 await page.screenshot({ path: 'docs/images/string-eight.png' });
+
+// 1b. 耦合编辑：hover「信任↔色温」标记，滚一点强度，截图后把世界恢复干净
+const colorMark = await page.evaluate(() => {
+  const marks = window.__neurouString.couplingMarks();
+  return marks.find((m) => m.from === '信任' && m.to === '色温') ?? null;
+});
+if (colorMark) {
+  await page.mouse.move(colorMark.x, colorMark.y);
+  await page.waitForTimeout(220);
+  await page.mouse.wheel(0, -100);
+  await page.waitForTimeout(1400);
+  await page.screenshot({ path: 'docs/images/string-coupling-edit.png' });
+  restoreWorld();
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-testid="string-field"]');
+  await page.waitForTimeout(1000);
+}
 
 // 2. 拖弦写回世界：信任下移 100px，等 1–2 拍看耦合弦自己波动
 const baseY = await focusBaselineY();

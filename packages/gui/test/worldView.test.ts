@@ -6,6 +6,7 @@ import { compileText, type WorldIR } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import {
   collectLanes,
+  couplingLanes,
   laneRange,
   numericStringsByKind,
   withCurrentBaselines,
@@ -144,5 +145,17 @@ describe('世界 → 调律台投影', () => {
     const frozen = withCurrentBaselines(ir, universe);
     expect(frozen.strings.find((s) => s.id === '甲')?.baseline).toBe(33);
     expect(frozen.strings.find((s) => s.id === '乙')?.baseline).toBe(88);
+  });
+
+  it('耦合投影：两端是世界弦 id，回路边带 loop 标记', () => {
+    const { ir } = loadTuner();
+    const couplings = couplingLanes(ir);
+    expect(couplings).toHaveLength(10);
+    const trustToColor = couplings.find((c) => c.from === '信任' && c.to === '色温');
+    expect(trustToColor?.strength).toBe(0.5);
+    expect(trustToColor?.loop).toBe('色温回响');
+    const trustToFear = couplings.find((c) => c.from === '信任' && c.to === '恐惧');
+    expect(trustToFear?.polarity).toBe(-1);
+    expect(trustToFear?.loop).toBeUndefined();
   });
 });
