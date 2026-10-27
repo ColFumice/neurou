@@ -262,6 +262,14 @@ class Compiler {
       mode = '固定';
     }
 
+    let articulation: IRSpectrum['articulation'] = d.articulation ?? '拨弦';
+    if (articulation !== '拨弦' && articulation !== '持续') {
+      this.error('NRO2100', `谱「${d.name}」的演奏方式「${String(articulation)}」无效。`, d.span, {
+        hint: '可用：拨弦、持续。',
+      });
+      articulation = '拨弦';
+    }
+
     if (d.bands.length === 0) {
       this.error('NRO2100', `谱「${d.name}」的「段」至少需要一个音段值。`, d.span, {
         hint: '空谱无法插值——写一行「段 0.1 0.4 0.8 0.5」。',
@@ -294,6 +302,7 @@ class Compiler {
       interpolation,
       loop: d.loop,
       mode,
+      articulation,
       span: d.span,
     });
   }

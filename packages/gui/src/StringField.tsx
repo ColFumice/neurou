@@ -1660,6 +1660,7 @@ export function StringField({
       ghostText?: string,
       pushWorld = true,
       persist = true,
+      playAudio = true,
     ): void {
       if (dualNow) return;
       const lane = laneAt(focusIdx);
@@ -1685,14 +1686,16 @@ export function StringField({
         const nextNorm = clamp(lane.norm + deltaNorm, 0, 1);
         injectRef.current(lane.kind, lane.min + nextNorm * (lane.max - lane.min), persist);
       }
-      audioBegin(
-        lane.kind,
-        clamp(center01, 0, 1),
-        clamp(screenY / LOGICAL_H, 0, 1),
-        clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
-        1 / spanNow,
-        lane.timbre,
-      );
+      if (playAudio) {
+        audioBegin(
+          lane.kind,
+          clamp(center01, 0, 1),
+          clamp(screenY / LOGICAL_H, 0, 1),
+          clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
+          1 / spanNow,
+          lane.timbre,
+        );
+      }
       if (resonantNow) chordOnPluck(center01, amplitude);
       trailSettle = 0;
       setRestingUi(false);
@@ -2018,6 +2021,15 @@ export function StringField({
       noteTouch(key.cx, key.cy, amplitude, direction, event.code);
       if (!keyHolds.has(event.code)) {
         keyHolds.set(event.code, { code: event.code, label, x: key.cx, y: key.cy, startedAt: performance.now() });
+        // 键盘 keydown 立即用当前弦的音色发一声较轻的即时音（keyup 不再重复发声）。
+        audioBegin(
+          kindOf(focusIdx),
+          clamp(key.cx / LOGICAL_W, 0, 1),
+          clamp(key.cy / LOGICAL_H, 0, 1),
+          0.55,
+          1 / spanNow,
+          laneAt(focusIdx)?.timbre,
+        );
       }
     }
 
@@ -2027,8 +2039,8 @@ export function StringField({
       keyHolds.delete(event.code);
       pinsNow = pinsNow.filter((pin) => !(pin.source === 'keyboard' && pin.code === event.code));
       updateHeldState();
-      // 松手：以按住点的位移拨一次（视觉/音频/值注入）。
-      pluckFocus(session.x, session.y, session.code, session.label);
+      // 松手：以按住点的位移拨一次（视觉/值注入；键盘已在 keydown 即时发声，不再重复播放）。
+      pluckFocus(session.x, session.y, session.code, session.label, true, true, false);
     }
 
     /* —— 每帧 —— */

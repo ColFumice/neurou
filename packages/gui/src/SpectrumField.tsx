@@ -26,6 +26,8 @@ export interface SpectrumView {
   interpolation: '线性' | '平滑';
   loop: boolean;
   mode: '固定' | '受迫';
+  /** 演奏方式：拨弦 = 一次性；持续 = 按住循环发声（v2.0.1）。 */
+  articulation: '拨弦' | '持续';
 }
 
 export interface SpectrumFieldProps {
@@ -49,6 +51,7 @@ interface SpectrumDebugState {
   interpolation: '线性' | '平滑';
   loop: boolean;
   mode: '固定' | '受迫';
+  articulation: '拨弦' | '持续';
 }
 
 interface BandPosition {
@@ -119,6 +122,15 @@ const KEY_STEP_DIVISOR = 100;
 const HIT_RADIUS_PX = 40;
 /** 拖动判定阈值：超过这么多像素才算改值（纯点击只选段）。 */
 const DRAG_THRESHOLD_PX = 2;
+
+/** 按键反馈：键位 x 处极淡短竖线 + 底部该键字符；拨弦 300ms 淡出，持续按住保持。 */
+const FEEDBACK_LINE_ALPHA = 0.2;
+const FEEDBACK_LABEL_ALPHA = 0.3;
+const FEEDBACK_LINE_TOP = 800;
+const FEEDBACK_LINE_BOTTOM = 818;
+const FEEDBACK_LABEL_FONT_PX = 11;
+const FEEDBACK_LABEL_Y = 840;
+const FEEDBACK_FADE_MS = 300;
 
 const DEFAULT_SERIF = '"Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif';
 const FALLBACK_INK: Rgb = [11, 11, 11];
@@ -201,6 +213,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
   const [hoverUi, setHoverUi] = useState<number | null>(null);
   const [auditionsUi, setAuditionsUi] = useState(0);
   const [lastKeyUi, setLastKeyUi] = useState('');
+  const [sustainedCountUi, setSustainedCountUi] = useState(0);
 
   const bandsJson = formatBandList(valuesUi);
   const targetsJson = formatBandList(targetsUi);
@@ -227,6 +240,13 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     let spectrumKey = '';
     let auditionsNow = 0;
     let lastKeyNow = '';
+    /** 持续音（拉奏/吹奏）：keyCode → audio voice id，多键各自独立。 */
+    const sustainedVoices = new Map<string, number>();
+    /** 按键反馈：keyCode → 位置/字符/按下与松开时间（松开后 300ms 淡出）。 */
+    const auditionMarks = new Map<
+      string,
+      { x: number; label: string; pressedAt: number; releasedAt: number | null }
+    >();
     let scaleX = 1;
     let scaleY = 1;
     let ink: Rgb = FALLBACK_INK;
@@ -313,6 +333,17 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       setLastKeyUi(lastKeyNow);
     }
 
+    function setSustainedCount(value: number): void {
+      setSustainedCountUi(value);
+    }
+
+    /** 停掉全部持续音（Tab/切谱/Esc/卸载时调用）。 */
+    function stopAllSustained(updateUi = true): void {
+      for (const id of sustainedVoices.values()) audio.stopSustainedSpectrum(id);
+      sustainedVoices.clear();
+      if (updateUi) setSustainedCount(0);
+    }
+
     /** 谱切换 / 频段数量变化时：快照到新谱、清掉选中/hover/拖动。 */
     function syncSpectrum(): SpectrumView | null {
       const list = spectraRef.current;
@@ -325,6 +356,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
           selected = null;
           hover = null;
           drag = null;
+          stopAllSustained();
+          auditionMarks.clear();
           pushUi(true);
         }
         return null;
@@ -338,6 +371,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         selected = null;
         hover = null;
         drag = null;
+        stopAllSustained();
+        auditionMarks.clear();
         pushUi(true);
         return spectrum;
       }
@@ -405,7 +440,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     }
 
     /* —— 绘制 —— */
-    function draw(spectrum: SpectrumView | null): void {
+    function draw(spectrum: SpectrumView | null, now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
@@ -474,6 +509,29 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
           ctx.beginPath();
           ctx.arc(startX + i * DOTS_GAP, NAME_Y, DOTS_SIZE, 0, Math.PI * 2);
           ctx.fill();
+        }
+      }
+      // 按键反馈：键位 x 处极淡短竖线 + 底部该键字符（拨弦 300ms 淡出，持续按住保持）
+      if (auditionMarks.size > 0) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 1.2;
+        ctx.lineCap = 'round';
+        for (const [code, mark] of [...auditionMarks]) {
+          const fade = mark.releasedAt === null ? 1 : Math.max(0, 1 - (now - mark.releasedAt) / FEEDBACK_FADE_MS);
+          if (fade <= 0) {
+            auditionMarks.delete(code);
+            continue;
+          }
+          const x = clamp(mark.x, 0, LOGICAL_W);
+          ctx.strokeStyle = rgba(ink, FEEDBACK_LINE_ALPHA * fade);
+          ctx.beginPath();
+          ctx.moveTo(x, FEEDBACK_LINE_TOP);
+          ctx.lineTo(x, FEEDBACK_LINE_BOTTOM);
+          ctx.stroke();
+          ctx.font = `${FEEDBACK_LABEL_FONT_PX}px ${serif}`;
+          ctx.fillStyle = rgba(ink, FEEDBACK_LABEL_ALPHA * fade);
+          ctx.fillText(mark.label, x, FEEDBACK_LABEL_Y);
         }
       }
       ctx.textAlign = 'center';
@@ -550,12 +608,16 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       if (event.code === 'Tab') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        stopAllSustained();
+        auditionMarks.clear();
         cycleRef.current(event.shiftKey ? -1 : 1);
         return;
       }
       if (event.code === 'Escape' || event.code === 'F2') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        stopAllSustained();
+        auditionMarks.clear();
         exitRef.current();
         return;
       }
@@ -569,14 +631,32 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         auditionsNow += 1;
         lastKeyNow = event.code;
         pushAuditionUi();
+        const now = performance.now();
+        auditionMarks.set(event.code, { x: auditionKey.cx, label: auditionKey.label, pressedAt: now, releasedAt: null });
         void audio.ensureStarted();
-        audio.previewSpectrum(
-          spectrum.bands,
-          auditionKey.cx / LOGICAL_W,
-          0.5,
-          spectrum.interpolation === '平滑',
-          spectrum.loop,
-        );
+        const xNorm = auditionKey.cx / LOGICAL_W;
+        if (spectrum.articulation === '持续') {
+          // 持续（拉奏/吹奏）：按 keyCode 各持一个循环 voice，松手才停。
+          const voiceId = audio.startSustainedSpectrum(
+            spectrum.bands,
+            xNorm,
+            0.5,
+            spectrum.interpolation === '平滑',
+            spectrum.loop,
+          );
+          if (voiceId > 0) {
+            sustainedVoices.set(event.code, voiceId);
+            setSustainedCount(sustainedVoices.size);
+          }
+        } else {
+          audio.previewSpectrum(
+            spectrum.bands,
+            xNorm,
+            0.5,
+            spectrum.interpolation === '平滑',
+            spectrum.loop,
+          );
+        }
         return;
       }
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight' || event.code === 'ArrowUp' || event.code === 'ArrowDown') {
@@ -606,6 +686,17 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       editRef.current(spectrum.id, bandIndex, nextValue, true);
     }
 
+    function onKeyUp(event: KeyboardEvent): void {
+      const mark = auditionMarks.get(event.code);
+      if (mark && mark.releasedAt === null) mark.releasedAt = performance.now();
+      const voiceId = sustainedVoices.get(event.code);
+      if (voiceId !== undefined) {
+        audio.stopSustainedSpectrum(voiceId);
+        sustainedVoices.delete(event.code);
+        setSustainedCount(sustainedVoices.size);
+      }
+    }
+
     /* —— 每帧：缓动 + 绘制 —— */
     function frame(now: number): void {
       requestId = window.requestAnimationFrame(frame);
@@ -632,7 +723,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         }
         if (changed) pushUi();
       }
-      draw(spectrum);
+      draw(spectrum, now);
     }
 
     /* —— 调试 / 验收钩子 —— */
@@ -653,6 +744,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         interpolation: spectrum?.interpolation ?? '线性',
         loop: spectrum?.loop ?? false,
         mode: spectrum?.mode ?? '固定',
+        articulation: spectrum?.articulation ?? '拨弦',
       };
     }
 
@@ -699,6 +791,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
     const observer = new ResizeObserver(() => {
       resize();
@@ -717,6 +810,9 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      stopAllSustained(false);
+      auditionMarks.clear();
       if (window.__neurouSpectrum === debugApi) delete window.__neurouSpectrum;
     };
   }, []);
@@ -736,6 +832,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       data-hover-band={hoverUi === null ? '' : String(hoverUi)}
       data-auditions={auditionsUi}
       data-last-key={lastKeyUi}
+      data-articulation={current?.articulation ?? '拨弦'}
+      data-sustained-count={sustainedCountUi}
       style={{
         position: 'absolute',
         inset: 0,

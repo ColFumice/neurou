@@ -360,6 +360,50 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /**
+ * 把谱段采样成一个周期波形（v2.0.1 持续音色用）：0..1 归一化、去直流、峰值归一化。
+ */
+export function spectrumWaveSamples(
+  bands: readonly number[],
+  options: { min?: number; max?: number; smooth?: boolean; loop?: boolean } = {},
+  count = 256,
+): Float32Array {
+  const out = new Float32Array(Math.max(8, Math.round(count)));
+  if (bands.length < 2) return out;
+  const min = finiteOr(options.min ?? 0, 0);
+  const max = finiteOr(options.max ?? 1, 1);
+  const span = max - min || 1;
+  const smooth = options.smooth === true;
+  const loop = options.loop === true;
+  let mean = 0;
+  for (let i = 0; i < out.length; i++) {
+    let phase = i / out.length;
+    if (loop) phase -= Math.floor(phase);
+    else phase = clamp(phase, 0, 1);
+    const at = phase * (bands.length - 1);
+    const i0 = Math.floor(at);
+    const i1 = Math.min(bands.length - 1, i0 + 1);
+    let t = at - i0;
+    if (smooth) t = (1 - Math.cos(Math.PI * t)) / 2;
+    const a = (bands[i0]! - min) / span;
+    const b = (bands[i1]! - min) / span;
+    out[i] = a * (1 - t) + b * t;
+    mean += out[i]!;
+  }
+  mean /= out.length;
+  let peak = 0;
+  for (let i = 0; i < out.length; i++) {
+    out[i] = out[i]! - mean;
+    peak = Math.max(peak, Math.abs(out[i]!));
+  }
+  if (peak > 1e-6) {
+    for (let i = 0; i < out.length; i++) out[i] = out[i]! / peak;
+  } else {
+    out.fill(0);
+  }
+  return out;
+}
+
+/**
  * Karplus-Strong：噪声激励 + 延迟线 + 低通反馈，最后叠一条指数衰减包络。
  * 返回长度 = round(seconds * sampleRate) 的缓冲；峰值归一化到 ~0.92，无 NaN。
  */

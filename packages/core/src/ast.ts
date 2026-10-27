@@ -201,6 +201,8 @@ export interface SpectrumDecl extends DeclBase {
   interpolation: '线性' | '平滑';
   loop: boolean;
   mode: '固定' | '受迫';
+  /** 演奏方式：拨弦（一次性）或持续（按住发声，v2.0.1）。 */
+  articulation: '拨弦' | '持续';
 }
 
 export type Decl =

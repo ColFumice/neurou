@@ -34,6 +34,7 @@ const RESPONSE_CURVES: ResponseCurve[] = ['线性', '缓入', '缓出', '阶跃'
 
 const SPECTRUM_INTERPOLATIONS: readonly string[] = ['线性', '平滑'];
 const SPECTRUM_MODES: readonly string[] = ['固定', '受迫'];
+const SPECTRUM_ARTICULATIONS: readonly string[] = ['拨弦', '持续'];
 
 /**
  * 递归下降解析器，按缩进分块。
@@ -486,12 +487,14 @@ class Parser {
       interpolation: '线性',
       loop: false,
       mode: '固定',
+      articulation: '拨弦',
       span: this.spanFrom(start),
     };
     this.finishLine();
 
     let sawBands = false;
     let sawMode = false;
+    let sawArticulation = false;
     if (this.enterBlock(`谱「${name}」`)) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -574,8 +577,25 @@ class Parser {
             this.finishLine();
             break;
           }
+          case '演奏': {
+            if (sawArticulation) {
+              this.fail(`谱「${name}」的「演奏」只能声明一次。`, fieldStart.span, '把演奏方式写在一行，例如「演奏 持续」。');
+              this.skipToLineEnd();
+              break;
+            }
+            sawArticulation = true;
+            const valueStart = this.peek();
+            const value = this.readName('演奏方式');
+            if (!SPECTRUM_ARTICULATIONS.includes(value)) {
+              this.fail(`不认识的演奏方式「${value}」。`, valueStart.span, '可用：拨弦、持续。');
+            } else {
+              decl.articulation = value as SpectrumDecl['articulation'];
+            }
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环、模式。');
+            this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环、模式、演奏。');
             this.skipToLineEnd();
         }
       }

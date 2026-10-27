@@ -212,6 +212,7 @@ function spectrumBlock(w: Writer, spectrum: IRSpectrum): void {
   if (spectrum.interpolation !== '线性') w.line(1, `插值 ${spectrum.interpolation}`);
   if (spectrum.loop) w.line(1, '循环 是');
   if (spectrum.mode !== '固定') w.line(1, `模式 ${spectrum.mode}`);
+  if (spectrum.articulation !== '拨弦') w.line(1, `演奏 ${spectrum.articulation}`);
   w.blank();
 }
 

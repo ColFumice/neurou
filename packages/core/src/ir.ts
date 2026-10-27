@@ -168,6 +168,8 @@ export interface IRSpectrum {
   loop: boolean;
   /** 调制模式：固定（持久叠加）或受迫（每拍衰减回锚点）。 */
   mode: '固定' | '受迫';
+  /** 演奏方式：拨弦（一次性）或持续（按住发声）。 */
+  articulation: '拨弦' | '持续';
   span?: Span;
 }
 

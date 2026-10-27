@@ -520,6 +520,7 @@ export function App() {
     interpolation: s.interpolation,
     loop: s.loop,
     mode: s.mode,
+    articulation: s.articulation,
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {

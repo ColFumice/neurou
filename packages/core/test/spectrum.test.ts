@@ -24,6 +24,7 @@ function spectrumShape(ir: WorldIR) {
     interpolation: s.interpolation,
     loop: s.loop,
     mode: s.mode,
+    articulation: s.articulation,
   }));
 }
 
@@ -367,6 +368,27 @@ describe('谱：解析、编译与验证', () => {
       interpolation: '平滑',
       loop: true,
     });
+  });
+
+  it('「演奏 持续」可解析、默认拨弦、序列化保留非默认', () => {
+    const sustained = compileWorld(`${STRING}谱 拉奏
+  段 0 1 0.5
+  演奏 持续
+`);
+    expect(sustained.ok).toBe(true);
+    expect(sustained.ir.spectra[0]?.articulation).toBe('持续');
+    const text = serialize(sustained.ir);
+    expect(text).toContain('演奏 持续');
+    const again = compileText(text, 'sustained.nro');
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.ir.spectra[0]?.articulation).toBe('持续');
+    const defaults = compileWorld(`${STRING}谱 弹奏
+  段 0 1 0.5
+`);
+    expect(defaults.ok).toBe(true);
+    expect(defaults.ir.spectra[0]?.articulation).toBe('拨弦');
+    expect(serialize(defaults.ir)).not.toContain('演奏');
   });
 
   it('弦可以用「音色」引用一条谱，序列化后仍保留', () => {

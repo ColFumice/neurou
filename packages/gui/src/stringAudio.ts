@@ -7,7 +7,7 @@
  * - AnalyserNode 挂在 master 之后，`rms()` 给自动验收一个真实的非静音信号。
  */
 import type { StringKind } from '@neurou/core';
-import { WAVE_WIDTH, ksPluckBuffer, pitchForX } from './waveMath.js';
+import { WAVE_WIDTH, ksPluckBuffer, pitchForX, spectrumWaveSamples } from './waveMath.js';
 import type { TimbreCurve } from './stringMath.js';
 
 export type StringAudioState = 'off' | 'running' | 'suspended' | 'unavailable';
@@ -56,6 +56,8 @@ export class StringAudioEngine {
   private listeners = new Set<(state: StringAudioState) => void>();
   private bufferCache = new Map<string, AudioBuffer>();
   private sources = new Set<AudioBufferSourceNode>();
+  private voices = new Map<number, { source: AudioBufferSourceNode; gain: GainNode; pan: StereoPannerNode | null }>();
+  private voiceSeq = 0;
 
   getState(): StringAudioState {
     return this.status;
@@ -263,6 +265,78 @@ export class StringAudioEngine {
       }
     }
     this.sources.clear();
+    for (const id of [...this.voices.keys()]) this.stopSustainedSpectrum(id);
+  }
+
+  /** v2.0.1：持续音色（拉奏/吹奏）——按住键时循环发声。返回 voice id。 */
+  startSustainedSpectrum(
+    bands: readonly number[],
+    xNorm: number,
+    yNorm: number,
+    smooth: boolean,
+    loop: boolean,
+    amplitudeNorm = 0.6,
+  ): number {
+    const ctx = this.ctx;
+    const master = this.master;
+    if (!ctx || !master || bands.length < 2) return 0;
+    const profile = KIND_AUDIO['叙事'];
+    const x = clamp(xNorm, 0, 1);
+    const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
+    const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
+    const period = Math.max(8, Math.round(ctx.sampleRate / freq));
+    const wave = spectrumWaveSamples(bands, { min: 0, max: 1, smooth, loop }, period);
+    const buffer = ctx.createBuffer(1, wave.length, ctx.sampleRate);
+    buffer.copyToChannel(wave, 0);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const gain = ctx.createGain();
+    const target = clamp(profile.gain * (0.4 + amplitudeNorm * 0.5), 0.02, 0.3);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(target, ctx.currentTime + 0.035);
+    const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    if (pan) {
+      pan.pan.value = (x * 2 - 1) * 0.4;
+      source.connect(gain);
+      gain.connect(pan);
+      pan.connect(master);
+    } else {
+      source.connect(gain);
+      gain.connect(master);
+    }
+    source.start();
+    const id = ++this.voiceSeq;
+    this.voices.set(id, { source, gain, pan });
+    return id;
+  }
+
+  stopSustainedSpectrum(id: number): void {
+    const ctx = this.ctx;
+    const voice = this.voices.get(id);
+    if (!voice) return;
+    this.voices.delete(id);
+    const end = (ctx?.currentTime ?? 0) + 0.12;
+    try {
+      voice.gain.gain.cancelScheduledValues(ctx?.currentTime ?? 0);
+      voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), ctx?.currentTime ?? 0);
+      voice.gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      voice.source.stop(end + 0.02);
+    } catch {
+      try {
+        voice.source.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    voice.source.onended = () => {
+      try {
+        voice.gain.disconnect();
+        voice.pan?.disconnect();
+      } catch {
+        /* ignore */
+      }
+    };
   }
 }
 

@@ -86,6 +86,7 @@ function structuralSignature(ir: WorldIR): string {
       interpolation: s.interpolation,
       loop: s.loop,
       mode: s.mode,
+      articulation: s.articulation,
       bandCount: s.bands.length,
     })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
