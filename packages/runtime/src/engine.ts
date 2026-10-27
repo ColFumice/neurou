@@ -18,7 +18,9 @@ import {
   type TimelineEvent,
   clampString,
   cloneState,
+  createSpectrumState,
   createState,
+  sampleSpectrum,
 } from './state.js';
 
 export interface EmittedCue {
@@ -240,24 +242,8 @@ export class Universe {
   getSpectrumAt(id: string, position: number): number | undefined {
     const ir = this.spectra.get(id);
     const st = this.state.spectra?.[id];
-    if (!ir || !st || !Number.isFinite(position)) return undefined;
-
-    const n = st.values.length;
-    if (n === 0) return undefined;
-    const p = ir.loop ? ((position % 1) + 1) % 1 : Math.min(1, Math.max(0, position));
-    if (n === 1) return st.values[0]!;
-
-    const x = p * (n - 1);
-    const i = Math.floor(x);
-    if (i >= n - 1) return st.values[n - 1]!;
-    const a = st.values[i]!;
-    const b = st.values[i + 1]!;
-    const t = x - i;
-    if (ir.interpolation === '平滑') {
-      const eased = (1 - Math.cos(Math.PI * t)) / 2;
-      return a + (b - a) * eased;
-    }
-    return a + (b - a) * t;
+    if (!ir || !st) return undefined;
+    return sampleSpectrum(st, position);
   }
 
   // ---------- 操作 ----------
@@ -547,14 +533,15 @@ export class Universe {
   restore(s: WorldState): void {
     this.state = cloneState(s);
     // 旧快照可能没有 spectra：用 IR 里的作者数据补齐，避免恢复后谱凭空消失。
-    this.ensureSpectrumState();
+    // 旧快照的谱条目也可能缺少 v2.1a 的采样元数据，用 IR 覆盖回退值。
+    this.ensureSpectrumState(true);
   }
 
   /** 从当前状态分叉出一个新宇宙（力迫的 V[G]）。 */
   branch(label?: string): Universe {
     const u = new Universe(this.ir, { seed: this.state.rng, log: this.logEnabled });
     u.state = cloneState(this.state);
-    u.ensureSpectrumState();
+    u.ensureSpectrumState(true);
     // 尚未 tick 的谱调制也是「当下状态」的一部分；分叉时一起带走。
     u.pendingSpectrumModulations = this.pendingSpectrumModulations.map((m) => ({ ...m }));
     if (label) u.state.branch = label;
@@ -571,13 +558,34 @@ export class Universe {
 
   // ---------- 内部 ----------
 
-  /** 确保每条 IR 谱在当前状态里都有可变槽位（兼容没有 spectra 的旧快照）。 */
-  private ensureSpectrumState(): void {
+  /**
+   * 确保每条 IR 谱在当前状态里都有可变槽位（兼容没有 spectra 的旧快照）。
+   *
+   * `rebuildFromIR` 为 true 时（restore / branch），把 v2.1a 的采样元数据
+   * 一律从 IR 重写：旧快照在 clone 时已经回退到 0..1 / 线性 / 不循环，
+   * 只有 IR 知道这条谱真正的插值与循环方式。
+   */
+  private ensureSpectrumState(rebuildFromIR = false): void {
     if (!this.state.spectra) this.state.spectra = {};
     for (const ir of this.spectra.values()) {
-      if (!this.state.spectra[ir.id]) {
-        this.state.spectra[ir.id] = { anchors: [...ir.bands], values: [...ir.bands], mode: ir.mode };
+      const st = this.state.spectra[ir.id];
+      if (!st) {
+        this.state.spectra[ir.id] = createSpectrumState(ir);
+        continue;
       }
+      if (rebuildFromIR) {
+        st.mode = ir.mode;
+        st.min = ir.min;
+        st.max = ir.max;
+        st.interpolation = ir.interpolation;
+        st.loop = ir.loop;
+        continue;
+      }
+      if (st.mode !== '固定' && st.mode !== '受迫') st.mode = ir.mode;
+      if (typeof st.min !== 'number' || !Number.isFinite(st.min)) st.min = ir.min;
+      if (typeof st.max !== 'number' || !Number.isFinite(st.max)) st.max = ir.max;
+      if (st.interpolation !== '线性' && st.interpolation !== '平滑') st.interpolation = ir.interpolation;
+      if (typeof st.loop !== 'boolean') st.loop = ir.loop;
     }
   }
 

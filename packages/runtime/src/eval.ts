@@ -1,5 +1,5 @@
 import type { LExpr } from '@neurou/core';
-import type { RuntimeValue, WorldState } from './state.js';
+import { sampleSpectrum, type RuntimeValue, type WorldState } from './state.js';
 
 /** 求值：把图上的表达式还原成一次具体的判断或数值。 */
 export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
@@ -50,6 +50,15 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           return Math.abs(asNumber(args[0] ?? null));
         case '存在':
           return args[0] !== null && args[0] !== undefined;
+        case '查谱': {
+          // 第一个参数在编译期已保证是谱名字符串；运行时只按状态采样。
+          // 未知谱 / 非有限位置返回 0，让规则与结局保持数值语义。
+          const name = args[0];
+          const st = typeof name === 'string' ? state.spectra?.[name] : undefined;
+          if (!st) return 0;
+          const sampled = sampleSpectrum(st, asNumber(args[1] ?? null));
+          return sampled === undefined ? 0 : sampled;
+        }
         default:
           return null;
       }

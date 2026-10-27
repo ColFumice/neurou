@@ -601,8 +601,38 @@ class Compiler {
           case '存在':
             if (argTypes[0] !== 'ref' && argTypes[0] !== 'any') return fail('一个引用');
             return { expr: { k: 'call', fn: '存在', args: l }, type: 'boolean' };
+          case '查谱': {
+            if (e.args.length !== 2) {
+              this.error('NRO2003', `函数「查谱」需要两个参数：谱名（字符串）和位置（数字），现在给了 ${e.args.length} 个。`, e.span, {
+                hint: '例如：查谱("情绪地形", 0.5)。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const nameArg = e.args[0]!;
+            const position = args[1]!;
+            if (argTypes[1] !== 'number' && argTypes[1] !== 'any') {
+              this.error('NRO2003', `「查谱」的位置参数必须是数字，这里是${typeLabel(argTypes[1]!)}。`, e.args[1]!.span, {
+                hint: '位置是 0..1 的归一化坐标，例如 查谱("情绪地形", 0.5)。',
+              });
+            }
+            if (nameArg.k !== 'str') {
+              this.error('NRO2003', '「查谱」的第一个参数必须是直接写出的谱名字符串。', nameArg.span, {
+                hint: '谱名在编译期就要确定，例如 查谱("情绪地形", 0.5)。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            // 名字必须指向一条已声明的谱（WorldIR.spectra 的 id/name）。
+            if (!this.spectrumNames.has(nameArg.v)) {
+              const hint = suggestName(nameArg.v, [...this.spectrumNames]);
+              this.error('NRO2101', `「查谱」引用了不存在的谱「${nameArg.v}」。`, nameArg.span, hint ? { hint: `你是不是想写「${hint}」？` } : { hint: '先声明「谱 名字」，再在表达式里查询它。' });
+            }
+            return {
+              expr: { k: 'call', fn: '查谱', args: [{ k: 'const', v: nameArg.v }, position.expr] },
+              type: 'number',
+            };
+          }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在']);
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '查谱']);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
