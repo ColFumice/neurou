@@ -1,22 +1,32 @@
 ﻿import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_VALUES,
   KEY_COUNT,
-  STRING_N,
   KIND_ORDER,
+  KIND_RESONANCE,
   KIND_VISUAL,
   LOGICAL_H,
   LOGICAL_W,
+  RESONANCE_BAND,
   STRING_CENTER_Y,
+  STRING_N,
   StringSim,
+  VALUE_Y_BOTTOM,
+  VALUE_Y_TOP,
+  curveCrossings,
   excitationShape,
   keyAtPoint,
   keyByCode,
   layoutKeyboard,
   nextKind,
+  resonanceOf,
   signature,
+  standingOvertone,
   tentShape,
   touchFromKey,
   touchFromPoint,
+  valueToY,
+  yToValue,
 } from '../src/stringMath.js';
 
 const keys = layoutKeyboard();
@@ -233,5 +243,72 @@ describe('一维弦物理：稳定、会振动、会衰减、会停', () => {
     for (let i = 0; i < 30; i++) b.step(1 / 30, profile);
     // 半个周期的相位差允许存在，但量级应该在同一档。
     expect(Math.abs(a.amplitude() - b.amplitude())).toBeLessThan(profile.maxPull * 0.7);
+  });
+});
+
+describe('八弦叠影：设置值 = 基线纵坐标', () => {
+  it('value 0..100 单调映射到 y，并且可逆', () => {
+    expect(valueToY(100)).toBeCloseTo(VALUE_Y_TOP, 6);
+    expect(valueToY(0)).toBeCloseTo(VALUE_Y_BOTTOM, 6);
+    expect(valueToY(50)).toBeLessThan(valueToY(0));
+    expect(valueToY(50)).toBeGreaterThan(valueToY(100));
+    for (const value of [0, 12.5, 50, 77.7, 100]) {
+      expect(yToValue(valueToY(value))).toBeCloseTo(value, 6);
+    }
+    // 越界值被夹住，不能把基线推出去。
+    expect(valueToY(-20)).toBeCloseTo(VALUE_Y_BOTTOM, 6);
+    expect(valueToY(180)).toBeCloseTo(VALUE_Y_TOP, 6);
+    expect(yToValue(-999)).toBe(100);
+    expect(yToValue(9999)).toBe(0);
+  });
+
+  it('8 类弦都有默认值与共振点，默认值不落在各自共振带上（初始不是驻波态）', () => {
+    for (const kind of KIND_ORDER) {
+      expect(DEFAULT_VALUES[kind]).toBeGreaterThanOrEqual(0);
+      expect(DEFAULT_VALUES[kind]).toBeLessThanOrEqual(100);
+      const bands = KIND_RESONANCE[kind];
+      expect(bands.length).toBeGreaterThan(0);
+      expect(resonanceOf(kind, DEFAULT_VALUES[kind]).resonant).toBe(false);
+    }
+    // 默认值整体铺开，不是全挤在一起。
+    const ys = KIND_ORDER.map((kind) => valueToY(DEFAULT_VALUES[kind]));
+    expect(new Set(ys.map((y) => Math.round(y))).size).toBe(8);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(300);
+  });
+
+  it('共振带：中心最接近 1，带外不共振，带宽有定义', () => {
+    const center = KIND_RESONANCE['动画'][1]!;
+    const info = resonanceOf('动画', center);
+    expect(info.resonant).toBe(true);
+    expect(info.center).toBe(center);
+    expect(info.strength).toBeCloseTo(1, 6);
+    expect(resonanceOf('动画', center + RESONANCE_BAND / 2).strength).toBeGreaterThan(0.3);
+    expect(resonanceOf('动画', center + RESONANCE_BAND + 1).resonant).toBe(false);
+  });
+
+  it('驻波泛音是有限、有节点的周期函数', () => {
+    const samples = Array.from({ length: 64 }, (_, i) => standingOvertone(i / 63, 1234, 5));
+    expect(samples.every((value) => Number.isFinite(value) && value >= -1 && value <= 1)).toBe(true);
+    // 5 次谐波的节点：x=0、0.2、0.4…处接近 0。
+    expect(Math.abs(standingOvertone(0, 0, 5))).toBeLessThan(0.001);
+    expect(Math.abs(standingOvertone(0.2, 0, 5))).toBeLessThan(0.001);
+  });
+
+  it('两条曲线的交点：平行时不交，交叉时交点位置正确', () => {
+    const flat = new Array(181).fill(0);
+    expect(curveCrossings(flat, 300, flat, 500)).toHaveLength(0);
+    // A 在 y=500 附近向上鼓 120px，B 在 y=450 平直 → 鼓包穿过 B 后又回来，两个交点。
+    const bump = Array.from({ length: 181 }, (_, i) => Math.sin((i / 180) * Math.PI) * -120);
+    const crossings = curveCrossings(bump, 500, flat, 450);
+    expect(crossings.length).toBeGreaterThanOrEqual(2);
+    for (const crossing of crossings) {
+      expect(crossing.x01).toBeGreaterThan(0);
+      expect(crossing.x01).toBeLessThan(1);
+      expect(Number.isFinite(crossing.y)).toBe(true);
+    }
+    // 交点在 x 上左右对称（正弦鼓包）。
+    const first = crossings[0]!;
+    const last = crossings[crossings.length - 1]!;
+    expect(first.x01 + last.x01).toBeCloseTo(1, 1);
   });
 });

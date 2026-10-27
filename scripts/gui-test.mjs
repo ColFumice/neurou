@@ -1,5 +1,6 @@
 /**
- * 单弦调律台（v0.6）验收：一张白纸 + 一根黑弦 + 隐形键盘映射 + 8 类弦 + Tab/ESC。
+ * 八弦叠影（v0.7）验收：一张白纸上的 8 类弦、基线即设置、Tab 焦点、
+ * 拨动/干涉/共振/D-膜/紧致化/对偶，以及 ESC 总谱。
  *
  * 运行：node scripts/gui-test.mjs（需要 127.0.0.1:5188 的 dev server）
  * 结果：artifacts/string-test.json + artifacts/9x-*.png
@@ -19,6 +20,12 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
 }
 
+// 与 stringMath 的 valueToY 一致：value 100 → y110，value 0 → y790。
+const VALUE_TOP = 110;
+const VALUE_BOTTOM = 790;
+const valueToY = (value) => VALUE_BOTTOM - (value / 100) * (VALUE_BOTTOM - VALUE_TOP);
+const DEFAULT_VALUES = [85, 76, 67, 58, 49, 40, 31, 22];
+
 const browser = await chromium.launch({
   channel: 'msedge',
   headless: true,
@@ -32,21 +39,21 @@ page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
 await page.goto(URL, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]');
-await page.waitForTimeout(900);
+await page.waitForTimeout(1000);
 
 const field = page.locator('[data-testid="string-field"]');
 const attr = async (name) => field.getAttribute(name);
 const state = () => page.evaluate(() => window.__neurouString.state());
-const u = () => page.evaluate(() => window.__neurouString.u());
+const curves = () => page.evaluate(() => window.__neurouString.curves());
 const lastTouch = () => page.evaluate(() => window.__neurouString.lastTouch());
 const rms = () => page.evaluate(() => window.__neurouString.rms());
 const reset = async () => {
   await page.evaluate(() => window.__neurouString.reset());
-  await page.waitForTimeout(260);
+  await page.waitForTimeout(320);
 };
 const hash = async () => createHash('sha256').update(await page.screenshot()).digest('hex').slice(0, 10);
+const valuesOf = async () => JSON.parse(String((await attr('data-values')) ?? '[]'));
 
-/** 画布墨迹统计：像素 alpha>10 视为墨。 */
 const canvasStats = () =>
   page.evaluate(() => {
     const canvas = document.querySelector('[data-testid="string-canvas"]');
@@ -61,13 +68,13 @@ const canvasStats = () =>
     let minY = height;
     let maxX = -1;
     let maxY = -1;
-    const rowCounts = new Array(height).fill(0);
+    const rows = new Array(height).fill(0);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const i = (y * width + x) * 4;
         if (data[i + 3] <= 10) continue;
         ink++;
-        rowCounts[y]++;
+        rows[y]++;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -81,12 +88,12 @@ const canvasStats = () =>
       ink,
       colored,
       bbox: ink === 0 ? { x: 0, y: 0, w: 0, h: 0 } : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
-      rows: rowCounts,
+      rows,
     };
   });
 
-/** 横向带计数（总览谱面用）：连续有墨的行算一条带，允许 2px 断裂。 */
-const countRowBands = (rows, threshold = 4, gapTolerance = 26) => {
+/** 横向带计数：连续有墨的行算一条带，允许 gap 断裂。 */
+const countRowBands = (rows, threshold = 4, gapTolerance = 10) => {
   const bands = [];
   let current = null;
   let gap = 0;
@@ -110,288 +117,303 @@ const countRowBands = (rows, threshold = 4, gapTolerance = 26) => {
   return bands;
 };
 
-/** 某逻辑 x 处墨迹的纵向范围。 */
-const columnExtent = (logicalX) =>
-  page.evaluate((xLogical) => {
-    const canvas = document.querySelector('[data-testid="string-canvas"]');
-    if (!(canvas instanceof HTMLCanvasElement)) return null;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    const { width, height } = canvas;
-    const x = Math.round((xLogical / 1440) * (width - 1));
-    const data = ctx.getImageData(0, 0, width, height).data;
-    let count = 0;
-    let minY = height;
-    let maxY = -1;
-    for (let y = 0; y < height; y++) {
-      if (data[(y * width + x) * 4 + 3] <= 10) continue;
-      count++;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    return { count, minY, maxY, span: maxY - minY + 1 };
-  }, logicalX);
+/** 某 y 行附近的平均墨量（只看 x 300..1200，避开左侧类名）。 */
+const rowInk = (yLogical, half = 2) =>
+  page.evaluate(
+    ({ y, half }) => {
+      const canvas = document.querySelector('[data-testid="string-canvas"]');
+      const ctx = canvas.getContext('2d');
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let sum = 0;
+      let count = 0;
+      for (let row = Math.max(0, y - half); row <= Math.min(canvas.height - 1, y + half); row++) {
+        for (let x = 300; x < 1200; x++) {
+          sum += data[(row * canvas.width + x) * 4 + 3];
+          count++;
+        }
+      }
+      return sum / Math.max(1, count);
+    },
+    { y: Math.round(yLogical), half },
+  );
 
-/** 不在当前弦几何上的残余墨像素（拖尾 / 帧残留）。 */
+/** 某逻辑 x 处、y 区间内的墨像素数。 */
+const columnInk = (xLogical, yMin, yMax) =>
+  page.evaluate(
+    ({ xLogical, yMin, yMax }) => {
+      const canvas = document.querySelector('[data-testid="string-canvas"]');
+      const ctx = canvas.getContext('2d');
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const x = Math.round((xLogical / 1440) * (canvas.width - 1));
+      let count = 0;
+      for (let y = Math.max(0, yMin); y <= Math.min(canvas.height - 1, yMax); y++) {
+        if (data[(y * canvas.width + x) * 4 + 3] > 10) count++;
+      }
+      return count;
+    },
+    { xLogical, yMin, yMax },
+  );
+
 const strayInk = () =>
   page.evaluate(() => {
-    const arr = window.__neurouString.u();
+    const list = window.__neurouString.curves();
     const canvas = document.querySelector('[data-testid="string-canvas"]');
     if (!(canvas instanceof HTMLCanvasElement)) return -1;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return -1;
     const { width, height } = canvas;
     const data = ctx.getImageData(0, 0, width, height).data;
-    const n = arr.length;
-    const center = height / 2;
     let stray = 0;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         if (data[(y * width + x) * 4 + 3] <= 10) continue;
-        const idx = Math.round((x / (width - 1)) * (n - 1));
-        const lineY = center + arr[idx] * (height / 900);
-        if (Math.abs(y - lineY) > 8) stray++;
+        const x01 = x / (width - 1);
+        let nearest = 1e9;
+        for (const curve of list) {
+          const index = Math.round(x01 * (curve.samples.length - 1));
+          const lineY = curve.baseline + curve.samples[index];
+          const distance = Math.abs(y - lineY);
+          if (distance < nearest) nearest = distance;
+        }
+        if (nearest > 8) stray++;
       }
     }
     return stray;
   });
 
-// ============ 1. 默认：一张白纸 + 一根水平黑弦 ============
-check('首屏是弦场', (await page.locator('[data-testid="string-field"]').count()) === 1);
+// ============ 1. 首屏：白纸上的八根弦 ============
+check('首屏是八弦场', (await page.locator('[data-testid="string-field"]').count()) === 1);
 check('只有一张画布', (await page.locator('[data-testid="string-canvas"]').count()) === 1);
-check(
-  '没有任何按钮/输入框/面板',
-  (await page.locator('button, input, textarea, select, .desk, .panel, [data-testid="ink-network"]').count()) === 0,
-);
-check('没有任何常驻文字', (await page.evaluate(() => document.body.innerText.trim())) === '');
+check('没有按钮/输入框/面板', (await page.locator('button, input, textarea, select, .panel').count()) === 0);
+check('没有任何常驻 DOM 文字', (await page.evaluate(() => document.body.innerText.trim())) === '');
 check('背景是纸白', (await page.locator('[data-testid="ink-app"]').evaluate((n) => getComputedStyle(n).backgroundColor)) === 'rgb(250, 250, 250)');
-check('默认模式是单弦', (await attr('data-mode')) === 'string');
-check('默认是第一类弦（叙事）', (await attr('data-kind')) === '叙事' && (await attr('data-kind-index')) === '0');
+check('默认模式是八弦', (await attr('data-mode')) === 'strings', String(await attr('data-mode')));
+check('默认焦点是叙事弦', (await attr('data-kind')) === '叙事' && (await attr('data-kind-index')) === '0');
+check('默认 8 个设置值', JSON.stringify(await valuesOf()) === JSON.stringify(DEFAULT_VALUES), JSON.stringify(await valuesOf()));
 check('默认没有拨弦', (await attr('data-plucks')) === '0');
-check('键盘映射共 46 键', (await attr('data-key-count')) === '46', String(await attr('data-key-count')));
-check('默认是静止的', (await attr('data-resting')) === 'true');
+check('键盘映射共 46 键', (await attr('data-key-count')) === '46');
+check('默认跨度满弦', Number(await attr('data-span')) === 1, String(await attr('data-span')));
+check('默认不共振', (await attr('data-resonant')) === 'false');
+check('默认紧致化参数 0.50', Number(await attr('data-micro')) === 0.5, String(await attr('data-micro')));
+check('默认无对偶', (await attr('data-dual')) === 'false');
 
 const restStats = await canvasStats();
-check('静止时只有一条横线', restStats !== null && restStats.bbox.h <= 6 && restStats.bbox.w >= 1400, JSON.stringify(restStats?.bbox));
-check('横线在画面正中', restStats !== null && Math.abs(restStats.bbox.y + restStats.bbox.h / 2 - 450) <= 3, `中心 y=${restStats ? restStats.bbox.y + restStats.bbox.h / 2 : '?'}`);
-check('静止画面没有彩色像素', restStats !== null && restStats.colored === 0, `${restStats?.colored ?? '?'} 个彩色像素`);
+const restBands = restStats ? countRowBands(restStats.rows, 120, 12) : [];
+check('画布上有 8 条弦的基线', restBands.length === 8, restBands.map((b) => `${b.start}-${b.end}`).join(' | '));
+const expectedYs = DEFAULT_VALUES.map((value) => valueToY(value));
+const bandCenters = restBands.map((band) => (band.start + band.end) / 2);
+check(
+  '每根弦的基线纵坐标 = 它的设置值',
+  expectedYs.every((expected) => bandCenters.some((center) => Math.abs(center - expected) <= 6)),
+  `期望 ${expectedYs.map((y) => Math.round(y)).join(',')} / 实测 ${bandCenters.map((y) => Math.round(y)).join(',')}`,
+);
+check('静止画面没有彩色像素', restStats !== null && restStats.colored === 0, `${restStats?.colored ?? '?'}`);
 
+const focusY = expectedYs[0];
+const otherY = expectedYs[1];
+const focusInk = await rowInk(focusY);
+const otherInk = await rowInk(otherY);
+check('焦点弦更黑更粗（其余半透明）', focusInk > otherInk * 2, `焦点 ${focusInk.toFixed(1)} vs 其它 ${otherInk.toFixed(1)}`);
 const idleA = await hash();
-await page.waitForTimeout(450);
+await page.waitForTimeout(420);
 const idleB = await hash();
-check('静止时没有 idle 动画', idleA === idleB, `${idleA} / ${idleB}`);
-await page.screenshot({ path: 'artifacts/90-string-rest.png' });
+check('焦点弦有高频微颤（两帧不同）', idleA !== idleB, `${idleA} / ${idleB}`);
+await page.screenshot({ path: 'artifacts/90-string-eight.png' });
 
-// ============ 2. 点击：方向、幅度、振动 ============
-await page.mouse.click(720, 250);
-await page.waitForTimeout(140);
-check('点击后累计一次拨弦', (await attr('data-plucks')) === '1', String(await attr('data-plucks')));
-check('点击位置在弦上方 → 向上拨', (await attr('data-last-direction')) === 'up', String(await attr('data-last-direction')));
+// ============ 2. Tab：焦点切换 ============
+const kinds = ['叙事', '视觉', '动画', '物理', '控制', '空间', '认知', '关系'];
+let tabOk = true;
+const seen = [];
+for (let i = 0; i < 8; i++) {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(130);
+  const kind = await attr('data-kind');
+  const index = Number(await attr('data-kind-index'));
+  seen.push(kind);
+  if (kind !== kinds[(i + 1) % 8] || index !== (i + 1) % 8) tabOk = false;
+}
+check('Tab 按顺序切换 8 类弦焦点', tabOk, seen.join(' → '));
+check('Tab 每次演示一次拨弦', Number(await attr('data-plucks')) === 8, String(await attr('data-plucks')));
+await reset();
+
+// ============ 3. 拨动：方向、幅度、局部行波 ============
+const pluckBase = valueToY((await valuesOf())[0]);
+await page.mouse.click(720, Math.round(pluckBase - 150));
+await page.waitForTimeout(150);
+check('点击后累计一次拨弦', Number(await attr('data-plucks')) === 1, String(await attr('data-plucks')));
+check('点击在弦上方 → 向上拨', (await attr('data-last-direction')) === 'up', String(await attr('data-last-direction')));
 const amp = Number(await attr('data-last-amplitude'));
-check('幅度 = 点击位置到弦的距离', Math.abs(amp - 200) <= 4, String(amp));
-check('点击落在隐形键盘的某个键上', (await attr('data-last-key')) !== '', String(await attr('data-last-key')));
-
+check('幅度 = 点击位置到该弦基线的距离', Math.abs(amp - 150) <= 5, String(amp));
 const pluckState = await state();
-check('松手后弦在振动', pluckState.amplitude > 40 && pluckState.resting === false, `amplitude=${pluckState.amplitude.toFixed(1)}`);
+check('松手后弦在振动', pluckState.amplitude > 40, `amplitude=${pluckState.amplitude.toFixed(1)}`);
 const pluckStats = await canvasStats();
-check('振动时墨迹不再是一条线', pluckStats !== null && pluckStats.bbox.h > 20, JSON.stringify(pluckStats?.bbox));
-check('振动时墨量明显增加（拖影）', restStats !== null && pluckStats !== null && pluckStats.ink > restStats.ink * 2.2, `${restStats?.ink} → ${pluckStats?.ink}`);
-/** 当前行波的波峰位置/强度；用于证明点击是局部行波而不是整弦同步摆。 */
-const wavePeak = () =>
-  page.evaluate(() => {
-    const arr = window.__neurouString.u();
-    const n = arr.length;
-    let absMax = 0;
-    let index = 0;
-    let active = 0;
-    for (let i = 0; i < n; i++) {
-      const value = Math.abs(arr[i]);
-      if (value > absMax) {
-        absMax = value;
-        index = i;
-      }
-      if (value > 10) active++;
-    }
-    return {
-      amp: absMax,
-      x: (index / (n - 1)) * 1440,
-      ends: Math.max(Math.abs(arr[2]), Math.abs(arr[n - 3]), Math.abs(arr[8]), Math.abs(arr[n - 9])),
-      activeRatio: active / n,
-    };
-  });
-const waveA = await wavePeak();
-check(
-  '快速点触是局部行波（两端不动、只有一段弦在响）',
-  waveA.ends < 5 && waveA.activeRatio < 0.6 && waveA.amp > 40,
-  `两端 ${waveA.ends.toFixed(1)}px、活动弦长 ${(waveA.activeRatio * 100).toFixed(0)}%`,
-);
-await page.waitForTimeout(130);
-const waveB = await wavePeak();
-check(
-  '波包沿弦传播（两个时刻的波峰位置不同）',
-  Math.abs(waveA.x - waveB.x) > 50,
-  `波峰 x ${waveA.x.toFixed(0)} → ${waveB.x.toFixed(0)}`,
-);
+check('振动时墨量明显增加', restStats !== null && pluckStats !== null && pluckStats.ink > restStats.ink * 1.25, `${restStats?.ink} → ${pluckStats?.ink}`);
+const stray = await strayInk();
+check('有运动模糊/帧残留', stray > 500, `${stray}`);
 await page.screenshot({ path: 'artifacts/91-string-pluck.png' });
 
-const hash1 = await hash();
-await page.waitForTimeout(170);
-const hash2 = await hash();
-check('弦在逐帧运动', hash1 !== hash2, `${hash1} / ${hash2}`);
-
-await page.waitForTimeout(220);
-const stray = await strayInk();
-check('有运动模糊/黑色帧残留', stray > 500, `${stray} 个残余墨像素`);
-
-const arr = await u();
-let peakIndex = 0;
-let peakValue = 0;
-for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) > peakValue) { peakValue = Math.abs(arr[i]); peakIndex = i; }
-let flatIndex = -1;
-for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) < 2) { flatIndex = i; break; }
-const peakX = (peakIndex / (arr.length - 1)) * 1440;
-const flatX = flatIndex >= 0 ? (flatIndex / (arr.length - 1)) * 1440 : 40;
-const peakCol = await columnExtent(peakX);
-const flatCol = await columnExtent(flatX);
-check(
-  '波峰位置更粗',
-  peakCol !== null && flatCol !== null && peakCol.span > Math.max(4, flatCol.span * 1.5),
-  `峰 ${peakCol?.span}px vs 平 ${flatCol?.span}px`,
-);
-check('墨是灰度（无彩色）', pluckStats !== null && pluckStats.colored === 0, `${pluckStats?.colored ?? '?'} 个彩色像素`);
-await page.screenshot({ path: 'artifacts/92-string-wave.png' });
-
-// ============ 3. 拉弦：像拉弓一样弯曲 ============
+// ============ 4. 拖动 = 改设置值（基线纵坐标） ============
 await reset();
-await page.mouse.move(400, 450);
+const beforeDrag = await valuesOf();
+const baseY = valueToY(beforeDrag[0]);
+await page.mouse.move(720, Math.round(baseY));
 await page.mouse.down();
-await page.mouse.move(400, 190, { steps: 10 });
-await page.waitForTimeout(180);
-check('按住拖动=正在拉弦', (await attr('data-pulling')) === 'true');
-const pullAmp = (await state()).amplitude;
-check('拉弦位移足够大', pullAmp > 140, String(pullAmp.toFixed(1)));
-const pulled = await page.evaluate(() => {
-  const canvas = document.querySelector('[data-testid="string-canvas"]');
-  const ctx = canvas.getContext('2d');
-  const x = Math.round((400 / 1440) * (canvas.width - 1));
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let y = 100; y < 430; y++) {
-    if (data[(y * canvas.width + x) * 4 + 3] > 10) return y;
-  }
-  return -1;
-});
-check('弦在 x=400 处被拉起', pulled > 0, pulled > 0 ? `墨迹到 y=${pulled}` : '没有墨');
-await page.screenshot({ path: 'artifacts/93-string-pull.png' });
-const plucksBeforeRelease = Number(await attr('data-plucks'));
+await page.mouse.move(720, Math.round(baseY) + 102, { steps: 8 });
+await page.waitForTimeout(140);
+check('拖动弦时 data-pulling=true', (await attr('data-pulling')) === 'true');
+const midDrag = await valuesOf();
+check('向下拖 → 设置值变小', midDrag[0] < beforeDrag[0] - 5, `${beforeDrag[0]} → ${midDrag[0].toFixed(1)}`);
+check('只有焦点弦的值改变，其它弦不动', midDrag.slice(1).every((v, i) => Math.abs(v - beforeDrag[i + 1]) < 0.01));
+const plucksAtDrag = Number(await attr('data-plucks'));
 await page.mouse.up();
-await page.waitForTimeout(160);
-check('松手=一次拨弦', Number(await attr('data-plucks')) === plucksBeforeRelease + 1);
-check('松手后开始振动', (await attr('data-pulling')) === 'false' && (await state()).amplitude > 60);
-await page.screenshot({ path: 'artifacts/94-string-release.png' });
-
-// ============ 4. 键盘映射：点击哪里 = 按下哪个键 ============
+await page.waitForTimeout(220);
+check('松手不额外拨弦', Number(await attr('data-plucks')) === plucksAtDrag);
+const draggedBands = countRowBands((await canvasStats()).rows, 120, 12);
+check(
+  '基线的确移动了（仍是 8 条）',
+  draggedBands.length === 8 && draggedBands.some((band) => Math.abs((band.start + band.end) / 2 - valueToY(midDrag[0])) <= 6),
+  `新基线 ${Math.round(valueToY(midDrag[0]))}`,
+);
+const plucksBeforeTap = Number(await attr('data-plucks'));
+const tapValues = await valuesOf();
+await page.mouse.click(720, Math.round(valueToY(tapValues[0])));
+await page.waitForTimeout(120);
+check('在弦上快速点触=拨弦而不是改值', Number(await attr('data-plucks')) === plucksBeforeTap + 1 && Math.abs((await valuesOf())[0] - tapValues[0]) < 0.01);
 await reset();
+
+// ============ 5. 键盘映射（相对焦点弦基线） ============
 await page.keyboard.press('a');
 await page.waitForTimeout(120);
-check('按 A 也会拨弦', (await attr('data-plucks')) === '1', String(await attr('data-plucks')));
-check('A 映射到 KeyA', (await attr('data-last-key')) === 'KeyA', String(await attr('data-last-key')));
+check('按 A 也会拨弦', Number(await attr('data-plucks')) === 1);
+check('A 映射到 KeyA', (await attr('data-last-key')) === 'KeyA');
 const touchA = await lastTouch();
-check('A 在弦下方 → 向下拨', (await attr('data-last-direction')) === 'down', String(await attr('data-last-direction')));
+check('A 在焦点弦下方 → 向下拨', (await attr('data-last-direction')) === 'down', `keyY=${touchA.y.toFixed(0)} baseline=${Math.round(valueToY(85))}`);
+await page.keyboard.press('1');
+await page.waitForTimeout(100);
+check('数字键在焦点弦上方 → 向上拨', (await attr('data-last-direction')) === 'up', String(await attr('data-last-direction')));
 await page.mouse.click(touchA.x, touchA.y);
 await page.waitForTimeout(80);
 const touchClick = await lastTouch();
-check(
-  '鼠标点在键位中心与按 A 是同一个触点',
-  touchClick.keyCode === 'KeyA' && Math.abs(touchClick.x - touchA.x) <= 2 && Math.abs(touchClick.amplitude - touchA.amplitude) <= 2,
-  `键 (${touchA.x.toFixed(1)}, ${touchA.y.toFixed(1)}) vs 点 (${touchClick.x.toFixed(1)}, ${touchClick.y.toFixed(1)})`,
-);
+check('鼠标点在键位中心与按 A 是同一个触点', touchClick.keyCode === 'KeyA' && Math.abs(touchClick.x - touchA.x) <= 2);
 await reset();
-await page.keyboard.press('1');
-await page.waitForTimeout(100);
-const upTouch = await lastTouch();
-await page.keyboard.press('z');
-await page.waitForTimeout(100);
-const downTouch = await lastTouch();
-check('数字键在上两行 → 向上拨', upTouch.direction === -1, `y=${upTouch.y.toFixed(1)}`);
-check('底行字母键 → 向下拨', downTouch.direction === 1, `y=${downTouch.y.toFixed(1)}`);
-check('不同键位对应不同弦位置', Math.abs(upTouch.x - downTouch.x) > 5, `${upTouch.x.toFixed(1)} / ${downTouch.x.toFixed(1)}`);
 
-// ============ 5. Tab：8 类弦循环 ============
-await reset();
-const kindOrder = ['叙事', '视觉', '动画', '物理', '控制', '空间', '认知', '关系'];
-let kindOk = true;
-const seenKinds = [];
-const plucksBeforeTab = Number(await attr('data-plucks'));
-for (let i = 0; i < 8; i++) {
-  await page.keyboard.press('Tab');
-  await page.waitForTimeout(140);
-  const kind = await attr('data-kind');
-  const index = Number(await attr('data-kind-index'));
-  seenKinds.push(kind);
-  if (kind !== kindOrder[(i + 1) % 8] || index !== (i + 1) % 8) kindOk = false;
+// ============ 6. 干涉：交点/奇点/跨弦耦合 ============
+await page.evaluate(() => {
+  window.__neurouString.setValue('叙事', 50);
+  window.__neurouString.setValue('视觉', 52);
+});
+await page.waitForTimeout(260);
+const crossBefore = Number(await attr('data-crossings'));
+await page.mouse.click(720, 300);
+await page.waitForTimeout(420);
+const crossAfter = Number(await attr('data-crossings'));
+check('拨动后出现奇点（两弦交点）', crossAfter > crossBefore, `${crossBefore} → ${crossAfter}`);
+const allCurves = await curves();
+const vision = allCurves.find((c) => c.kind === '视觉');
+const visionAmp = vision ? Math.max(...vision.samples.map((v) => Math.abs(v))) : 0;
+check('波经过交点后另一根弦被带动（半透明弦有波动）', visionAmp > 1.5, `视觉弦振幅 ${visionAmp.toFixed(1)}px`);
+const crossList = await page.evaluate(() => window.__neurouString.crossings());
+check('debug 能读到交点坐标', crossList.length > 0, `${crossList.length} 个`);
+if (crossList.length > 0) {
+  const point = crossList[0];
+  await page.mouse.move(point.x * 1440, point.y);
+  await page.waitForTimeout(180);
+  await page.screenshot({ path: 'artifacts/92-string-crossing.png' });
 }
-check('Tab 依次切换 8 类弦', kindOk, seenKinds.join(' → '));
-check('Tab 每次都会演示一次拨弦', Number(await attr('data-plucks')) === plucksBeforeTab + 8, `${plucksBeforeTab} → ${await attr('data-plucks')}`);
-await page.screenshot({ path: 'artifacts/95-string-kind.png' });
-
-// ============ 6. ESC：8 类弦总谱 ============
 await reset();
+
+// ============ 7. 共振/泛音 ============
+await page.evaluate(() => window.__neurouString.setValue('叙事', 40));
+await page.waitForTimeout(220);
+const calmInk = (await canvasStats()).ink;
+check('远离共振点时不共振', (await attr('data-resonant')) === 'false', String(await attr('data-resonant')));
+await page.evaluate(() => window.__neurouString.setValue('叙事', 50));
+await page.waitForTimeout(260);
+check(
+  '设置值到共振点 → 驻波态',
+  (await attr('data-resonant')) === 'true' && Math.abs(Number(await attr('data-resonance')) - 50) < 0.01,
+  `${await attr('data-resonant')} / ${await attr('data-resonance')}`,
+);
+const resonantInk = (await canvasStats()).ink;
+check('共振态出现虚影/泛音（墨量增加）', resonantInk > calmInk * 1.05, `${calmInk} → ${resonantInk}`);
+await page.screenshot({ path: 'artifacts/93-string-resonance.png' });
+const plucksBeforeChord = Number(await attr('data-plucks'));
+await page.mouse.click(720, 300);
+await page.waitForTimeout(300);
+check('共振态拨弦 = 一次和弦（焦点弦计数 +1）', Number(await attr('data-plucks')) === plucksBeforeChord + 1);
+const chordCurves = await curves();
+const awakened = chordCurves.filter((c) => Math.max(...c.samples.map((v) => Math.abs(v))) > 0.8);
+check('和弦同时激发多根弦', awakened.length >= 3, `${awakened.length} 根在动`);
+const chordRms = await rms();
+check('和弦有真实声音信号', chordRms > 0.001, chordRms.toFixed(6));
+await reset();
+
+// ============ 8. D-膜：跨度与端点 ============
+await page.evaluate(() => window.__neurouString.setSpan(0.7));
+await page.waitForTimeout(260);
+check('setSpan 后 data-span=0.70', Math.abs(Number(await attr('data-span')) - 0.7) < 0.01, String(await attr('data-span')));
+const spanY = Math.round(valueToY(85));
+const outsideLeft = await columnInk(200, spanY - 30, spanY + 30);
+const insideLeft = await columnInk(260, spanY - 30, spanY + 30);
+check('缩短跨度后弦的左端点内移', outsideLeft <= 1 && insideLeft > 2, `x=200:${outsideLeft} x=260:${insideLeft}`);
+await page.screenshot({ path: 'artifacts/94-string-span.png' });
+await page.evaluate(() => window.__neurouString.setSpan(1));
+await page.waitForTimeout(220);
+await page.mouse.move(8, spanY);
+await page.mouse.down();
+await page.mouse.move(8 + 130, spanY, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(220);
+check('拖动 D-膜改变跨度', Number(await attr('data-span')) < 0.96, String(await attr('data-span')));
+await reset();
+
+// ============ 9. 紧致化结点：悬停 + 滚轮 ============
+const knotX = 1440 * 0.62;
+await page.mouse.move(Math.round(knotX), Math.round(valueToY(85)));
+await page.waitForTimeout(160);
+const microBefore = Number(await attr('data-micro'));
+await page.mouse.wheel(0, 140);
+await page.waitForTimeout(180);
+const microAfter = Number(await attr('data-micro'));
+check('悬停结点滚轮调整微观参数', Math.abs(microAfter - microBefore) > 0.03, `${microBefore} → ${microAfter}`);
+await page.screenshot({ path: 'artifacts/95-string-knot.png' });
+await reset();
+
+// ============ 10. 对偶翻转：极值 + 重拨 ============
+await page.evaluate(() => window.__neurouString.setValue('叙事', 99));
+await page.waitForTimeout(160);
+await page.evaluate(() => window.__neurouString.pluckAt(720, 800));
+await page.waitForTimeout(200);
+check('极值重拨触发对偶翻转', (await attr('data-dual')) === 'true', String(await attr('data-dual')));
+await page.screenshot({ path: 'artifacts/96-string-dual.png' });
+await page.waitForTimeout(800);
+check('对偶结束后值翻到对侧', Math.abs((await valuesOf())[0] - 1) < 1.5, String((await valuesOf())[0]));
+check('对偶动画结束后状态复位', (await attr('data-dual')) === 'false');
+await reset();
+
+// ============ 11. ESC 总谱 ============
 await page.keyboard.press('Escape');
 await page.waitForTimeout(320);
 check('ESC 进入总览', (await attr('data-mode')) === 'overview', String(await attr('data-mode')));
-check('总览有 8 行', (await attr('data-overview-rows')) === '8', String(await attr('data-overview-rows')));
+check('总览有 8 行', (await attr('data-overview-rows')) === '8');
 const overviewStats = await canvasStats();
-const bands = overviewStats ? countRowBands(overviewStats.rows) : [];
-check('画布上确实画出 8 条谱线', bands.length === 8, bands.length ? bands.map((b) => `${b.start}-${b.end}`).join(' | ') : '0 条');
-const overviewState = await state();
-const currentBand = bands[overviewState.kindIndex] ?? null;
-if (overviewStats && currentBand && bands.length === 8) {
-  // 当前类那一行应该最深：在 x=300..1200 的中间段比较平均墨量。
-  const bandInk = await page.evaluate(
-    ({ bands: all, kindIndex }) => {
-      const canvas = document.querySelector('[data-testid="string-canvas"]');
-      const ctx = canvas.getContext('2d');
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-      const measure = (band) => {
-        let total = 0;
-        for (let y = band.start; y <= band.end; y++) {
-          for (let x = 300; x < 1200; x++) total += data[(y * canvas.width + x) * 4 + 3];
-        }
-        return total / ((band.end - band.start + 1) * 900);
-      };
-      return { current: measure(all[kindIndex]), others: all.filter((_, i) => i !== kindIndex).map(measure) };
-    },
-    { bands, kindIndex: overviewState.kindIndex },
-  );
-  check(
-    '当前类在总览里最黑',
-    bandInk.current > Math.max(...bandInk.others) * 1.6,
-    `当前 ${bandInk.current.toFixed(1)} vs 其余最大 ${Math.max(...bandInk.others).toFixed(1)}`,
-  );
-} else {
-  check('当前类在总览里最黑', false, '谱带读取失败');
-}
-await page.screenshot({ path: 'artifacts/96-string-overview.png' });
-
+const overviewBands = overviewStats ? countRowBands(overviewStats.rows, 4, 26) : [];
+check('画布上画出 8 条谱线', overviewBands.length === 8, `${overviewBands.length} 条`);
+await page.screenshot({ path: 'artifacts/97-string-overview.png' });
 await page.keyboard.press('Tab');
-await page.waitForTimeout(160);
-check('总览里 Tab 仍切换当前类', Number(await attr('data-kind-index')) === (overviewState.kindIndex + 1) % 8, String(await attr('data-kind-index')));
-
+await page.waitForTimeout(140);
+check('总览里 Tab 仍切换当前类', (await attr('data-kind')) === '视觉', String(await attr('data-kind')));
 await page.keyboard.press('Escape');
-await page.waitForTimeout(300);
-check('再按 ESC 回到单弦', (await attr('data-mode')) === 'string');
-check('回到单弦后又是一根线', (await canvasStats())?.bbox.h <= 8, JSON.stringify((await canvasStats())?.bbox));
+await page.waitForTimeout(260);
+check('再按 ESC 回到八弦视图', (await attr('data-mode')) === 'strings');
 
-// ============ 7. 声音（本地合成，不验证听感，只验证非静音） ============
+// ============ 12. 声音 / 性能 / 错误 ============
 const audioState = await attr('data-audio');
 check('音频引擎可用', audioState === 'running' || audioState === 'suspended', String(audioState));
-await page.mouse.click(900, 250);
+await page.mouse.click(720, 300);
 await page.waitForTimeout(120);
-const rmsValue = await rms();
-check('拨弦后 master 有真实信号（rms>0.001）', rmsValue > 0.001, rmsValue.toFixed(6));
+const finalRms = await rms();
+check('拨弦后 master 有真实信号（rms>0.001）', finalRms > 0.001, finalRms.toFixed(6));
 await reset();
-
-// ============ 8. 性能与错误 ============
 const fps = await page.evaluate(
   () =>
     new Promise((resolve) => {
@@ -414,12 +436,16 @@ await browser.close();
 
 const summary = {
   when: new Date().toISOString(),
-  default: { restInk: restStats?.ink ?? null, restBBox: restStats?.bbox ?? null },
-  pluck: { amplitude: pluckState.amplitude, peakSpan: peakCol?.span ?? null, flatSpan: flatCol?.span ?? null, stray },
-  keyboard: { keyCount: 46, touchA, upTouch, downTouch },
-  kinds: seenKinds,
-  overview: { bands: bands.length, kindIndex: overviewState.kindIndex },
-  audio: { state: audioState, rms: rmsValue },
+  rest: { ink: restStats?.ink ?? null, bands: restBands.length, centers: bandCenters },
+  focus: { focusInk, otherInk },
+  pluck: { amp, amplitude: pluckState.amplitude, stray },
+  drag: { before: beforeDrag[0], after: midDrag[0], y: valueToY(midDrag[0]) },
+  keyboard: { touchA },
+  interference: { crossBefore, crossAfter, visionAmp, crossings: crossList.length },
+  resonance: { calmInk, resonantInk, awakened: awakened.length, rms: chordRms },
+  knot: { microBefore, microAfter },
+  overview: { bands: overviewBands.length },
+  audio: { state: audioState, rms: finalRms },
   fps,
   heapMB: heap,
   consoleErrors,

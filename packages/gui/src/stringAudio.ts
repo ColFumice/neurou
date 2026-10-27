@@ -149,29 +149,32 @@ export class StringAudioEngine {
 
   /**
    * 拨一下：xNorm、yNorm ∈ 0..1（触点在屏幕上的归一化位置）；
-   * amplitudeNorm 0..1 只影响音量与轻微亮度。
+   * amplitudeNorm 0..1 只影响音量与轻微亮度；
+   * pitchScale 用来表现 D-膜跨度（弦越短，音越高）。
    */
-  pluck(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm = 0.7): void {
+  pluck(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm = 0.7, pitchScale = 1): void {
     if (this.failed) return;
     if (!this.ctx) {
       // 手势可能已经把 context 创建起来了；没有就尝一次，失败则不响。
-      void this.ensureStarted().then(() => this.play(kind, xNorm, yNorm, amplitudeNorm));
+      void this.ensureStarted().then(() => this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale));
       return;
     }
-    this.play(kind, xNorm, yNorm, amplitudeNorm);
+    this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale);
   }
 
-  private play(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm: number): void {
+  private play(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm: number, pitchScale: number): void {
     const ctx = this.ctx;
     const master = this.master;
     if (!ctx || !master) return;
     const profile = KIND_AUDIO[kind] ?? KIND_AUDIO['叙事'];
     const x = clamp(xNorm, 0, 1);
-    const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
+    const scale = clamp(pitchScale, 0.5, 2);
+    const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave * scale;
     const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
     const degree = Math.round(x * 15);
+    const pitchBucket = Math.round(scale * 20);
     const amp = clamp(amplitudeNorm, 0, 1);
-    const cacheKey = `${kind}:${degree}`;
+    const cacheKey = `${kind}:${degree}:${pitchBucket}`;
 
     let buffer = this.bufferCache.get(cacheKey);
     if (!buffer) {

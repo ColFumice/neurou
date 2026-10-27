@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 单弦调律台的纯数学层（无 DOM、无 React，可在 node 里单测）。
  *
  * 这里只有四件事：
@@ -467,4 +467,126 @@ export function signature(kind: StringKind, x01: number): number {
     default:
       return 0;
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * v0.7 八弦叠影：设置值 = 弦基线的纵坐标
+ * ------------------------------------------------------------------ */
+
+/** value = 100 时基线的 y（屏幕上方），value = 0 时基线的 y（下方）。 */
+export const VALUE_Y_TOP = 110;
+export const VALUE_Y_BOTTOM = 790;
+/** 1 个设置值对应多少像素。 */
+export const VALUE_PX_PER_UNIT = (VALUE_Y_BOTTOM - VALUE_Y_TOP) / 100;
+
+/** 设置值（0..100）→ 基线纵坐标；夹在画布安全区里。 */
+export function valueToY(value: number): number {
+  const v = clamp(value, 0, 100);
+  return VALUE_Y_BOTTOM - v * VALUE_PX_PER_UNIT;
+}
+
+/** 基线纵坐标 → 设置值（0..100）。 */
+export function yToValue(y: number): number {
+  return clamp((VALUE_Y_BOTTOM - y) / VALUE_PX_PER_UNIT, 0, 100);
+}
+
+/**
+ * 8 类弦的默认设置值：从上到下均匀铺开，像八根悬在纸上的蛛丝。
+ * 这些值只是调律台的初始状态，不是某个世界的真实数据。
+ */
+export const DEFAULT_VALUES: Record<StringKind, number> = {
+  叙事: 85,
+  视觉: 76,
+  动画: 67,
+  物理: 58,
+  控制: 49,
+  空间: 40,
+  认知: 31,
+  关系: 22,
+};
+
+/**
+ * 每类弦的共振点（设置值）：基线经过这些高度时进入驻波/泛音态。
+ * 相当于「这根弦在这个高度上会自己唱起来」。
+ */
+export const KIND_RESONANCE: Record<StringKind, readonly number[]> = {
+  叙事: [50],
+  视觉: [33, 66],
+  动画: [25, 50, 75],
+  物理: [50],
+  控制: [40, 80],
+  空间: [50],
+  认知: [66],
+  关系: [33, 66],
+};
+
+/** 共振带的半宽（设置值单位）。 */
+export const RESONANCE_BAND = 3.5;
+
+export interface ResonanceInfo {
+  resonant: boolean;
+  /** 最近的共振点；没有则 null。 */
+  center: number | null;
+  /** 0..1，越接近 1 越靠近共振中心。 */
+  strength: number;
+}
+
+/** 当前设置值离本类弦的共振点有多近。 */
+export function resonanceOf(kind: StringKind, value: number): ResonanceInfo {
+  const bands = KIND_RESONANCE[kind] ?? [];
+  let best: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const band of bands) {
+    const distance = Math.abs(value - band);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = band;
+    }
+  }
+  if (best === null) return { resonant: false, center: null, strength: 0 };
+  const strength = clamp(1 - bestDistance / RESONANCE_BAND, 0, 1);
+  return { resonant: bestDistance <= RESONANCE_BAND, center: best, strength };
+}
+
+/** 驻波/泛音的高频视觉偏移（-1..1），节点数 = harmonic，用于共振态。 */
+export function standingOvertone(x01: number, timeMs: number, harmonic = 5): number {
+  const x = clamp(x01, 0, 1);
+  return Math.sin(Math.PI * harmonic * x) * Math.cos((timeMs / 1000) * Math.PI * 2 * 4.5);
+}
+
+export interface CurveCrossing {
+  /** 采样下标（0..n-1）。 */
+  index: number;
+  /** 横向归一化位置 0..1。 */
+  x01: number;
+  /** 交点的绝对 y。 */
+  y: number;
+}
+
+/**
+ * 两条「基线 + 位移」曲线的交点。
+ * 用相邻采样之间的线性插值求 x，用于干涉/奇点与跨弦耦合。
+ */
+export function curveCrossings(
+  displacementsA: readonly number[],
+  baselineA: number,
+  displacementsB: readonly number[],
+  baselineB: number,
+): CurveCrossing[] {
+  const n = Math.min(displacementsA.length, displacementsB.length);
+  if (n < 2) return [];
+  const out: CurveCrossing[] = [];
+  let prevDelta = baselineA + (displacementsA[0] ?? 0) - (baselineB + (displacementsB[0] ?? 0));
+  for (let i = 1; i < n; i++) {
+    const delta = baselineA + (displacementsA[i] ?? 0) - (baselineB + (displacementsB[i] ?? 0));
+    if (prevDelta === 0 || (prevDelta < 0) !== (delta < 0)) {
+      const denom = Math.abs(prevDelta) + Math.abs(delta);
+      const t = denom > 1e-9 ? Math.abs(prevDelta) / denom : 0.5;
+      const x01 = (i - 1 + t) / (n - 1);
+      const y = baselineA + (displacementsA[i - 1] ?? 0) + ((displacementsA[i] ?? 0) - (displacementsA[i - 1] ?? 0)) * t;
+      out.push({ index: i, x01: clamp(x01, 0, 1), y });
+    }
+    prevDelta = delta;
+  }
+  return out;
 }
