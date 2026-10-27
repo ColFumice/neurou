@@ -35,6 +35,9 @@ interface CellPosition {
   col: number;
   x: number;
   y: number;
+  /** 该格相对未视差位置的实际位移（含亮度差速）。 */
+  dx: number;
+  dy: number;
   value: number;
 }
 
@@ -141,6 +144,12 @@ const CURSOR_FADE_MS = 160;
 /** 命中容差：视差弹簧还没追上时也能稳定点到目标格。 */
 const HIT_TOLERANCE_PX = 10;
 
+/** 伪 3D：越白的格子略大（0.94..1.05），且视差移动更快（0.78..1.22 × 组 offset）。 */
+const CELL_VALUE_SCALE_MIN = 0.94;
+const CELL_VALUE_SCALE_MAX = 1.05;
+const CELL_PARALLAX_BASE = 0.78;
+const CELL_PARALLAX_SPAN = 0.44;
+
 /** 交互灵敏度。 */
 const DRAG_VALUE_PER_PX = 1 / 220;
 const WHEEL_STEP = 0.02;
@@ -182,6 +191,16 @@ function cellGrey(value: number): string {
 function easeOutCubic(t: number): number {
   const value = clamp(t, 0, 1);
   return 1 - (1 - value) * (1 - value) * (1 - value);
+}
+
+/** 亮度 → 尺寸倍率（0.94..1.05）。 */
+function valueScale(value: number): number {
+  return lerp(CELL_VALUE_SCALE_MIN, CELL_VALUE_SCALE_MAX, clamp(value, 0, 1));
+}
+
+/** 亮度 → 视差差速倍率（0.78..1.22）。 */
+function valueParallaxFactor(value: number): number {
+  return CELL_PARALLAX_BASE + clamp(value, 0, 1) * CELL_PARALLAX_SPAN;
 }
 
 function toCellKey(row: number, col: number): string {
@@ -332,6 +351,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     let cursorUiNow: { x: number; y: number } | null = { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
     let cursorActive = true;
     let cursorFade = 1;
+    /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
+    let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
     let wheelFreezeUntil = 0;
     /** 视差弹簧：content 整体平移（response .4s / damping .9）。 */
@@ -422,8 +443,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     function snapSelectionToSelected(dt: number): void {
       if (!selected) return;
       const center = cellCenter(layout, selected.row, selected.col);
-      selectionX.target = center.x;
-      selectionY.target = center.y;
+      // 选中框跟「组 offset」（不跟格子的亮度差速）。
+      selectionX.target = center.x + parallaxX.value;
+      selectionY.target = center.y + parallaxY.value;
       selectionX.step(dt);
       selectionY.step(dt);
     }
@@ -506,20 +528,26 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       };
     }
 
-    /** 矩阵空间坐标 → 格子（含少量容差，按最近中心取）。 */
-    function cellAtMatrix(logicalX: number, logicalY: number): CellRef | null {
+    /** 屏幕坐标 → 格子：按每格「亮度差速后的实际位置 + 实际尺寸」命中。 */
+    function cellAtScreen(logicalX: number, logicalY: number, useParallax: boolean): CellRef | null {
       const matrix = currentMatrix();
       if (!matrix) return null;
       const rows = matrixRows(matrix);
       const cols = matrixCols(matrix);
-      const half = layout.cell / 2 + HIT_TOLERANCE_PX;
+      const groupX = useParallax ? parallaxX.value : 0;
+      const groupY = useParallax ? parallaxY.value : 0;
       let best: CellRef | null = null;
       let bestDistance = Number.POSITIVE_INFINITY;
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
+          const value = displayed[r]?.[c] ?? 0;
+          const factor = frozenFactors?.[r]?.[c] ?? valueParallaxFactor(value);
           const center = cellCenter(layout, r, c);
-          const dx = logicalX - center.x;
-          const dy = logicalY - center.y;
+          const centerX = center.x + groupX * factor;
+          const centerY = center.y + groupY * factor;
+          const half = (layout.cell * valueScale(value)) / 2 + HIT_TOLERANCE_PX;
+          const dx = logicalX - centerX;
+          const dy = logicalY - centerY;
           if (Math.abs(dx) > half || Math.abs(dy) > half) continue;
           const distance = dx * dx + dy * dy;
           if (distance < bestDistance) {
@@ -531,12 +559,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       return best;
     }
 
-    /** 屏幕坐标 → 格子：先按当前视差位移命中，视差弹簧未追上时退回未平移坐标。 */
+    /** 屏幕坐标 → 格子：先按当前视差命中，视差弹簧未追上时退回未平移坐标。 */
     function cellAtPointer(logicalX: number, logicalY: number): CellRef | null {
-      return (
-        cellAtMatrix(logicalX - parallaxX.value, logicalY - parallaxY.value) ??
-        cellAtMatrix(logicalX, logicalY)
-      );
+      return cellAtScreen(logicalX, logicalY, true) ?? cellAtScreen(logicalX, logicalY, false);
     }
 
     /* —— 输入 —— */
@@ -753,7 +778,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
     }
 
-    function drawSummary(matrix: MatrixView): void {
+    function drawSummary(matrix: MatrixView, offsetX: number, offsetY: number): void {
       if (!selected) return;
       const rowName = matrix.rows[selected.row] ?? '';
       const colName = matrix.cols[selected.col] ?? '';
@@ -762,7 +787,11 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = rgba(LABEL_RGB, SUMMARY_ALPHA);
-      ctx.fillText(`${rowName} × ${colName}    ${value.toFixed(2)}`, LOGICAL_W / 2, LOGICAL_H - 46);
+      ctx.fillText(
+        `${rowName} × ${colName}    ${value.toFixed(2)}`,
+        LOGICAL_W / 2 + offsetX,
+        LOGICAL_H - 46 + offsetY,
+      );
     }
 
     /** 自定义光标：全屏 1px 十字 + 22px/3px 粗准星（中心 4px 空隙）；difference 自动反色。 */
@@ -819,25 +848,30 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
 
       ctx.save();
       ctx.globalAlpha = clamp(alpha, 0, 1);
-      // 视差：内容整体沿光标方向平移（不影响光标层）。
-      ctx.translate(LOGICAL_W / 2 + parallaxX.value, LOGICAL_H / 2 + parallaxY.value);
+      // 淡入缩放绕屏幕中心；组视差在下面按元素分别叠加（格子还要叠亮度差速）。
+      ctx.translate(LOGICAL_W / 2, LOGICAL_H / 2);
       ctx.scale(scale, scale);
       ctx.translate(-LOGICAL_W / 2, -LOGICAL_H / 2);
 
-      // 格子（含逐格弹簧缩放；选中格额外描边）
+      // 格子：尺寸随亮度（0.94..1.05），视差位移随亮度差速（0.78..1.22 × 组 offset）。
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
-          const center = cellCenter(layout, r, c);
+          const base = cellCenter(layout, r, c);
           const spring = scales[r]?.[c];
           const value = displayed[r]?.[c] ?? 0;
+          const factor = frozenFactors?.[r]?.[c] ?? valueParallaxFactor(value);
+          const centerX = base.x + parallaxX.value * factor;
+          const centerY = base.y + parallaxY.value * factor;
           const isSelected = selected !== null && selected.row === r && selected.col === c;
-          drawCell(center.x, center.y, value, spring?.value ?? SCALE_BASE, isSelected);
+          const cellScale = (spring?.value ?? SCALE_BASE) * valueScale(value);
+          drawCell(centerX, centerY, value, cellScale, isSelected);
         }
       }
 
-      // 选中框：弹簧滑动位置（比格子略大一点）
+      // 选中框：弹簧滑动位置（跟组 offset，不跟格子差速）
       if (selected) {
-        const size = layout.cell * 1.06;
+        const selectedValue = displayed[selected.row]?.[selected.col] ?? 0;
+        const size = layout.cell * valueScale(selectedValue) * 1.06;
         const radius = layout.radius + 2;
         ctx.strokeStyle = rgba(LABEL_RGB, 0.7);
         ctx.lineWidth = 1.6;
@@ -846,7 +880,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         ctx.stroke();
       }
 
-      // 行标签（左侧）
+      // 行标签（左侧）：跟组 offset
       ctx.font = `${ROW_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
@@ -855,10 +889,10 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         const active = selected?.row === r;
         const hovering = hover?.row === r;
         ctx.fillStyle = rgba(LABEL_RGB, active ? LABEL_ACTIVE_ALPHA : hovering ? LABEL_HOVER_ALPHA : LABEL_ALPHA);
-        ctx.fillText(matrix.rows[r] ?? '', layout.left - LABEL_GAP, center.y);
+        ctx.fillText(matrix.rows[r] ?? '', layout.left - LABEL_GAP + parallaxX.value, center.y + parallaxY.value);
       }
 
-      // 列标签（上方）
+      // 列标签（上方）：跟组 offset
       ctx.font = `${COL_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
       ctx.textAlign = 'center';
       for (let c = 0; c < cols; c += 1) {
@@ -866,27 +900,31 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         const active = selected?.col === c;
         const hovering = hover?.col === c;
         ctx.fillStyle = rgba(LABEL_RGB, active ? LABEL_ACTIVE_ALPHA : hovering ? LABEL_HOVER_ALPHA : LABEL_ALPHA);
-        ctx.fillText(matrix.cols[c] ?? '', center.x, layout.top - LABEL_GAP - COL_LABEL_FONT_PX / 2);
+        ctx.fillText(
+          matrix.cols[c] ?? '',
+          center.x + parallaxX.value,
+          layout.top - LABEL_GAP - COL_LABEL_FONT_PX / 2 + parallaxY.value,
+        );
       }
 
-      // 左下极淡矩阵名
+      // 左下极淡矩阵名：跟组 offset
       ctx.font = `${NAME_FONT_PX}px ${DEFAULT_SERIF}`;
       ctx.textAlign = 'left';
       ctx.fillStyle = rgba(LABEL_RGB, NAME_ALPHA);
-      ctx.fillText(matrix.name, 64, LOGICAL_H - 46);
+      ctx.fillText(matrix.name, 64 + parallaxX.value, LOGICAL_H - 46 + parallaxY.value);
 
       // 底部选中格：行 × 列 + 极淡数值
-      drawSummary(matrix);
+      drawSummary(matrix, parallaxX.value, parallaxY.value);
 
       // 多矩阵指示点（右下，当前略深；不显示数字）
       const total = matricesRef.current.length;
       if (total > 1) {
         const activeIndex = clamp(indexRef.current, 0, total - 1);
-        const startX = LOGICAL_W - 64 - (total - 1) * 12;
+        const startX = LOGICAL_W - 64 - (total - 1) * 12 + parallaxX.value;
         for (let i = 0; i < total; i += 1) {
           ctx.fillStyle = rgba(LABEL_RGB, i === activeIndex ? 0.55 : 0.22);
           ctx.beginPath();
-          ctx.arc(startX + i * 12, LOGICAL_H - 46, 2, 0, Math.PI * 2);
+          ctx.arc(startX + i * 12, LOGICAL_H - 46 + parallaxY.value, 2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -967,6 +1005,13 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
       parallaxX.step(dt);
       parallaxY.step(dt);
+      if (frozen) {
+        if (!frozenFactors) {
+          frozenFactors = displayed.map((row) => row.map((value) => valueParallaxFactor(clampValue(value))));
+        }
+      } else {
+        frozenFactors = null;
+      }
       if (
         Math.abs(parallaxX.value - offsetUiNow.x) > 0.1 ||
         Math.abs(parallaxY.value - offsetUiNow.y) > 0.1
@@ -1017,12 +1062,18 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         for (let r = 0; r < displayed.length; r += 1) {
           for (let c = 0; c < (displayed[r]?.length ?? 0); c += 1) {
             const center = cellCenter(layout, r, c);
+            const value = displayed[r]?.[c] ?? 0;
+            const factor = frozenFactors?.[r]?.[c] ?? valueParallaxFactor(value);
+            const dx = parallaxX.value * factor;
+            const dy = parallaxY.value * factor;
             result.push({
               row: r,
               col: c,
-              x: Math.round((center.x + parallaxX.value) * 100) / 100,
-              y: Math.round((center.y + parallaxY.value) * 100) / 100,
-              value: round4(displayed[r]?.[c] ?? 0),
+              x: Math.round((center.x + dx) * 100) / 100,
+              y: Math.round((center.y + dy) * 100) / 100,
+              dx: Math.round(dx * 100) / 100,
+              dy: Math.round(dy * 100) / 100,
+              value: round4(value),
             });
           }
         }
