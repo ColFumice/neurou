@@ -9,7 +9,7 @@ import {
 } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
-import type { WorldView } from './stringMath.js';
+import type { Lane, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
@@ -33,6 +33,61 @@ const WORLD_FILE = worldFileFromUrl();
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 
+/** 撤销/重做的缓动时长与类型。 */
+const UNDO_TRANSITION_MS = 620;
+type UndoDirection = 'undo' | 'redo';
+interface UndoTransition {
+  dir: UndoDirection;
+  from: Lane[];
+  to: Lane[];
+  start: number;
+  duration: number;
+  text: string;
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+/**
+ * 撤消缓动：按类把 8 根弦的当前值与阈值插值回上一版。
+ * id/name 取目标版本（真正切换世界在动画结束后发生，视觉上无缝）。
+ */
+function interpolateLanes(from: Lane[], to: Lane[], t: number): Lane[] {
+  const fromByKind = new Map(from.map((lane) => [lane.kind, lane]));
+  const toByKind = new Map(to.map((lane) => [lane.kind, lane]));
+  const kinds = [...to.map((lane) => lane.kind), ...from.map((lane) => lane.kind)].filter(
+    (kind, index, list) => list.indexOf(kind) === index,
+  );
+  const lanes: Lane[] = [];
+  for (const kind of kinds) {
+    const a = fromByKind.get(kind);
+    const b = toByKind.get(kind);
+    if (!a && b) {
+      lanes.push(b);
+      continue;
+    }
+    if (!b && a) {
+      lanes.push(a);
+      continue;
+    }
+    if (!a || !b) continue;
+    const lane: Lane = {
+      ...b,
+      value: lerp(a.value, b.value, t),
+      norm: lerp(a.norm, b.norm, t),
+    };
+    if (a.verge !== undefined && b.verge !== undefined) lane.verge = lerp(a.verge, b.verge, t);
+    if (a.safe !== undefined && b.safe !== undefined) lane.safe = lerp(a.safe, b.safe, t);
+    if (a.vergeNorm !== undefined && b.vergeNorm !== undefined) lane.vergeNorm = lerp(a.vergeNorm, b.vergeNorm, t);
+    if (a.safeNorm !== undefined && b.safeNorm !== undefined) lane.safeNorm = lerp(a.safeNorm, b.safeNorm, t);
+    lanes.push(lane);
+  }
+  return lanes;
+}
+
 function fetchWorld(file: string): Promise<string> {
   return fetch(`/__neurou/world?file=${encodeURIComponent(file)}`, { cache: 'no-store' }).then(
     (response) => {
@@ -46,7 +101,12 @@ function fetchWorld(file: string): Promise<string> {
  * 世界源码：dev 下用 fetch 读文件（写回/撤销后能重新读取，不吃 Vite import 缓存）；
  * 生产包用构建时内联的 raw 文本。读不到时退回内联文本，页面不会白屏。
  */
-function useWorldSource(file: string): { source: string | null; rev: number; reload: () => Promise<void> } {
+function useWorldSource(file: string): {
+  source: string | null;
+  rev: number;
+  reload: () => Promise<void>;
+  apply: (text: string) => void;
+} {
   const [source, setSource] = useState<string | null>(DEV ? null : bundledSource);
   const [rev, setRev] = useState(0);
   useEffect(() => {
@@ -75,7 +135,12 @@ function useWorldSource(file: string): { source: string | null; rev: number; rel
       /* 保持当前世界 */
     }
   };
-  return { source, rev, reload };
+  /** 直接应用一段已知文本（撤销缓动结束后用，避免再发一次网络请求）。 */
+  const apply = (text: string): void => {
+    setSource(text);
+    setRev((r) => r + 1);
+  };
+  return { source, rev, reload, apply };
 }
 
 /**
@@ -83,7 +148,7 @@ function useWorldSource(file: string): { source: string | null; rev: number; rel
  * 视图之外的逻辑（编译、逐拍、注入、结构编辑、写回、撤销）都在这层；画布只负责乐器。
  */
 export function App() {
-  const { source, rev, reload } = useWorldSource(WORLD_FILE);
+  const { source, rev, reload, apply } = useWorldSource(WORLD_FILE);
   const compiled = useMemo(() => (source ? compileText(source, WORLD_FILE) : null), [source, rev]);
   const [universe, setUniverse] = useState<Universe | null>(null);
   /** 编辑后的图（阈值等结构编辑在它上面生效），写回以它为准。 */
@@ -99,6 +164,9 @@ export function App() {
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
   const [couplingEdits, setCouplingEdits] = useState(0);
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
+  /** 撤销/重做的缓动状态。 */
+  const [transition, setTransition] = useState<UndoTransition | null>(null);
+  const [frame, setFrame] = useState(0);
 
   const saveTimer = useRef<number | null>(null);
   const saving = useRef(false);
@@ -107,6 +175,11 @@ export function App() {
   const worldIRRef = useRef<WorldIR | null>(null);
   const undoStack = useRef<string[]>([]);
   const redoStack = useRef<string[]>([]);
+  const transitionRef = useRef<UndoTransition | null>(null);
+  /** 缓动结束、等待新世界编译完成后再清掉 transition（避免最后一帧闪回旧值）。 */
+  const finishRef = useRef<UndoTransition | null>(null);
+  const applyRef = useRef<(text: string) => void>(() => {});
+  applyRef.current = apply;
   const actions = useRef<{ undo: () => Promise<void>; redo: () => Promise<void> }>({
     undo: async () => {},
     redo: async () => {},
@@ -123,17 +196,46 @@ export function App() {
     setUniverse(new Universe(compiled.ir, { seed: 7 }));
     setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
+    if (finishRef.current) {
+      finishRef.current = null;
+      transitionRef.current = null;
+      setTransition(null);
+    }
   }, [compiled, source]);
 
   useEffect(() => {
     if (!universe) return;
     const timer = window.setInterval(() => {
+      if (transitionRef.current) return; // 缓动期间暂停逐拍
       if (universe.state.ended) return;
       universe.tick();
       setVersion((v) => v + 1);
     }, TICK_MS);
     return () => window.clearInterval(timer);
   }, [universe]);
+
+  // 撤销/重做缓动：每帧重绘插值后的 lanes，结束时应用目标文本并等待新世界就绪。
+  useEffect(() => {
+    if (!transition) return;
+    let raf = 0;
+    let finished = false;
+    const step = (): void => {
+      const elapsed = performance.now() - transition.start;
+      if (elapsed < transition.duration) {
+        setFrame((v) => v + 1);
+        raf = window.requestAnimationFrame(step);
+        return;
+      }
+      if (!finished) {
+        finished = true;
+        finishRef.current = transition;
+        setFrame((v) => v + 1);
+        applyRef.current(transition.text);
+      }
+    };
+    raf = window.requestAnimationFrame(step);
+    return () => window.cancelAnimationFrame(raf);
+  }, [transition]);
 
   useEffect(
     () => () => {
@@ -142,10 +244,13 @@ export function App() {
     [],
   );
 
-  const lanes = useMemo(
-    () => (universe && worldIR ? collectLanes(universe, worldIR, selected) : []),
-    [universe, worldIR, version, selected],
-  );
+  const lanes = useMemo(() => {
+    if (transition) {
+      const raw = Math.min(1, Math.max(0, (performance.now() - transition.start) / transition.duration));
+      return interpolateLanes(transition.from, transition.to, easeInOutCubic(raw));
+    }
+    return universe && worldIR ? collectLanes(universe, worldIR, selected) : [];
+  }, [universe, worldIR, version, selected, transition, frame]);
 
   const writeFile = async (text: string): Promise<boolean> => {
     if (!DEV) {
@@ -214,7 +319,29 @@ export function App() {
     }, SAVE_DEBOUNCE_MS);
   };
 
+  /** 启动撤销/重做缓动：先按目标文本算目标 lanes，再让画布插值过去。 */
+  const beginTransition = (text: string, dir: UndoDirection): boolean => {
+    if (!universe || !worldIRRef.current || transitionRef.current) return false;
+    const targetCompiled = compileText(text, `${WORLD_FILE}.${dir}`);
+    if (!targetCompiled.ok) return false;
+    const targetUniverse = new Universe(targetCompiled.ir, { seed: 7 });
+    const to = collectLanes(targetUniverse, targetCompiled.ir, selected);
+    const next: UndoTransition = {
+      dir,
+      from: lanes,
+      to,
+      start: performance.now(),
+      duration: UNDO_TRANSITION_MS,
+      text,
+    };
+    transitionRef.current = next;
+    setTransition(next);
+    setFrame((v) => v + 1);
+    return true;
+  };
+
   const undo = async (): Promise<void> => {
+    if (transitionRef.current) return;
     const previous = undoStack.current.pop();
     if (!previous) return;
     redoStack.current.push(savedText.current);
@@ -228,10 +355,11 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    await reload();
+    if (!beginTransition(previous, 'undo')) await reload();
   };
 
   const redo = async (): Promise<void> => {
+    if (transitionRef.current) return;
     const next = redoStack.current.pop();
     if (!next) return;
     undoStack.current.push(savedText.current);
@@ -245,7 +373,7 @@ export function App() {
     setRedoDepth(redoStack.current.length);
     setSaveState('saved');
     setSaveError('');
-    await reload();
+    if (!beginTransition(next, 'redo')) await reload();
   };
   actions.current = { undo, redo };
 
@@ -273,6 +401,7 @@ export function App() {
       data-redo-depth={redoDepth}
       data-coupling-edits={couplingEdits}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
+      data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
@@ -304,6 +433,7 @@ export function App() {
   };
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
+    if (transitionRef.current) return;
     const lane = lanes.find((l) => l.kind === kind);
     if (!lane) return;
     universe.inject(lane.id, value);
@@ -317,6 +447,7 @@ export function App() {
     value: number,
     persist = false,
   ): void => {
+    if (transitionRef.current) return;
     const lane = lanes.find((l) => l.kind === kind);
     if (!lane) return;
     const result = setStringThreshold(worldIR, lane.id, which, value);
@@ -332,6 +463,7 @@ export function App() {
 
   /** 同类多根弦时，左右方向键切换这一类的哪一根（只切换视图，不改世界）。 */
   const onCycleString = (kind: StringKind, dir: 1 | -1): void => {
+    if (transitionRef.current) return;
     const candidates = numericStringsByKind(worldIR)[kind];
     if (!candidates || candidates.length <= 1) return;
     const count = candidates.length;
@@ -341,6 +473,7 @@ export function App() {
 
   /** 滚轮调一条耦合的强度（0..2）；写回前同样走编译闸门。 */
   const onEditCoupling = (from: string, to: string, strength: number, persist = false): void => {
+    if (transitionRef.current) return;
     const result = setCouplingStrengthBetween(worldIR, from, to, strength);
     if (!result.ok) {
       setSaveError(result.error);

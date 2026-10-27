@@ -58,6 +58,19 @@ if (colorMark) {
   await page.waitForTimeout(1000);
 }
 
+// 1c. 按住绷弦：在弦上方按住不动，波峰被钉在按点，松手释放
+const holdY = await focusBaselineY();
+await page.mouse.move(720, Math.round(holdY - 150));
+await page.mouse.down();
+await page.waitForTimeout(380);
+await page.screenshot({ path: 'docs/images/string-hold.png' });
+await page.mouse.up();
+await page.waitForTimeout(900);
+restoreWorld();
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]');
+await page.waitForTimeout(1000);
+
 // 2. 拖弦写回世界：信任下移 100px，等 1–2 拍看耦合弦自己波动
 const baseY = await focusBaselineY();
 await page.mouse.move(720, Math.round(baseY));

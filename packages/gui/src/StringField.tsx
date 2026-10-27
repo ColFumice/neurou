@@ -100,6 +100,11 @@ const COUPLING_STEP = 0.05;
 const COUPLING_MAX = 2;
 const COUPLING_INSET_PX = 10;
 
+/** 按住绷弦：长按不动 ≥HOLD_MS 后把按住点钉成一个局部波峰。 */
+const HOLD_MS = 180;
+const PIN_RADIUS_PX = 44;
+const TENSION_DX_PX = 80;
+
 /** 世界逐拍 → 视觉波。 */
 const TICK_WAVE_RATIO = 1.6;
 const TICK_WAVE_MIN = 6;
@@ -179,6 +184,26 @@ interface CrossingTrailPoint {
 type DragKind = 'value' | 'membrane' | 'pluck' | 'threshold' | 'coupling';
 
 type ThresholdName = 'verge' | 'safe';
+
+/** 按住绷弦的状态（鼠标 / 键盘同一时间只保留一个）。 */
+interface HoldState {
+  source: 'mouse' | 'keyboard';
+  pointerId: number;
+  keyCode: string;
+  keyLabel: string;
+  x: number;
+  y: number;
+  startedAt: number;
+}
+
+/** 键盘按住中的暂存（到 HOLD_MS 才变成可见的 pin）。 */
+interface KeyboardHold {
+  code: string;
+  label: string;
+  x: number;
+  y: number;
+  startedAt: number;
+}
 
 /** 焦点弦的一条耦合标记（内部几何）。 */
 interface CouplingMark {
@@ -343,6 +368,15 @@ declare global {
       }>;
       /** 改一条耦合强度（debug 注入，persist=false，不落盘）。 */
       setCoupling: (from: string, to: string, strength: number) => void;
+      /** 按住绷弦状态（验收用）。 */
+      pinInfo: () => {
+        active: boolean;
+        x: number;
+        y: number;
+        amplitude: number;
+        direction: 1 | -1;
+        heldMs: number;
+      };
       rms: () => number;
     };
   }
@@ -392,6 +426,8 @@ export function StringField({
   const [lastKey, setLastKey] = useState('');
   const [lastAmplitude, setLastAmplitude] = useState(0);
   const [lastDirection, setLastDirection] = useState<'up' | 'down'>('down');
+  const [holding, setHolding] = useState(false);
+  const [heldAmplitude, setHeldAmplitude] = useState(0);
 
   useEffect(() => {
     const hostElement = hostRef.current;
@@ -442,6 +478,11 @@ export function StringField({
 
     let drag: PointerDrag | null = null;
     let pointerNow: { x: number; y: number } | null = null;
+    /** 按住绷弦（鼠标/键盘共用一个 pin）。 */
+    let hold: HoldState | null = null;
+    let kbHold: KeyboardHold | null = null;
+    let holdingNow = false;
+    let heldAmplitudeNow = 0;
     let hoverNodeNow = false;
     let hoverCrossNow: CrossingHit | null = null;
     let hoverPairNow: { a: number; b: number } | null = null;
@@ -537,6 +578,44 @@ export function StringField({
       if (modeNow === value) return;
       modeNow = value;
       setMode(value);
+    }
+
+    function setHoldingUi(value: boolean): void {
+      if (holdingNow === value) return;
+      holdingNow = value;
+      setHolding(value);
+    }
+
+    function setHeldAmplitudeUi(value: number): void {
+      const rounded = Math.round(value * 10) / 10;
+      if (Math.abs(rounded - heldAmplitudeNow) < 0.1) return;
+      heldAmplitudeNow = rounded;
+      setHeldAmplitude(rounded);
+    }
+
+    /** pin 的带符号屏幕位移：负 = 基线上方（向上拉），与物理 u 方向一致。 */
+    function pinAmplitude(): number {
+      if (!hold) return 0;
+      const profile = profileOf(focusIdx);
+      return clamp(hold.y - focusBaseline(), -profile.maxPull, profile.maxPull);
+    }
+
+    function updateHeldState(): void {
+      if (!hold) {
+        setHoldingUi(false);
+        setHeldAmplitudeUi(0);
+        return;
+      }
+      setHoldingUi(true);
+      setHeldAmplitudeUi(Math.abs(pinAmplitude()));
+    }
+
+    /** 清掉按住状态（切焦点/总览/对偶/复位时调用）。 */
+    function clearHold(): void {
+      hold = null;
+      kbHold = null;
+      setHoldingUi(false);
+      setHeldAmplitudeUi(0);
     }
 
     function bumpPlucks(): void {
@@ -713,6 +792,7 @@ export function StringField({
       if (!lanesNow.length) return;
       const next = clamp(index, 0, lanesNow.length - 1);
       if (next === focusIdx) return;
+      clearHold();
       if (sims[focusIdx]) sims[focusIdx] = new StringSim(STRING_N, LOGICAL_W);
       focusIdx = next;
       setFocusIndex(focusIdx);
@@ -838,20 +918,72 @@ export function StringField({
       ctx.stroke();
     }
 
-    /** 焦点弦显示位移：物理 u + 高频驻波抖动（+ 共振泛音）。 */
+    /** 焦点弦显示位移：物理 u + 高频驻波抖动（+ 共振泛音 + 按住 pin 的局部 tent）。 */
     function focusDisplayU(now: number, includeResonance: boolean): Float32Array {
       const sim = sims[focusIdx];
       const u = sim ? sim.u() : new Float32Array(STRING_N);
       const count = u.length;
       const resonance = includeResonance && resonantNow;
+      const geom = focusGeom();
+      const pinAmp = hold ? pinAmplitude() : 0;
       for (let i = 0; i < count; i += 1) {
         const x01 = count > 1 ? i / (count - 1) : 0.5;
         let value = u[i] ?? 0;
         value += standingOvertone(x01, now, 3) * FOCUS_JITTER_PX;
         if (resonance) value += standingOvertone(x01, now, 5) * RESONANCE_OVERTONE_PX;
+        if (hold && pinAmp !== 0) {
+          const distance = Math.abs(geom.xL + x01 * geom.width - hold.x);
+          if (distance < PIN_RADIUS_PX) value += pinAmp * (1 - distance / PIN_RADIUS_PX);
+        }
         focusDispBuf[i] = value;
       }
       return focusDispBuf;
+    }
+
+    /** 按住绷弦的视觉：两条极淡张力线 + 比普通波峰更粗更深的局部峰。 */
+    function drawPin(disp: Float32Array): void {
+      if (!hold) return;
+      const geom = focusGeom();
+      const baseline = focusBaseline();
+      const profile = profileOf(focusIdx);
+      const amplitude = pinAmplitude();
+      if (Math.abs(amplitude) < 0.5) return;
+      const tipX = clamp(hold.x, geom.xL, geom.xR);
+      const tipY = baseline + amplitude;
+      // 两条张力细线：峰顶 → 基线
+      ctx.strokeStyle = rgba(ink, 0.07);
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'round';
+      for (const direction of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(clamp(tipX + direction * TENSION_DX_PX, geom.xL, geom.xR), baseline);
+        ctx.stroke();
+      }
+      // 局部峰加粗加深（比普通波峰略粗，但不至于压过弦本身）
+      const count = disp.length;
+      const stepX = geom.width / (count - 1);
+      let started = false;
+      ctx.strokeStyle = rgba(ink, 0.92);
+      ctx.lineWidth = Math.max(FOCUS_WIDTH_BASE, profile.restWidth) + profile.peakWidth * 0.75;
+      ctx.beginPath();
+      for (let i = 0; i < count; i += 1) {
+        const x = geom.xL + i * stepX;
+        if (Math.abs(x - tipX) > PIN_RADIUS_PX) continue;
+        const y = baseline + (disp[i] ?? 0);
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      if (started) ctx.stroke();
+      // 峰顶小圆点
+      ctx.fillStyle = rgba(ink, 0.55);
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 1.8, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     function drawMembranes(geom: { xL: number; xR: number }): void {
@@ -1186,6 +1318,7 @@ export function StringField({
       } else {
         const disp = focusDisplayU(now, true);
         strokeFocus(ctx, disp, 1, true);
+        if (hold) drawPin(disp);
       }
 
       drawCrossings();
@@ -1355,6 +1488,7 @@ export function StringField({
     function startDual(persist = true): void {
       const lane = laneAt(focusIdx);
       if (!lane) return;
+      clearHold();
       dualNow = true;
       dualStartedAt = performance.now();
       dualLaneIndex = focusIdx;
@@ -1453,6 +1587,7 @@ export function StringField({
 
     function enterOverview(): void {
       if (modeNow === 'overview') return;
+      clearHold();
       setModeUi('overview');
       chartTarget = 1;
       drag = null;
@@ -1563,6 +1698,13 @@ export function StringField({
     function onPointerMove(event: PointerEvent): void {
       const point = pointToLogical(event.clientX, event.clientY);
       pointerNow = point;
+      // 绷住后 pin 跟着指针走（不转成取值拖动）。
+      if (hold && hold.source === 'mouse' && event.pointerId === hold.pointerId) {
+        hold.x = point.x;
+        hold.y = point.y;
+        updateHeldState();
+        return;
+      }
       if (!drag || event.pointerId !== drag.pointerId) return;
       const dx = point.x - drag.startX;
       const dy = point.y - drag.startY;
@@ -1602,6 +1744,18 @@ export function StringField({
         /* ignore */
       }
       setPullingUi(false);
+      // 按住绷弦松手：以 pin 的当前位移触发一次拨弦（视觉/音频/值注入）。
+      if (hold && hold.source === 'mouse' && hold.pointerId === current.pointerId) {
+        const session = hold;
+        hold = null;
+        setHoldingUi(false);
+        setHeldAmplitudeUi(0);
+        const key = keyAtPoint(keys, session.x, session.y);
+        pluckFocus(session.x, session.y, key ? key.code : '', key ? key.label : '');
+        return;
+      }
+      // 键盘按住时鼠标松手不再拨弦（键盘优先）。
+      if (kbHold !== null || (hold !== null && hold.source === 'keyboard')) return;
       // 阈值拖动：按松手时的最终坐标再提交一次，并标记为用户手势（要落盘）。
       if (current.kind === 'threshold') {
         const which = current.thresholdWhich ?? 'verge';
@@ -1685,7 +1839,31 @@ export function StringField({
       if (!key) return;
       event.preventDefault();
       const label = event.key.length === 1 ? event.key : key.label;
-      pluckFocus(key.cx, key.cy, event.code, label);
+      // 键盘长按：keydown 只进入「按住」，keyup 才拨弦（HOLD_MS 后显示 pin）。
+      const profile = profileOf(focusIdx);
+      const baseline = focusBaseline();
+      const amplitude = Math.min(Math.abs(key.cy - baseline), profile.maxPull);
+      const direction: 1 | -1 = key.cy < baseline ? -1 : 1;
+      noteTouch(key.cx, key.cy, amplitude, direction, event.code);
+      if (hold !== null && hold.source === 'mouse') {
+        hold = null;
+        setHoldingUi(false);
+        setHeldAmplitudeUi(0);
+      }
+      kbHold = { code: event.code, label, x: key.cx, y: key.cy, startedAt: performance.now() };
+    }
+
+    function onKeyUp(event: KeyboardEvent): void {
+      if (!kbHold || event.code !== kbHold.code) return;
+      const session = kbHold;
+      kbHold = null;
+      if (hold !== null && hold.source === 'keyboard' && hold.keyCode === event.code) {
+        hold = null;
+        setHoldingUi(false);
+        setHeldAmplitudeUi(0);
+      }
+      // 松手：以按住点的位移拨一次（视觉/音频/值注入）。
+      pluckFocus(session.x, session.y, session.code, session.label);
     }
 
     /* —— 每帧 —— */
@@ -1784,6 +1962,39 @@ export function StringField({
       ripples = ripples.filter((ripple) => now - ripple.born < RIPPLE_MS);
     }
 
+    /** 按住绷弦：长按到 HOLD_MS 才把按住点变成可见的 pin；同一时间只保留一个。 */
+    function updateHoldState(now: number): void {
+      if (modeNow !== 'strings' || dualNow) {
+        if (hold !== null || kbHold !== null) clearHold();
+        return;
+      }
+      // 键盘按住优先（后按者优先）：存在 kbHold 时不再把鼠标按压升级成 pin。
+      if (!hold && kbHold && now - kbHold.startedAt >= HOLD_MS) {
+        hold = {
+          source: 'keyboard',
+          pointerId: -1,
+          keyCode: kbHold.code,
+          keyLabel: kbHold.label,
+          x: kbHold.x,
+          y: kbHold.y,
+          startedAt: kbHold.startedAt,
+        };
+      }
+      if (!hold && !kbHold && drag && drag.kind === 'pluck' && !drag.moved && now - drag.startedAt >= HOLD_MS) {
+        const point = pointerNow ?? { x: drag.startX, y: drag.startY };
+        hold = {
+          source: 'mouse',
+          pointerId: drag.pointerId,
+          keyCode: '',
+          keyLabel: '',
+          x: point.x,
+          y: point.y,
+          startedAt: drag.startedAt,
+        };
+      }
+      if (hold) updateHeldState();
+    }
+
     function frame(now: number): void {
       requestId = window.requestAnimationFrame(frame);
       const dt = lastFrame > 0 ? Math.min(0.05, (now - lastFrame) / 1000) : 1 / 60;
@@ -1824,6 +2035,7 @@ export function StringField({
       }
       couplingMarksNow = buildCouplingMarks();
       updateHoverState();
+      updateHoldState(now);
       const focusSim = sims[focusIdx];
       setRestingUi(focusSim ? focusSim.resting() : true);
 
@@ -1837,6 +2049,7 @@ export function StringField({
     /* —— 本地复位（不动世界值） —— */
     function resetField(): void {
       audio.reset();
+      clearHold();
       for (let i = 0; i < sims.length; i += 1) {
         if (sims[i]) sims[i] = new StringSim(STRING_N, LOGICAL_W);
       }
@@ -1997,6 +2210,18 @@ export function StringField({
         if (!exists) return;
         couplingEditRef.current?.(from, to, Math.round(clamp(strength, 0, COUPLING_MAX) * 100) / 100, false);
       },
+      pinInfo: () => {
+        if (!hold) return { active: false, x: 0, y: 0, amplitude: 0, direction: 1, heldMs: 0 };
+        const signed = pinAmplitude();
+        return {
+          active: true,
+          x: Math.round(hold.x * 10) / 10,
+          y: Math.round(hold.y * 10) / 10,
+          amplitude: Math.round(Math.abs(signed) * 10) / 10,
+          direction: signed < 0 ? -1 : 1,
+          heldMs: Math.round(performance.now() - hold.startedAt),
+        };
+      },
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
@@ -2016,6 +2241,7 @@ export function StringField({
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     window.addEventListener('wheel', onWheel, { passive: false });
 
     const observer = new ResizeObserver(() => {
@@ -2035,6 +2261,7 @@ export function StringField({
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('wheel', onWheel);
       unsubscribeAudio();
       audio.reset();
@@ -2081,6 +2308,8 @@ export function StringField({
       data-dual={dualUi ? 'true' : 'false'}
       data-crossings={crossingsCountUi}
       data-pulling={pulling ? 'true' : 'false'}
+      data-holding={holding ? 'true' : 'false'}
+      data-held-amplitude={heldAmplitude.toFixed(1)}
       data-resting={resting ? 'true' : 'false'}
       data-key-count={46}
       data-overview-rows={mode === 'overview' ? KIND_ORDER.length : 0}

@@ -362,6 +362,40 @@ check('A 在信任弦下方 → 向下拨', (await attr('data-last-direction')) 
 const afterKey = await valuesOf();
 check('键盘拨动也写回真实值', Math.abs(afterKey[0] - beforeKey[0]) > 1, `${beforeKey[0].toFixed(1)} → ${afterKey[0].toFixed(1)}`);
 
+// ============ 3b. 按住绷弦（鼠标/键盘长按） ============
+await resetLocal();
+const holdBaseY = valueToY((await valuesOf())[0], 0);
+await page.mouse.move(720, Math.round(holdBaseY - 160));
+await page.mouse.down();
+await page.waitForTimeout(380);
+check('按住不动 → 弦被绷住（data-holding=true）', (await attr('data-holding')) === 'true', String(await attr('data-holding')));
+check('按住期间还没有拨弦', Number(await attr('data-plucks')) === 0, String(await attr('data-plucks')));
+const heldAmp = Number(await attr('data-held-amplitude'));
+check('绷住的幅度接近按住点位移', Math.abs(heldAmp - 160) <= 25, String(heldAmp));
+const pinNow = await page.evaluate(() => window.__neurouString.pinInfo());
+check('pinInfo 指向按住点', pinNow.active === true && Math.abs(pinNow.x - 720) < 10, JSON.stringify(pinNow));
+await page.screenshot({ path: 'artifacts/99-string-hold.png' });
+await page.mouse.move(620, Math.round(holdBaseY - 110), { steps: 6 });
+await page.waitForTimeout(160);
+const pinMoved = await page.evaluate(() => window.__neurouString.pinInfo());
+check(
+  '按住后移动指针，波峰跟随',
+  pinMoved.active === true && Math.abs(pinMoved.x - 620) < 15 && Math.abs(pinMoved.amplitude - 110) < 30,
+  JSON.stringify(pinMoved),
+);
+await page.mouse.up();
+await page.waitForTimeout(220);
+check('松手释放一次拨弦', Number(await attr('data-plucks')) === 1 && (await attr('data-last-direction')) === 'up', String(await attr('data-plucks')));
+
+await resetLocal();
+await page.keyboard.down('a');
+await page.waitForTimeout(380);
+check('键盘长按也绷住', (await attr('data-holding')) === 'true', String(await attr('data-holding')));
+check('键盘按住期间不拨弦', Number(await attr('data-plucks')) === 0, String(await attr('data-plucks')));
+await page.keyboard.up('a');
+await page.waitForTimeout(220);
+check('键盘松手拨一次', Number(await attr('data-plucks')) === 1, String(await attr('data-plucks')));
+
 // ============ 4. 阈值共振：共振点来自悬崖/安全线 ============
 await resetLocal();
 await page.evaluate(() => window.__neurouString.setValue('叙事', 26));
@@ -507,6 +541,37 @@ if (trustColorMark) {
   check('Ctrl+Z 撤销耦合编辑', Math.abs((undone?.strength ?? NaN) - colorCoupling.strength) < 1e-6, `→ ${undone?.strength}`);
   check('撤销后耦合文件回到上一版', readFileSync(WORLD_PATH, 'utf8') === couplingPreText);
 }
+
+// ============ 8b. 撤销缓动（不是闪回） ============
+await page.waitForTimeout(300);
+const easingPreFile = readFileSync(WORLD_PATH, 'utf8');
+const easingTarget = parseTrustBaseline(easingPreFile);
+const easFrom = (await valuesOf())[0];
+const easBaseY = valueToY(easFrom, 0);
+await page.mouse.move(720, Math.round(easBaseY));
+await page.mouse.down();
+await page.mouse.move(720, Math.round(easBaseY) + 90, { steps: 10 });
+await page.mouse.up();
+await page.waitForTimeout(1700);
+const easEdited = (await valuesOf())[0];
+check('缓动前：拖动写回了不同值', Math.abs(easEdited - easFrom) > 3, `${easFrom.toFixed(2)} → ${easEdited.toFixed(2)}`);
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(110);
+check('Ctrl+Z 进入缓动状态', (await appAttr('data-transition')) === 'undo', String(await appAttr('data-transition')));
+const easMid1 = (await valuesOf())[0];
+check(
+  '缓动中途：值已开始回退但还没到终点',
+  Math.abs(easMid1 - easEdited) > 0.05 && Math.abs(easMid1 - easingTarget) > 0.05,
+  `${easEdited.toFixed(2)} → ${easMid1.toFixed(2)} → ${easingTarget}`,
+);
+await page.waitForTimeout(200);
+const easMid2 = (await valuesOf())[0];
+check('缓动是渐进的（两个采样点不同）', Math.abs(easMid2 - easMid1) > 0.02, `${easMid1.toFixed(2)} → ${easMid2.toFixed(2)}`);
+await page.waitForTimeout(1000);
+check('缓动结束，data-transition 清空', (await appAttr('data-transition')) === '');
+const easFinal = (await valuesOf())[0];
+check('缓动结束在目标基线', Math.abs(easFinal - easingTarget) < 0.02, `${easFinal.toFixed(2)} vs ${easingTarget}`);
+check('撤销后的文件回到编辑前一版', readFileSync(WORLD_PATH, 'utf8') === easingPreFile);
 
 // ============ 9. 写回 .nro（GUI → 运行时 → IR → 文本） ============
 await page.waitForTimeout(1300); // 结清前面手势的 debounce 写回
@@ -693,6 +758,14 @@ const summary = {
     savedBaseline,
     reloadedTrust: reloaded[0],
     restored,
+  },
+  hold: { heldAmplitude: heldAmp, movedPin: pinMoved },
+  easing: {
+    from: easEdited,
+    mid1: easMid1,
+    mid2: easMid2,
+    target: easingTarget,
+    final: easFinal,
   },
   audio: { state: audioState, rms: finalRms },
   worldSwitch: { file: TEMP_TUNER, trust: tempTrust, tunerUntouched: readFileSync(WORLD_PATH, 'utf8') === tunerBeforeOtherWorld },
