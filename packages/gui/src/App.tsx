@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   compileText,
+  patchWorldText,
   serialize,
   setCouplingStrengthBetween,
   setStringThreshold,
@@ -158,6 +159,7 @@ export function App() {
   const [version, setVersion] = useState(0);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
   const [saveError, setSaveError] = useState('');
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
@@ -173,6 +175,9 @@ export function App() {
   const savedText = useRef('');
   /** doSave 在 debounce 计时器里执行，必须读「最新」的图，不能用本帧闭包里的旧值。 */
   const worldIRRef = useRef<WorldIR | null>(null);
+  /** 写回保真：磁盘上当前文本 + 它编译出的图；只对它们做「行级 patch」。 */
+  const baseText = useRef('');
+  const baseIR = useRef<WorldIR | null>(null);
   const undoStack = useRef<string[]>([]);
   const redoStack = useRef<string[]>([]);
   const transitionRef = useRef<UndoTransition | null>(null);
@@ -196,6 +201,10 @@ export function App() {
     setUniverse(new Universe(compiled.ir, { seed: 7 }));
     setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
+    if (source) {
+      baseText.current = source;
+      baseIR.current = compiled.ir;
+    }
     if (finishRef.current) {
       finishRef.current = null;
       transitionRef.current = null;
@@ -270,7 +279,7 @@ export function App() {
     }
   };
 
-  /** 写回闸门：序列化后必须重新编译通过，否则拒绝写文件。 */
+  /** 写回闸门：先尝试行级 patch（保注释/排版），失败回退规范序列化；结果必须编译通过。 */
   const doSave = async (): Promise<void> => {
     if (!DEV) {
       setSaveState('disabled');
@@ -282,7 +291,29 @@ export function App() {
     setSaveState('saving');
     try {
       const candidate = withCurrentBaselines(latestIR, universe);
-      const text = serialize(candidate);
+      let text: string | null = null;
+      // 1) 行级 patch：只改被编辑的行，保留注释与排版
+      if (baseText.current && baseIR.current) {
+        const patch = patchWorldText(baseText.current, baseIR.current, candidate);
+        if (patch.ok) {
+          const check = compileText(patch.text, `${WORLD_FILE}.patch`);
+          if (check.ok) {
+            text = patch.text;
+            baseText.current = patch.text;
+            baseIR.current = check.ir;
+            setSaveMode('patch');
+          } else {
+            console.info('[tuner] patch 编译失败，回退规范序列化');
+          }
+        } else {
+          console.info('[tuner] patch 回退：', patch.reason);
+        }
+      }
+      // 2) 回退：规范序列化整张图
+      if (text === null) {
+        text = serialize(candidate);
+        setSaveMode('fallback');
+      }
       const check = compileText(text, `${WORLD_FILE}.edit`);
       if (!check.ok) {
         const first = check.diagnostics.errors[0];
@@ -290,6 +321,8 @@ export function App() {
         setSaveState('error');
         return;
       }
+      baseText.current = text;
+      baseIR.current = check.ir;
       if (!(await writeFile(text))) throw new Error('写回失败');
       undoStack.current.push(savedText.current);
       savedText.current = text;
@@ -396,6 +429,7 @@ export function App() {
       data-world-file={WORLD_FILE}
       data-saves={saves}
       data-save-state={saveState}
+      data-save-mode={saveMode}
       data-save-error={saveError}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}

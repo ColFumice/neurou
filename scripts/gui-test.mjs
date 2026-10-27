@@ -88,6 +88,8 @@ const parseTrustBaseline = (text) => {
   const match = /叙事弦 信任\r?\n(?:[^\r\n]*\r?\n)*?  基线 ([\d.]+)/.exec(text);
   return match ? Number(match[1]) : NaN;
 };
+const commentCount = (text) => text.split(/\r?\n/).filter((line) => /^\s*#/.test(line)).length;
+const originalCommentCount = commentCount(worldBackup);
 
 function check(name, ok, detail = '') {
   results.push({ name, ok: Boolean(ok), detail: String(detail) });
@@ -478,7 +480,13 @@ check('阈值编辑也会触发写回', (await appAttr('data-save-state')) === '
 const vergeInFile = readThresholdFromFile('verge');
 check('文件里的悬崖线被重写', Math.abs(vergeInFile - thresholdAfter.verge) <= 0.01, `file=${vergeInFile}`);
 const thresholdPostText = readFileSync(WORLD_PATH, 'utf8');
-check('编辑后的世界文件仍是合法 .nro（写回闸门）', thresholdPostText.includes('由 neurou 序列化器生成'));
+check(
+  '阈值写回保留原文件注释（行级 patch）',
+  thresholdPostText.includes('# 八弦调律台的默认世界') &&
+    commentCount(thresholdPostText) === originalCommentCount &&
+    !thresholdPostText.includes('由 neurou 序列化器生成'),
+  `comments ${commentCount(thresholdPostText)}/${originalCommentCount}`,
+);
 await page.screenshot({ path: 'artifacts/96-string-threshold-edit.png' });
 
 // Ctrl+Z 撤销 → 回到上一次保存的文本；Ctrl+Shift+Z 重做（必须在刷新前，历史在内存里）
@@ -533,6 +541,7 @@ if (trustColorMark) {
   await page.waitForTimeout(1700);
   const fileStrength = readCouplingStrengthFromFile('信任', '色温');
   check('文件里的耦合强度被重写', Math.abs(fileStrength - (after?.strength ?? NaN)) <= 0.01, `file=${fileStrength}`);
+  check('耦合写回保留原文件注释（行级 patch）', commentCount(readFileSync(WORLD_PATH, 'utf8')) === originalCommentCount);
   check('耦合编辑写回状态 = saved', (await appAttr('data-save-state')) === 'saved', String(await appAttr('data-save-state')));
   // Ctrl+Z 撤销耦合编辑
   await page.keyboard.press('Control+z');
@@ -589,8 +598,15 @@ const savesAfter = Number((await appAttr('data-saves')) ?? 0);
 check('用户松手后触发写回（data-saves 增加）', savesAfter > savesBefore, `${savesBefore} → ${savesAfter}`);
 check('写回状态 = saved', (await appAttr('data-save-state')) === 'saved', String(await appAttr('data-save-state')));
 const fileAfter = readFileSync(WORLD_PATH, 'utf8');
-check('文件被序列化器重写（含规范头）', fileAfter.includes('由 neurou 序列化器生成'));
+check(
+  '拖弦写回保留原文件注释与排版（行级 patch）',
+  fileAfter.includes('# 八弦调律台的默认世界') &&
+    commentCount(fileAfter) === originalCommentCount &&
+    !fileAfter.includes('由 neurou 序列化器生成'),
+  `comments ${commentCount(fileAfter)}/${originalCommentCount}`,
+);
 const savedBaseline = parseTrustBaseline(fileAfter);
+check('写回走行级 patch（data-save-mode=patch）', (await appAttr('data-save-mode')) === 'patch', String(await appAttr('data-save-mode')));
 check(
   '文件里的「信任」基线被更新',
   Number.isFinite(savedBaseline) && Math.abs(savedBaseline - preBaseline) > 1,
@@ -699,8 +715,10 @@ await page.waitForTimeout(1700);
 const tempText = readFileSync(TEMP_TUNER, 'utf8');
 const tempTrust = parseTrustBaseline(tempText);
 check(
-  '写回目标是当前世界文件',
-  tempText.includes('由 neurou 序列化器生成') && Math.abs(tempTrust - (await valuesOf())[0]) < 2,
+  '写回目标是当前世界文件（保留其注释）',
+  tempText.includes('# 八弦调律台的默认世界') &&
+    !tempText.includes('由 neurou 序列化器生成') &&
+    Math.abs(tempTrust - (await valuesOf())[0]) < 2,
   `file=${tempTrust} view=${(await valuesOf())[0].toFixed(2)}`,
 );
 check('原 tuner.nro 不被误写', readFileSync(WORLD_PATH, 'utf8') === tunerBeforeOtherWorld);
