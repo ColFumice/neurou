@@ -5,8 +5,11 @@
  *   node scripts/gui-prod-smoke.mjs
  */
 import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
 
 const URL = 'http://127.0.0.1:5189/';
+const WORLD_PATH = 'examples/tuner.nro';
+const worldBefore = readFileSync(WORLD_PATH, 'utf8');
 const browser = await chromium.launch({
   channel: 'msedge',
   headless: true,
@@ -31,6 +34,8 @@ const extraUi = await page.locator('button, input, textarea, select').count();
 const world = await attr('data-world');
 const lanes = Number(await attr('data-lane-count'));
 const initial = await values();
+const app = page.locator('[data-testid="ink-app"]');
+const loading = await app.getAttribute('data-loading');
 await page.screenshot({ path: 'artifacts/60-prod-world.png' });
 
 // 拖弦写回世界 → 下一拍耦合传导
@@ -46,6 +51,12 @@ await page.mouse.up();
 await page.waitForTimeout(1200);
 const afterDrag = await values();
 const coupled = afterDrag.filter((v, i) => i > 0 && Math.abs(v - initial[i]) > 0.5).length;
+// 生产包没有写回中间件：手势只能改运行时，文件必须原样
+const prodSave = {
+  state: await app.getAttribute('data-save-state'),
+  saves: Number(await app.getAttribute('data-saves')),
+  fileUnchanged: readFileSync(WORLD_PATH, 'utf8') === worldBefore,
+};
 
 // 阈值共振
 await page.evaluate(() => window.__neurouString.setValue('叙事', 26));
@@ -72,9 +83,11 @@ console.log(
       extraUi,
       world,
       lanes,
+      loading,
       initial,
       afterDrag,
       coupled,
+      prodSave,
       threshold,
       kindAfterTab,
       overview,
@@ -93,10 +106,14 @@ process.exitCode =
   extraUi === 0 &&
   world === '调律台' &&
   lanes === 8 &&
+  loading === 'false' &&
   initial.length === 8 &&
   Math.abs(initial[0] - 55) < 1 &&
   Math.abs(initial[7] - 0.58) < 0.05 &&
   coupled >= 2 &&
+  prodSave.state === 'disabled' &&
+  prodSave.saves === 0 &&
+  prodSave.fileUnchanged &&
   threshold.resonant === 'true' &&
   Math.abs(Number(threshold.value) - 25) <= 0.6 &&
   kindAfterTab === '视觉' &&

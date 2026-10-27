@@ -21,3 +21,4 @@ export * from './ast.js';
 export * from './ir.js';
 export { parse } from './parser.js';
 export { compile, compileText, kindSolver, suggestName, type CompileResult } from './compiler.js';
+export { serialize } from './serialize.js';

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { SourceFile, compile, formatDiagnostic, type WorldIR } from '@neurou/core';
+import { SourceFile, compile, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
 import {
   ANSI,
   Universe,
@@ -23,6 +23,8 @@ const HELP = `neurou ${VERSION} · 雨若
   neurou sim <文件.nro> [选项]           跑批量模拟，出音准仪报告
   neurou run <文件.nro> [选项]           进入这个世界，逐拍游玩
   neurou ir <文件.nro> [--out 路径]      导出弦网络图（JSON）
+  neurou fmt <文件.nro> [--write] [--out 路径]
+                                        把图重新排成规范 .nro（默认打印到 stdout）
   neurou init <名字>                     生成一个可运行的世界模板
   neurou help                            这张帮助
 
@@ -74,7 +76,7 @@ function paint(enabled: boolean, code: string, s: string): string {
   return enabled ? `${code}${s}${ANSI.reset}` : s;
 }
 
-function load(path: string): { ir: WorldIR; ok: boolean } | undefined {
+function load(path: string, quiet = false): { ir: WorldIR; ok: boolean } | undefined {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
@@ -84,10 +86,12 @@ function load(path: string): { ir: WorldIR; ok: boolean } | undefined {
   }
   const result = compile(new SourceFile(path, text));
   const color = colorEnabled({});
-  for (const d of result.diagnostics.sorted()) {
-    const line = formatDiagnostic(result.source, d);
-    const head = d.severity === 'error' ? ANSI.red : d.severity === 'warning' ? ANSI.yellow : ANSI.cyan;
-    console.log(paint(color, head, line));
+  if (!quiet || !result.ok) {
+    for (const d of result.diagnostics.sorted()) {
+      const line = formatDiagnostic(result.source, d);
+      const head = d.severity === 'error' ? ANSI.red : d.severity === 'warning' ? ANSI.yellow : ANSI.cyan;
+      console.log(paint(color, head, line));
+    }
   }
   if (!result.ok) {
     const errs = result.diagnostics.count('error');
@@ -218,6 +222,30 @@ async function main(): Promise<void> {
         console.log(`弦网络图已写入 ${resolve(out)}`);
       } else {
         console.log(json);
+      }
+      return;
+    }
+    case 'fmt': {
+      if (!args.file) {
+        console.error('用法：neurou fmt <文件.nro> [--write] [--out 路径]');
+        process.exitCode = 2;
+        return;
+      }
+      const world = load(args.file, true);
+      if (!world || !world.ok) {
+        process.exitCode = 1;
+        return;
+      }
+      const formatted = serialize(world.ir);
+      const out = args.flags['out'];
+      if (typeof out === 'string') {
+        writeFileSync(out, formatted, 'utf8');
+        console.log(`已写入 ${resolve(out)}`);
+      } else if (args.flags['write']) {
+        writeFileSync(args.file, formatted, 'utf8');
+        console.log(`已格式化 ${resolve(args.file)}`);
+      } else {
+        process.stdout.write(formatted);
       }
       return;
     }

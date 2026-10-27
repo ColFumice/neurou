@@ -184,7 +184,8 @@ interface PointerDrag {
 
 export interface StringFieldProps {
   view: WorldView;
-  onInject: (kind: StringKind, value: number) => void;
+  /** persist=true 表示这是用户手势（拖弦松手/拨弦/对偶），App 会 debounce 写回 .nro。 */
+  onInject: (kind: StringKind, value: number, persist?: boolean) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1117,7 +1118,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       audioBegin(kindOf(focusIdx), clamp(center01 + 0.1, 0, 1), 0.5, 0.8, (1 / spanNow) * 1.5);
     }
 
-    function startDual(): void {
+    function startDual(persist = true): void {
       const lane = laneAt(focusIdx);
       if (!lane) return;
       dualNow = true;
@@ -1128,7 +1129,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       setPullingUi(false);
       // 立刻把真实值翻到对侧（世界下一拍照常传导）。
       const flippedNorm = clamp(1 - lane.norm, 0, 1);
-      injectRef.current(lane.kind, lane.min + flippedNorm * (lane.max - lane.min));
+      injectRef.current(lane.kind, lane.min + flippedNorm * (lane.max - lane.min), persist);
     }
 
     function finishDual(): void {
@@ -1143,8 +1144,15 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       audioBegin(kindOf(index), 0.5, 0.5, 0.8, (1 / spanNow) * 2);
     }
 
-    /** 拨动焦点弦：视觉波 + 推动真实值约 8% 量程。 */
-    function pluckFocus(screenX: number, screenY: number, keyCode: string, ghostText?: string, pushWorld = true): void {
+    /** 拨动焦点弦：视觉波 + 推动真实值约 8% 量程。persist=true = 用户手势（要落盘）。 */
+    function pluckFocus(
+      screenX: number,
+      screenY: number,
+      keyCode: string,
+      ghostText?: string,
+      pushWorld = true,
+      persist = true,
+    ): void {
       if (dualNow) return;
       const lane = laneAt(focusIdx);
       if (!lane) return;
@@ -1159,7 +1167,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       bumpPlucks();
       if (ghostText) pushGhost(ghostText, screenX, screenY);
       if ((lane.norm <= DUAL_LOW || lane.norm >= DUAL_HIGH) && amplitude > DUAL_AMP_MIN) {
-        startDual();
+        startDual(persist);
         return;
       }
       sims[focusIdx]?.pluck({ x: localX, y: screenY, amplitude, direction, key: null }, profile);
@@ -1167,7 +1175,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         // 值变大 = 基线上移；direction=-1 是向上拨 → 推高值。
         const deltaNorm = -direction * (amplitude / Math.max(1, profile.maxPull)) * PLUCK_WORLD_RATIO;
         const nextNorm = clamp(lane.norm + deltaNorm, 0, 1);
-        injectRef.current(lane.kind, lane.min + nextNorm * (lane.max - lane.min));
+        injectRef.current(lane.kind, lane.min + nextNorm * (lane.max - lane.min), persist);
       }
       audioBegin(
         lane.kind,
@@ -1317,7 +1325,8 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         const startY = valueToY(drag.startNorm * 100);
         const nextNorm = clamp(yToValue(startY + dy) / 100, 0, 1);
         const raw = drag.laneMin + nextNorm * (drag.laneMax - drag.laneMin);
-        injectRef.current(drag.laneKind, raw);
+        // 拖动过程中不落盘，只在松手时 persist 一次。
+        injectRef.current(drag.laneKind, raw, false);
       } else if (drag.kind === 'membrane') {
         const half = LOGICAL_W / 2;
         const nextSpan = drag.side < 0 ? 1 - point.x / half : point.x / half - 1;
@@ -1342,10 +1351,21 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
       setPullingUi(false);
       const elapsed = performance.now() - current.startedAt;
       const quickTap = !current.moved && elapsed < TAP_MS;
-      if (!quickTap) return;
-      if (current.kind === 'value' || current.kind === 'pluck') {
-        const key = keyAtPoint(keys, current.startX, current.startY);
-        pluckFocus(current.startX, current.startY, key ? key.code : '', key ? key.label : '');
+      if (quickTap) {
+        if (current.kind === 'value' || current.kind === 'pluck') {
+          const key = keyAtPoint(keys, current.startX, current.startY);
+          pluckFocus(current.startX, current.startY, key ? key.code : '', key ? key.label : '');
+        }
+        return;
+      }
+      // 拖动结束：按松手时的最终位置再注入一次，并标记为用户手势（要落盘）。
+      if (current.kind === 'value') {
+        const point = pointToLogical(event.clientX, event.clientY);
+        const dy = point.y - current.startY;
+        const startY = valueToY(current.startNorm * 100);
+        const nextNorm = clamp(yToValue(startY + dy) / 100, 0, 1);
+        const raw = current.laneMin + nextNorm * (current.laneMax - current.laneMin);
+        injectRef.current(current.laneKind, raw, true);
       }
     }
 
@@ -1625,7 +1645,7 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
           chartTarget = 0;
           chartAlpha = 0;
         }
-        pluckFocus(clamp(x, 0, LOGICAL_W), clamp(y, 0, LOGICAL_H), '', undefined, false);
+        pluckFocus(clamp(x, 0, LOGICAL_W), clamp(y, 0, LOGICAL_H), '', undefined, false, false);
       },
       pressKey: (code: string) => {
         if (code === 'Tab') {
@@ -1640,13 +1660,13 @@ export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
         if (modeNow === 'overview' || dualNow) return;
         const key = keyByCode(keys, code);
         if (!key) return;
-        pluckFocus(key.cx, key.cy, code, key.label);
+        pluckFocus(key.cx, key.cy, code, key.label, true, false);
       },
       reset: () => resetField(),
       setValue: (kind: StringKind, value: number) => {
         const lane = lanesNow.find((item) => item.kind === kind);
         if (!lane) return;
-        injectRef.current(lane.kind, clamp(value, lane.min, lane.max));
+        injectRef.current(lane.kind, clamp(value, lane.min, lane.max), false);
       },
       setSpan: (value: number) => setSpanValue(value),
       setMicro: (value: number) => setMicroValue(value),

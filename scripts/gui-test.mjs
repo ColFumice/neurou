@@ -12,13 +12,41 @@
  */
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 mkdirSync('artifacts', { recursive: true });
 
 const URL = 'http://127.0.0.1:5188/';
+const WORLD_PATH = 'examples/tuner.nro';
+const gitRestoreWorld = () => {
+  try {
+    execFileSync('git', ['checkout', '--', WORLD_PATH], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+// 自愈：如果上次验收把 tuner.nro 写脏了，先用 git 恢复干净基线，保证验收可重复。
+gitRestoreWorld();
+const worldBackup = readFileSync(WORLD_PATH, 'utf8');
+const restoreWorld = () => {
+  if (gitRestoreWorld()) return;
+  try {
+    writeFileSync(WORLD_PATH, worldBackup, 'utf8');
+  } catch {
+    /* ignore */
+  }
+};
+process.on('exit', restoreWorld);
+
 const results = [];
 const consoleErrors = [];
+
+const parseTrustBaseline = (text) => {
+  const match = /叙事弦 信任\n(?:[^\n]*\n)*?  基线 ([\d.]+)/.exec(text);
+  return match ? Number(match[1]) : NaN;
+};
 
 function check(name, ok, detail = '') {
   results.push({ name, ok: Boolean(ok), detail: String(detail) });
@@ -67,7 +95,9 @@ await page.waitForSelector('[data-testid="string-field"]');
 await page.waitForTimeout(900);
 
 const field = page.locator('[data-testid="string-field"]');
+const app = page.locator('[data-testid="ink-app"]');
 const attr = async (name) => field.getAttribute(name);
+const appAttr = async (name) => app.getAttribute(name);
 const state = () => page.evaluate(() => window.__neurouString.state());
 const curves = () => page.evaluate(() => window.__neurouString.curves());
 const lastTouch = () => page.evaluate(() => window.__neurouString.lastTouch());
@@ -324,11 +354,66 @@ await page.keyboard.press('Escape');
 await page.waitForTimeout(260);
 check('再按 ESC 回到八弦', (await attr('data-mode')) === 'strings');
 
-// ============ 6. 声音 / 性能 / 错误 ============
+// ============ 7. 写回 .nro（GUI → 运行时 → IR → 文本） ============
+await page.waitForTimeout(1300); // 结清前面手势的 debounce 写回
+const preFile = readFileSync(WORLD_PATH, 'utf8');
+const preBaseline = parseTrustBaseline(preFile);
+const savesBefore = Number((await appAttr('data-saves')) ?? 0);
+const trustBefore = (await valuesOf())[0];
+const dragBaseY = valueToY(trustBefore, 0);
+await page.mouse.move(720, Math.round(dragBaseY));
+await page.mouse.down();
+await page.mouse.move(720, Math.round(dragBaseY) + 64, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(1700);
+const savesAfter = Number((await appAttr('data-saves')) ?? 0);
+check('用户松手后触发写回（data-saves 增加）', savesAfter > savesBefore, `${savesBefore} → ${savesAfter}`);
+check('写回状态 = saved', (await appAttr('data-save-state')) === 'saved', String(await appAttr('data-save-state')));
+const fileAfter = readFileSync(WORLD_PATH, 'utf8');
+check('文件被序列化器重写（含规范头）', fileAfter.includes('由 neurou 序列化器生成'));
+const savedBaseline = parseTrustBaseline(fileAfter);
+check(
+  '文件里的「信任」基线被更新',
+  Number.isFinite(savedBaseline) && Math.abs(savedBaseline - preBaseline) > 1,
+  `写回前 ${preBaseline} → 写回后 ${savedBaseline}`,
+);
+await page.screenshot({ path: 'artifacts/96-string-saved.png' });
+
+// 刷新页面：应从刚写下的基线开局（持久化生效）
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+const reloaded = await valuesOf();
+check(
+  '刷新后从写回的基线开始（持久化生效）',
+  Math.abs(reloaded[0] - savedBaseline) < 0.01,
+  `文件基线=${savedBaseline} 刷新后=${reloaded[0].toFixed(3)}`,
+);
+
+// 恢复原始世界，再刷新，确认验收不会污染仓库
+restoreWorld();
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+const restored = await valuesOf();
+check('恢复原文件后刷新回到原初值', restored.every((v, i) => Math.abs(v - VALUES[i]) < 1e-6), JSON.stringify(restored));
+
+// ============ 8. 声音 / 性能 / 错误 ============
+// 写回验收期间刷新过页面，AudioContext 需要一次手势才创建。
+await page.mouse.click(720, 300);
+await page
+  .waitForFunction(
+    () => {
+      const el = document.querySelector('[data-testid="string-field"]');
+      return el !== null && el.getAttribute('data-audio') !== 'off';
+    },
+    { timeout: 3000 },
+  )
+  .catch(() => {
+    /* 超时后仍做一次断言，让失败信息可见 */
+  });
 const audioState = await attr('data-audio');
 check('音频引擎可用', audioState === 'running' || audioState === 'suspended', String(audioState));
-await page.mouse.click(720, 300);
-await page.waitForTimeout(120);
 const finalRms = await rms();
 check('拨弦后有真实信号（rms>0.001）', finalRms > 0.001, finalRms.toFixed(6));
 const fps = await page.evaluate(
@@ -351,6 +436,8 @@ const worldName = String(await attr('data-world'));
 check('没有页面级报错', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 await browser.close();
+// 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
+restoreWorld();
 
 const summary = {
   when: new Date().toISOString(),
@@ -361,6 +448,14 @@ const summary = {
   pluck: { before: beforePluck[0], after: afterPluck[0], amplitude: pluckState.amplitude },
   threshold: { resonant: true },
   crossings,
+  save: {
+    beforeSaves: savesBefore,
+    afterSaves: savesAfter,
+    preBaseline,
+    savedBaseline,
+    reloadedTrust: reloaded[0],
+    restored,
+  },
   audio: { state: audioState, rms: finalRms },
   fps,
   heapMB: heap,
