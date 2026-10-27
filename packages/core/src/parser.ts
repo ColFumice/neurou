@@ -14,6 +14,7 @@ import type {
   FormDecl,
   LoopDecl,
   LoopEdgeAst,
+  MatrixDecl,
   PhaseAst,
   Program,
   ResponseCurve,
@@ -251,6 +252,7 @@ class Parser {
     if (kw === '世界') return this.parseWorld();
     if (kw === '实体') return this.parseEntity();
     if (kw === '谱') return this.parseSpectrum();
+    if (kw === '关系谱') return this.parseMatrix();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -266,7 +268,7 @@ class Parser {
     this.fail(
       `不认识「${kw}」这个声明。`,
       t.span,
-      hint ? `你是不是想写「${hint}」？` : '可用的声明有：世界、实体、七类弦、谱、耦合、回路、力迫、和弦、公理、信号、动作、曲式、结局。',
+      hint ? `你是不是想写「${hint}」？` : '可用的声明有：世界、实体、七类弦、谱、关系谱、耦合、回路、力迫、和弦、公理、信号、动作、曲式、结局。',
     );
     this.skipToLineEnd();
     return undefined;
@@ -596,6 +598,87 @@ class Parser {
           }
           default:
             this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环、模式、演奏。');
+            this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    decl.span = { start: start.span.start, end: this.contentEnd() };
+    return decl;
+  }
+
+  // ---------- 关系谱 ----------
+
+  /**
+   * 关系谱 名字
+   *   行 甲 乙
+   *   列 甲 乙
+   *   段 0 0.3
+   *   段 0.3 0
+   *
+   * 「行/列」各是一行标签，「段」按行重复。标签是否重复、条数是否对得上、
+   * 每行数字个数是否等于列数，都留给编译器——这样诊断能指向整张矩阵，
+   * 并且错误时 IR 仍保留作者写的原值供预览。
+   */
+  private parseMatrix(): MatrixDecl {
+    const start = this.advance(); // 关键字
+    const name = this.readName('关系谱名');
+    const decl: MatrixDecl = { k: 'matrix', name, rows: [], cols: [], values: [], span: this.spanFrom(start) };
+    this.finishLine();
+
+    let sawRows = false;
+    let sawCols = false;
+    if (this.enterBlock(`关系谱「${name}」`)) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const fieldStart = this.peek();
+        const key = this.readName('字段名');
+        switch (key) {
+          case '行': {
+            if (sawRows) {
+              this.fail(`关系谱「${name}」的「行」只能声明一次。`, fieldStart.span, '把所有行标签写在同一行的「行」里。');
+              this.skipToLineEnd();
+              break;
+            }
+            sawRows = true;
+            while (!this.atLineEnd()) decl.rows.push(this.readName('行标签'));
+            this.finishLine();
+            break;
+          }
+          case '列': {
+            if (sawCols) {
+              this.fail(`关系谱「${name}」的「列」只能声明一次。`, fieldStart.span, '把所有列标签写在同一行的「列」里。');
+              this.skipToLineEnd();
+              break;
+            }
+            sawCols = true;
+            while (!this.atLineEnd()) decl.cols.push(this.readName('列标签'));
+            this.finishLine();
+            break;
+          }
+          case '段': {
+            const row: number[] = [];
+            let bad = false;
+            while (!this.atLineEnd()) {
+              const t = this.peek();
+              if (t.kind === 'number' || (t.kind === 'op' && (t.text === '-' || t.text === '+'))) {
+                row.push(this.readNumber('矩阵值'));
+              } else {
+                this.fail(`「段」后面只能写数字，但读到了「${t.text}」。`, t.span, '矩阵值用空格分隔，例如「段 0 0.3 0.1」。');
+                bad = true;
+                break;
+              }
+            }
+            if (bad) this.skipToLineEnd();
+            else this.finishLine();
+            decl.values.push(row);
+            break;
+          }
+          default:
+            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段。');
             this.skipToLineEnd();
         }
       }

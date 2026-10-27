@@ -205,6 +205,20 @@ export interface SpectrumDecl extends DeclBase {
   articulation: '拨弦' | '持续';
 }
 
+/**
+ * 关系谱：一张静态的「行 × 列」数值矩阵（v2.1c）。
+ *
+ * 行列标签是创作者自己定的名字（不必是弦名），矩阵值在编译期就是常量；
+ * 本版本只支持用 `查关系谱` 做编译期查表，没有运行时调制。
+ */
+export interface MatrixDecl extends DeclBase {
+  k: 'matrix';
+  name: string;
+  rows: string[];
+  cols: string[];
+  values: number[][];
+}
+
 export type Decl =
   | WorldDecl
   | EntityDecl
@@ -218,7 +232,8 @@ export type Decl =
   | ActionDecl
   | FormDecl
   | EndingDecl
-  | SpectrumDecl;
+  | SpectrumDecl
+  | MatrixDecl;
 
 export interface Program {
   decls: Decl[];
@@ -247,6 +262,7 @@ export const DECL_KEYWORDS = [
   '曲式',
   '结局',
   '谱',
+  '关系谱',
 ] as const;
 
 export function isStringKeyword(word: string): word is keyof typeof STRING_KEYWORDS {

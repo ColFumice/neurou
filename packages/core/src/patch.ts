@@ -89,6 +89,14 @@ function structuralSignature(ir: WorldIR): string {
       articulation: s.articulation,
       bandCount: s.bands.length,
     })),
+    // 关系谱没有行级编辑：任何矩阵变化都必须回退整图序列化。
+    matrices: ir.matrices.map((m) => ({
+      id: m.id,
+      name: m.name,
+      rows: m.rows,
+      cols: m.cols,
+      values: m.values,
+    })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
     axioms: ir.axioms,

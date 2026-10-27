@@ -173,6 +173,21 @@ export interface IRSpectrum {
   span?: Span;
 }
 
+/**
+ * 关系谱：一张静态的「行 × 列」数值矩阵（v2.1c）。
+ *
+ * 值是编译期数据，不进入运行时状态；`查关系谱` 会在编译期把查表结果
+ * 下降成常量。行列标签只是作者可读的坐标名，不要求是弦。
+ */
+export interface IRMatrix {
+  id: string;
+  name: string;
+  rows: string[];
+  cols: string[];
+  values: number[][];
+  span?: Span;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -180,6 +195,7 @@ export interface WorldIR {
   entities: IREntity[];
   strings: IRString[];
   spectra: IRSpectrum[];
+  matrices: IRMatrix[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];
@@ -191,6 +207,7 @@ export interface WorldIR {
   stats: {
     strings: number;
     spectra: number;
+    matrices: number;
     couplings: number;
     loops: number;
     rules: number;

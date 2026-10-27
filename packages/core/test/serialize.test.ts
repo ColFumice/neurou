@@ -147,6 +147,7 @@ describe('IR → .nro 序列化', () => {
       entities: [],
       strings: [],
       spectra: [],
+      matrices: [],
       couplings: [],
       loops: [],
       rules: [],
@@ -154,7 +155,7 @@ describe('IR → .nro 序列化', () => {
       signals: [],
       phases: [],
       endings: [],
-      stats: { strings: 0, spectra: 0, couplings: 0, loops: 0, rules: 0, signals: 0, endings: 0 },
+      stats: { strings: 0, spectra: 0, matrices: 0, couplings: 0, loops: 0, rules: 0, signals: 0, endings: 0 },
     };
     const text = serialize(empty);
     expect(text).toContain(`世界 ${base.name}`);

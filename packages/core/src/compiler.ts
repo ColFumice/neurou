@@ -12,6 +12,7 @@ import type {
   ForcingDecl,
   FormDecl,
   LoopDecl,
+  MatrixDecl,
   Program,
   ResponseCurve,
   SignalDecl,
@@ -29,6 +30,7 @@ import type {
   IREntity,
   IREnding,
   IRLoop,
+  IRMatrix,
   IRPhase,
   IRRule,
   IRSignal,
@@ -101,6 +103,8 @@ class Compiler {
   private readonly phases: IRPhase[] = [];
   private readonly spectra: IRSpectrum[] = [];
   private readonly spectrumNames = new Set<string>();
+  private readonly matrices: IRMatrix[] = [];
+  private readonly matrixByName = new Map<string, IRMatrix>();
 
   private readonly readBy = new Map<string, Set<string>>();
   private readonly writtenBy = new Map<string, Set<string>>();
@@ -165,6 +169,9 @@ class Compiler {
         case 'spectrum':
           this.declareSpectrum(d);
           break;
+        case 'matrix':
+          this.declareMatrix(d);
+          break;
         case 'coupling':
           this.couplingDecls.push(d);
           break;
@@ -210,6 +217,7 @@ class Compiler {
 
     // 弦和实体可能声明在谱之后；名字冲突必须等所有顶层名字都收集完再查。
     this.checkSpectrumNameConflicts();
+    this.checkMatrixNameConflicts();
     this.checkTimbreReferences();
   }
 
@@ -318,6 +326,118 @@ class Compiler {
       } else if (this.entities.has(spectrum.name)) {
         this.error('NRO2004', `谱「${spectrum.name}」与同名实体冲突：顶层名字必须唯一。`, span, {
           hint: '给谱或实体改一个名字。',
+        });
+      }
+    }
+  }
+
+  // ---------- 关系谱 ----------
+
+  /**
+   * v2.1c：关系谱是静态矩阵。校验标签数量/唯一性、段的条数与宽度、
+   * 以及所有值都是有限数字；出错时仍把原值放进 IR，供编辑器预览。
+   *
+   * 诊断码：形状/标签错误沿用谱的 NRO2100（NRO2103 已被力迫「先于」环占用），
+   * 重名用 NRO2004，语法/未知字段由 parser 报 NRO1100。
+   */
+  private declareMatrix(d: MatrixDecl): void {
+    if (this.matrixByName.has(d.name)) {
+      this.error('NRO2004', `关系谱「${d.name}」重复声明。`, d.span, { hint: '改个名字，或者删掉其中一个。' });
+      return;
+    }
+
+    if (d.rows.length === 0) {
+      this.error('NRO2100', `关系谱「${d.name}」没有「行」标签。`, d.span, {
+        hint: '至少写一行「行 甲 乙」；行标签是 查关系谱(..., "行名", ...) 的第二个参数。',
+      });
+    } else if (d.rows.length > 64) {
+      this.error('NRO2100', `关系谱「${d.name}」有 ${d.rows.length} 个行标签，超过了上限 64。`, d.span, {
+        hint: '一张关系谱最多 64 行；更大的表请拆成多张。',
+      });
+    }
+    if (d.cols.length === 0) {
+      this.error('NRO2100', `关系谱「${d.name}」没有「列」标签。`, d.span, {
+        hint: '至少写一行「列 甲 乙」；列标签是 查关系谱(..., "列名") 的第三个参数。',
+      });
+    } else if (d.cols.length > 64) {
+      this.error('NRO2100', `关系谱「${d.name}」有 ${d.cols.length} 个列标签，超过了上限 64。`, d.span, {
+        hint: '一张关系谱最多 64 列；更大的表请拆成多张。',
+      });
+    }
+    this.checkMatrixLabels(d.name, d.rows, '行', d.span);
+    this.checkMatrixLabels(d.name, d.cols, '列', d.span);
+
+    if (d.rows.length > 0 && d.values.length !== d.rows.length) {
+      this.error(
+        'NRO2100',
+        `关系谱「${d.name}」需要 ${d.rows.length} 条「段」（每条对应一行），但写了 ${d.values.length} 条。`,
+        d.span,
+        { hint: '「段」的条数必须和「行」标签数一致。' },
+      );
+    }
+    if (d.cols.length > 0) {
+      for (let i = 0; i < d.values.length; i++) {
+        const row = d.values[i]!;
+        if (row.length !== d.cols.length) {
+          this.error(
+            'NRO2100',
+            `关系谱「${d.name}」的第 ${i + 1} 条「段」有 ${row.length} 个数，但「列」有 ${d.cols.length} 个标签。`,
+            d.span,
+            { hint: `每条「段」必须正好写 ${d.cols.length} 个数字，顺序对应「列」。` },
+          );
+        }
+      }
+    }
+    for (let i = 0; i < d.values.length; i++) {
+      const row = d.values[i]!;
+      for (let j = 0; j < row.length; j++) {
+        if (!Number.isFinite(row[j]!)) {
+          this.error('NRO2100', `关系谱「${d.name}」第 ${i + 1} 条「段」的第 ${j + 1} 个数不是有限数字。`, d.span, {
+            hint: '矩阵值必须是有限的十进制数字（可以带负号）。',
+          });
+        }
+      }
+    }
+
+    const matrix: IRMatrix = {
+      id: d.name,
+      name: d.name,
+      rows: [...d.rows],
+      cols: [...d.cols],
+      values: d.values.map((row) => [...row]),
+      span: d.span,
+    };
+    this.matrices.push(matrix);
+    this.matrixByName.set(matrix.name, matrix);
+  }
+
+  private checkMatrixLabels(name: string, labels: string[], which: '行' | '列', span: Span): void {
+    const seen = new Set<string>();
+    for (const label of labels) {
+      if (seen.has(label)) {
+        this.error('NRO2100', `关系谱「${name}」的${which}标签「${label}」重复。`, span, {
+          hint: `${which}标签用于 查关系谱(...) 定位，必须唯一。`,
+        });
+      }
+      seen.add(label);
+    }
+  }
+
+  /** 关系谱与谱/弦/实体共享顶层命名空间：同名会让未来的引用产生歧义。 */
+  private checkMatrixNameConflicts(): void {
+    for (const matrix of this.matrices) {
+      const span = matrix.span ?? zeroSpan();
+      if (this.spectrumNames.has(matrix.name)) {
+        this.error('NRO2004', `关系谱「${matrix.name}」与同名谱冲突：顶层名字必须唯一。`, span, {
+          hint: '给关系谱或谱改一个名字。',
+        });
+      } else if (this.strings.has(matrix.name)) {
+        this.error('NRO2004', `关系谱「${matrix.name}」与同名弦冲突：顶层名字必须唯一。`, span, {
+          hint: '给关系谱或弦改一个名字。',
+        });
+      } else if (this.entities.has(matrix.name)) {
+        this.error('NRO2004', `关系谱「${matrix.name}」与同名实体冲突：顶层名字必须唯一。`, span, {
+          hint: '给关系谱或实体改一个名字。',
         });
       }
     }
@@ -631,8 +751,65 @@ class Compiler {
               type: 'number',
             };
           }
+          case '查关系谱': {
+            // 诊断沿用「查谱」：引用不存在用 NRO2101，参数形态用 NRO2003。
+            if (e.args.length !== 3) {
+              this.error(
+                'NRO2003',
+                `函数「查关系谱」需要三个参数：矩阵名、行名、列名（都是字符串），现在给了 ${e.args.length} 个。`,
+                e.span,
+                { hint: '例如：查关系谱("势力网", "信任", "色温")。' },
+              );
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const nameArg = e.args[0]!;
+            const rowArg = e.args[1]!;
+            const colArg = e.args[2]!;
+            if (nameArg.k !== 'str' || rowArg.k !== 'str' || colArg.k !== 'str') {
+              const bad = nameArg.k !== 'str' ? nameArg : rowArg.k !== 'str' ? rowArg : colArg;
+              this.error('NRO2003', '「查关系谱」的参数必须是直接写出的字符串：矩阵名、行名、列名。', bad.span, {
+                hint: '矩阵和标签都在编译期确定，例如 查关系谱("势力网", "信任", "色温")。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (!this.matrixByName.has(nameArg.v)) {
+              const names = [...this.matrixByName.keys()];
+              const hint = suggestName(nameArg.v, names);
+              this.error('NRO2101', `「查关系谱」引用了不存在的关系谱「${nameArg.v}」。`, nameArg.span, {
+                hint: hint
+                  ? `你是不是想写「${hint}」？`
+                  : names.length > 0
+                    ? `已声明的关系谱：${names.join('、')}。`
+                    : '先声明「关系谱 名字」，再在表达式里查它。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const matrix = this.matrixByName.get(nameArg.v)!;
+            const rowIndex = matrix.rows.indexOf(rowArg.v);
+            if (rowIndex < 0) {
+              const hint = suggestName(rowArg.v, matrix.rows);
+              this.error('NRO2101', `关系谱「${matrix.name}」没有行标签「${rowArg.v}」。`, rowArg.span, {
+                hint: hint ? `你是不是想写「${hint}」？` : `可用的行：${matrix.rows.join('、')}。`,
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const colIndex = matrix.cols.indexOf(colArg.v);
+            if (colIndex < 0) {
+              const hint = suggestName(colArg.v, matrix.cols);
+              this.error('NRO2101', `关系谱「${matrix.name}」没有列标签「${colArg.v}」。`, colArg.span, {
+                hint: hint ? `你是不是想写「${hint}」？` : `可用的列：${matrix.cols.join('、')}。`,
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            // 矩阵是静态作者数据：查表直接折叠成常量，不产生运行时读取。
+            const cell = matrix.values[rowIndex]?.[colIndex];
+            return {
+              expr: { k: 'const', v: typeof cell === 'number' && Number.isFinite(cell) ? cell : 0 },
+              type: 'number',
+            };
+          }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '查谱']);
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '查谱', '查关系谱']);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
@@ -1210,6 +1387,7 @@ class Compiler {
       entities: [...this.entities.values()],
       strings: [...this.strings.values()],
       spectra: this.spectra,
+      matrices: this.matrices,
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,
@@ -1220,6 +1398,7 @@ class Compiler {
       stats: {
         strings: this.strings.size,
         spectra: this.spectra.length,
+        matrices: this.matrices.length,
         couplings: this.couplings.length,
         loops: this.loops.length,
         rules: this.rules.length,

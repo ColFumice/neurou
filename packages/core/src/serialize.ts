@@ -7,6 +7,7 @@ import type {
   IREntity,
   IREnding,
   IRLoop,
+  IRMatrix,
   IRPhase,
   IRRule,
   IRSignal,
@@ -26,7 +27,7 @@ import type {
  *   3. 往返验证：compile(serialize(ir)) 必须得到同一张图。
  *
  * 规范性（canonical）：
- *   - 声明顺序固定：世界 → 实体（含实体弦）→ 全局弦 → 谱 → 耦合 → 回路 → 规则 →
+ *   - 声明顺序固定：世界 → 实体（含实体弦）→ 全局弦 → 谱 → 关系谱 → 耦合 → 回路 → 规则 →
  *     公理 → 信号 → 曲式 → 结局；
  *   - 表达式尽量少括号，数字统一格式，空行分节；
  *   - 有些源信息 IR 不保存，无法还原（见文件末尾「有损之处」）。
@@ -216,6 +217,18 @@ function spectrumBlock(w: Writer, spectrum: IRSpectrum): void {
   w.blank();
 }
 
+// ---------- 关系谱 ----------
+
+function matrixBlock(w: Writer, matrix: IRMatrix): void {
+  w.line(0, `关系谱 ${matrix.name}`);
+  w.line(1, matrix.rows.length > 0 ? `行 ${matrix.rows.join(' ')}` : '行');
+  w.line(1, matrix.cols.length > 0 ? `列 ${matrix.cols.join(' ')}` : '列');
+  for (const row of matrix.values) {
+    w.line(1, row.length > 0 ? `段 ${row.map((b) => numberText(b)).join(' ')}` : '段');
+  }
+  w.blank();
+}
+
 // ---------- 耦合 ----------
 
 function couplingLine(c: IRCoupling): string {
@@ -368,6 +381,7 @@ export function serialize(ir: WorldIR): string {
   if (globals.length > 0) w.blank();
 
   for (const spectrum of ir.spectra) spectrumBlock(w, spectrum);
+  for (const matrix of ir.matrices) matrixBlock(w, matrix);
 
   const byId = new Map(ir.couplings.map((c) => [c.id, c]));
   const loopCouplingIds = new Set(ir.couplings.filter((c) => c.loop).map((c) => c.id));
