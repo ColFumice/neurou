@@ -15,6 +15,7 @@ import type {
   Program,
   ResponseCurve,
   SignalDecl,
+  SpectrumDecl,
   StringDecl,
   StringKind,
   WorldDecl,
@@ -31,6 +32,7 @@ import type {
   IRPhase,
   IRRule,
   IRSignal,
+  IRSpectrum,
   IRString,
   LExpr,
   Value,
@@ -97,6 +99,8 @@ class Compiler {
   private readonly endings: IREnding[] = [];
   private readonly axioms: IRAxiom[] = [];
   private readonly phases: IRPhase[] = [];
+  private readonly spectra: IRSpectrum[] = [];
+  private readonly spectrumNames = new Set<string>();
 
   private readonly readBy = new Map<string, Set<string>>();
   private readonly writtenBy = new Map<string, Set<string>>();
@@ -158,6 +162,9 @@ class Compiler {
         case 'string':
           this.declareString(d, undefined);
           break;
+        case 'spectrum':
+          this.declareSpectrum(d);
+          break;
         case 'coupling':
           this.couplingDecls.push(d);
           break;
@@ -199,6 +206,89 @@ class Compiler {
     for (const d of decls) {
       if (d.k !== 'entity') continue;
       for (const s of d.strings) this.declareString(s, d.name);
+    }
+
+    // 弦和实体可能声明在谱之后；名字冲突必须等所有顶层名字都收集完再查。
+    this.checkSpectrumNameConflicts();
+  }
+
+  private declareSpectrum(d: SpectrumDecl): void {
+    if (this.spectrumNames.has(d.name)) {
+      this.error('NRO2004', `谱「${d.name}」重复声明。`, d.span, { hint: '改个名字，或者删掉其中一个。' });
+      return;
+    }
+    this.spectrumNames.add(d.name);
+
+    let min = d.min;
+    let max = d.max;
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      this.error('NRO2100', `谱「${d.name}」的范围必须是有限数字（当前 ${min}..${max}）。`, d.span, {
+        hint: '范围写成「范围 0..1」这样的两个有限数字。',
+      });
+      min = Number.isFinite(min) ? min : 0;
+      max = Number.isFinite(max) ? max : 1;
+    } else if (min >= max) {
+      this.error('NRO2100', `谱「${d.name}」的范围 ${min}..${max} 无效：上界必须大于下界。`, d.span, {
+        hint: '例如「范围 0..1」；下界和上界不能相等，也不能倒过来。',
+      });
+    }
+
+    let interpolation: IRSpectrum['interpolation'] = d.interpolation;
+    if (interpolation !== '线性' && interpolation !== '平滑') {
+      this.error('NRO2100', `谱「${d.name}」的插值方式「${String(interpolation)}」无效。`, d.span, {
+        hint: '可用：线性、平滑。',
+      });
+      interpolation = '线性';
+    }
+
+    if (d.bands.length === 0) {
+      this.error('NRO2100', `谱「${d.name}」的「段」至少需要一个音段值。`, d.span, {
+        hint: '空谱无法插值——写一行「段 0.1 0.4 0.8 0.5」。',
+      });
+    } else if (d.bands.length > 256) {
+      this.error('NRO2100', `谱「${d.name}」有 ${d.bands.length} 个音段值，超过了上限 256。`, d.span, {
+        hint: '一条谱最多 256 个音段；更长的数据请用算法或文件生成。',
+      });
+    }
+
+    for (let i = 0; i < d.bands.length; i++) {
+      const value = d.bands[i]!;
+      if (!Number.isFinite(value)) {
+        this.error('NRO2100', `谱「${d.name}」的第 ${i + 1} 个音段值不是有限数字。`, d.span);
+        continue;
+      }
+      if (Number.isFinite(min) && Number.isFinite(max) && min < max && (value < min || value > max)) {
+        this.error('NRO2100', `谱「${d.name}」的第 ${i + 1} 个音段值 ${value} 落在范围 ${min}..${max} 之外。`, d.span, {
+          hint: '音段值必须落在范围内，不会自动截断——改值或放宽「范围」。',
+        });
+      }
+    }
+
+    this.spectra.push({
+      id: d.name,
+      name: d.name,
+      bands: [...d.bands],
+      min,
+      max,
+      interpolation,
+      loop: d.loop,
+      span: d.span,
+    });
+  }
+
+  /** 谱与弦/实体共享顶层命名空间：同名会让未来的引用产生歧义。 */
+  private checkSpectrumNameConflicts(): void {
+    for (const spectrum of this.spectra) {
+      const span = spectrum.span ?? zeroSpan();
+      if (this.strings.has(spectrum.name)) {
+        this.error('NRO2004', `谱「${spectrum.name}」与同名弦冲突：顶层名字必须唯一。`, span, {
+          hint: '给谱或弦改一个名字。',
+        });
+      } else if (this.entities.has(spectrum.name)) {
+        this.error('NRO2004', `谱「${spectrum.name}」与同名实体冲突：顶层名字必须唯一。`, span, {
+          hint: '给谱或实体改一个名字。',
+        });
+      }
     }
   }
 
@@ -1057,6 +1147,7 @@ class Compiler {
       meta,
       entities: [...this.entities.values()],
       strings: [...this.strings.values()],
+      spectra: this.spectra,
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,
@@ -1066,6 +1157,7 @@ class Compiler {
       endings: this.endings,
       stats: {
         strings: this.strings.size,
+        spectra: this.spectra.length,
         couplings: this.couplings.length,
         loops: this.loops.length,
         rules: this.rules.length,

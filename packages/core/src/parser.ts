@@ -18,6 +18,7 @@ import type {
   Program,
   ResponseCurve,
   SignalDecl,
+  SpectrumDecl,
   StringDecl,
   StringKind,
   WorldDecl,
@@ -30,6 +31,8 @@ import { type SourceFile, type Span } from './source.js';
 class ParseError extends Error {}
 
 const RESPONSE_CURVES: ResponseCurve[] = ['线性', '缓入', '缓出', '阶跃'];
+
+const SPECTRUM_INTERPOLATIONS: readonly string[] = ['线性', '平滑'];
 
 /**
  * 递归下降解析器，按缩进分块。
@@ -231,6 +234,7 @@ class Parser {
 
     if (kw === '世界') return this.parseWorld();
     if (kw === '实体') return this.parseEntity();
+    if (kw === '谱') return this.parseSpectrum();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -246,7 +250,7 @@ class Parser {
     this.fail(
       `不认识「${kw}」这个声明。`,
       t.span,
-      hint ? `你是不是想写「${hint}」？` : '可用的声明有：世界、实体、七类弦、耦合、回路、力迫、和弦、公理、信号、动作、曲式、结局。',
+      hint ? `你是不是想写「${hint}」？` : '可用的声明有：世界、实体、七类弦、谱、耦合、回路、力迫、和弦、公理、信号、动作、曲式、结局。',
     );
     this.skipToLineEnd();
     return undefined;
@@ -440,6 +444,110 @@ class Parser {
       this.exitBlock();
     }
     return { k: 'entity', name, typeName, strings, fields, span: this.spanFrom(start) };
+  }
+
+  // ---------- 谱 ----------
+
+  /**
+   * 谱 名字
+   *   段 0.1 0.4 0.8 0.5
+   *   范围 0..1
+   *   插值 平滑
+   *   循环 是
+   *
+   * 「段」的条数、取值范围等语义留给编译器；这里只负责把写法解析干净，
+   * 让语法错误指到具体的 token。
+   */
+  private parseSpectrum(): SpectrumDecl {
+    const start = this.advance(); // 关键字
+    const name = this.readName('谱名');
+    const decl: SpectrumDecl = {
+      k: 'spectrum',
+      name,
+      bands: [],
+      min: 0,
+      max: 1,
+      interpolation: '线性',
+      loop: false,
+      span: this.spanFrom(start),
+    };
+    this.finishLine();
+
+    let sawBands = false;
+    if (this.enterBlock(`谱「${name}」`)) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const fieldStart = this.peek();
+        const key = this.readName('字段名');
+        switch (key) {
+          case '段': {
+            if (sawBands) {
+              this.fail(`谱「${name}」的「段」只能声明一次。`, fieldStart.span, '把所有音段值写在同一行的「段」里。');
+              this.skipToLineEnd();
+              break;
+            }
+            sawBands = true;
+            let bad = false;
+            while (!this.atLineEnd()) {
+              const t = this.peek();
+              if (t.kind === 'number' || (t.kind === 'op' && (t.text === '-' || t.text === '+'))) {
+                decl.bands.push(this.readNumber('音段值'));
+              } else {
+                this.fail(`「段」后面只能写数字，但读到了「${t.text}」。`, t.span, '音段值用空格分隔，例如「段 0.1 0.4 0.8 0.5」。');
+                bad = true;
+                break;
+              }
+            }
+            if (bad) this.skipToLineEnd();
+            else this.finishLine();
+            break;
+          }
+          case '范围': {
+            decl.min = this.readNumber('范围下界');
+            this.expect('punct', '..', '「..」（范围写成 0..1）');
+            decl.max = this.readNumber('范围上界');
+            this.finishLine();
+            break;
+          }
+          case '插值': {
+            const valueStart = this.peek();
+            const value = this.readName('插值方式');
+            if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
+              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑。');
+            } else {
+              decl.interpolation = value as SpectrumDecl['interpolation'];
+            }
+            this.finishLine();
+            break;
+          }
+          case '循环': {
+            if (this.atIdent('是')) {
+              this.advance();
+              decl.loop = true;
+            } else if (this.atIdent('否')) {
+              this.advance();
+              decl.loop = false;
+            } else {
+              const t = this.peek();
+              this.fail(`「循环」只能写「是」或「否」，但读到了「${t.text}」。`, t.span);
+              this.skipToLineEnd();
+              break;
+            }
+            this.finishLine();
+            break;
+          }
+          default:
+            this.fail(`谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：段、范围、插值、循环。');
+            this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    decl.span = this.spanFrom(start);
+    return decl;
   }
 
   // ---------- 弦 ----------

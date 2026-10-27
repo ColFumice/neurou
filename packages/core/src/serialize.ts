@@ -10,6 +10,7 @@ import type {
   IRPhase,
   IRRule,
   IRSignal,
+  IRSpectrum,
   IRString,
   LExpr,
   WorldIR,
@@ -25,7 +26,7 @@ import type {
  *   3. 往返验证：compile(serialize(ir)) 必须得到同一张图。
  *
  * 规范性（canonical）：
- *   - 声明顺序固定：世界 → 实体（含实体弦）→ 全局弦 → 耦合 → 回路 → 规则 →
+ *   - 声明顺序固定：世界 → 实体（含实体弦）→ 全局弦 → 谱 → 耦合 → 回路 → 规则 →
  *     公理 → 信号 → 曲式 → 结局；
  *   - 表达式尽量少括号，数字统一格式，空行分节；
  *   - 有些源信息 IR 不保存，无法还原（见文件末尾「有损之处」）。
@@ -196,6 +197,21 @@ function entityBlock(w: Writer, entity: IREntity, strings: IRString[]): void {
   w.blank();
 }
 
+// ---------- 谱 ----------
+
+function spectrumBlock(w: Writer, spectrum: IRSpectrum): void {
+  w.line(0, `谱 ${spectrum.name}`);
+  // 默认值不写回：0..1 / 线性 / 不循环。重新编译时由语法默认值补齐。
+  const bands = spectrum.bands.map((b) => numberText(b)).join(' ');
+  w.line(1, bands ? `段 ${bands}` : '段');
+  if (spectrum.min !== 0 || spectrum.max !== 1) {
+    w.line(1, `范围 ${numberText(spectrum.min)}..${numberText(spectrum.max)}`);
+  }
+  if (spectrum.interpolation !== '线性') w.line(1, `插值 ${spectrum.interpolation}`);
+  if (spectrum.loop) w.line(1, '循环 是');
+  w.blank();
+}
+
 // ---------- 耦合 ----------
 
 function couplingLine(c: IRCoupling): string {
@@ -346,6 +362,8 @@ export function serialize(ir: WorldIR): string {
   for (const leftovers of stringsByOwner.values()) globals.push(...leftovers);
   for (const s of globals) stringBlock(w, s, 0);
   if (globals.length > 0) w.blank();
+
+  for (const spectrum of ir.spectra) spectrumBlock(w, spectrum);
 
   const byId = new Map(ir.couplings.map((c) => [c.id, c]));
   const loopCouplingIds = new Set(ir.couplings.filter((c) => c.loop).map((c) => c.id));

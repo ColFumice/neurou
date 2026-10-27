@@ -152,12 +152,28 @@ export interface IRPhase {
   duration: number;
 }
 
+/**
+ * 谱：一组采样音段 + 插值方式。
+ * 目前只有编译期数据模型；运行时/音频读取留给后续阶段。
+ */
+export interface IRSpectrum {
+  id: string;
+  name: string;
+  bands: number[];
+  min: number;
+  max: number;
+  interpolation: '线性' | '平滑';
+  loop: boolean;
+  span?: Span;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
   meta: Record<string, string | number>;
   entities: IREntity[];
   strings: IRString[];
+  spectra: IRSpectrum[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];
@@ -168,6 +184,7 @@ export interface WorldIR {
   /** 编译期统计，供引擎盖与认证报告使用 */
   stats: {
     strings: number;
+    spectra: number;
     couplings: number;
     loops: number;
     rules: number;

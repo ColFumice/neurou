@@ -183,6 +183,20 @@ export interface EndingDecl extends DeclBase {
   guard: Expr;
 }
 
+/**
+ * 谱：一组采样音段，描述某个维度随参数变化的曲线。
+ * 目前只是编译期的数据模型；运行时/音频的读取留给后续阶段。
+ */
+export interface SpectrumDecl extends DeclBase {
+  k: 'spectrum';
+  name: string;
+  bands: number[];
+  min: number;
+  max: number;
+  interpolation: '线性' | '平滑';
+  loop: boolean;
+}
+
 export type Decl =
   | WorldDecl
   | EntityDecl
@@ -195,7 +209,8 @@ export type Decl =
   | SignalDecl
   | ActionDecl
   | FormDecl
-  | EndingDecl;
+  | EndingDecl
+  | SpectrumDecl;
 
 export interface Program {
   decls: Decl[];
@@ -223,6 +238,7 @@ export const DECL_KEYWORDS = [
   '动作',
   '曲式',
   '结局',
+  '谱',
 ] as const;
 
 export function isStringKeyword(word: string): word is keyof typeof STRING_KEYWORDS {
