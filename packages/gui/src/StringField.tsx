@@ -1,30 +1,23 @@
 /**
- * 单弦调律台 v0.7「八弦叠影」：一张白纸，八根弦同时悬在纸上。
+ * 单弦调律台 v0.8「世界驱动的八弦叠影」：一张白纸，八根弦同时悬在纸上，
+ * 每根弦 = 一个真实世界里的数值弦（基线纵坐标 = 归一化值）。
  *
- * - 8 类弦同时绘制：每根弦有自己的设置值 value（0..100 ↔ 基线 y 790..110），
- *   静止时像八根蛛丝；左侧 x≈64 各有一个极淡衬线类名。
- * - Tab / Shift+Tab 切焦点：焦点弦近黑、粗、带极轻的高频驻波抖动；其余七根半透明淡线。
- * - 在焦点弦曲线 ±16px 内拖动上下 = 改设置值；若按下后几乎没动（<5px/<200ms）则算点触。
- * - 点触 / 键盘 = 拨动焦点弦（局部行波、波峰更粗、运动模糊 + 黑色帧残留、触点淡字）。
- * - 干涉：每帧计算 8 根弦两两曲线交点，画「奇点」；悬停交点浮出「A × B」。
- *   焦点弦的波经过交点时把波动耦合给另一根弦（带 400ms 冷却 + 扩散光晕）。
- * - 共振：焦点弦 value 落在该类的共振点上 → 驻波泛音 + 双层虚影 + 左侧刻度；
- *   此时拨弦 = 和弦（同时激发其余七根 + 补一个高五度音）。
- * - D-膜：焦点弦两端有半透明短膜，可横向拖动改变跨度 span（0.55..1，清波重建 sim）。
- * - 紧致化结点：焦点弦 x=xL+0.62*(xR-xL) 处的小结点，悬停 + 滚轮调 micro（影响阻尼）。
- * - 对偶：焦点弦值在极值（≤2 / ≥98）时一次幅度 >170 的拨动 → 700ms 塌缩成环，
- *   结束把 value 翻到对侧（100-value）、清波、高八度拨一声。
- * - ESC 保留 v0.6 的 8 行签名波总谱（当前类实黑、Tab 可切、点行选中返回）。
- * - 纯黑白（var(--ink)/var(--paper) 与灰度），无面板/数字/其它常驻说明；
- *   canvas 透明，唯一收指针事件的元素是整屏 canvas。
+ * 与 v0.7 的区别：
+ * - 值唯一真源是 props.view.lanes：不再本地维护 values；
+ * - 拖弦写回世界（onInject(raw)），世界逐拍传导后回传新 view；
+ * - 世界逐拍变化（view.tick 且 |Δnorm|>0.001）→ 对应弦注入视觉波；
+ * - 共振改为「接近该弦的悬崖/安全阈值（±0.035 norm）」；
+ * - 对偶翻转把真实值翻到对侧；
+ * - 左侧标签 = 世界里的弦名（lane.name）。
+ *
+ * 视觉/音频全部沿用 v0.7：八弦蛛丝、焦点弦近黑 + 高频微颤、波峰加粗、
+ * 运动模糊 + 黑色帧残留、干涉奇点/悬停标签、跨弦耦合、共振虚影/泛音/和弦、
+ * D-膜 span、紧致化结点 micro、对偶塌缩、ESC 总谱。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { StringKind } from '@neurou/core';
 import {
-  DEFAULT_VALUES,
-  KEY_COUNT,
   KIND_ORDER,
-  KIND_RESONANCE,
   KIND_VISUAL,
   LOGICAL_H,
   LOGICAL_W,
@@ -34,14 +27,13 @@ import {
   keyAtPoint,
   keyByCode,
   layoutKeyboard,
-  nextKind,
-  resonanceOf,
   signature,
   standingOvertone,
   valueToY,
   yToValue,
   type KindVisualProfile,
-  type TouchPoint,
+  type Lane,
+  type WorldView,
 } from './stringMath.js';
 import { getStringAudio, type StringAudioState } from './stringAudio.js';
 import './string-field.css';
@@ -57,16 +49,16 @@ type Rgb = readonly [number, number, number];
 const FOCUS_WIDTH_BASE = 2.2;
 const FOCUS_ALPHA = 0.9;
 const FOCUS_JITTER_PX = 0.6;
-/** 非焦点弦：各自 restWidth 的 0.85（1.3–1.7px，八根粗细不同）、基础 alpha 0.20 再按 index ±0.03。 */
+/** 非焦点弦：各自 restWidth 的 0.85、基础 alpha 0.20 再按 index ±0.03。 */
 const OTHER_WIDTH_SCALE = 0.85;
 const OTHER_ALPHA = 0.2;
 const OTHER_ALPHA_STEP = 0.03;
-/** 共振态。 */
+/** 共振虚影。 */
 const RESONANCE_OVERTONE_PX = 1.4;
 /** 线宽/alpha 的量化档数。 */
 const BAND_COUNT = 9;
 
-/** 触点淡字 / Tab 类名浮现 / 总览淡入淡出。 */
+/** 触点淡字 / Tab 弦名浮现 / 总览淡入淡出。 */
 const GHOST_FADE_MS = 550;
 const HINT_FADE_MS = 1400;
 const OVERVIEW_FADE_MS = 180;
@@ -83,10 +75,12 @@ const SPAN_MIN = 0.55;
 const MICRO_STEP = 0.08;
 const NODE_HOVER_PX = 22;
 const CROSS_HOVER_PX = 16;
-/** 行波上的交点移动极快，命中后让标签滞留一小会儿，否则几乎看不清。 */
 const CROSS_HOVER_LINGER_MS = 350;
-/** 交点最近 250ms 的轨迹：指针靠近「刚经过的交点」也算命中（16px 内）。 */
 const CROSS_TRAIL_MS = 250;
+/** 共振带：距离悬崖/安全阈值的归一化距离。 */
+const RESONANCE_BAND_NORM = 0.035;
+/** 一次拨动推动真实值约 8% 量程。 */
+const PLUCK_WORLD_RATIO = 0.08;
 
 /** 跨弦耦合。 */
 const COUPLE_COOLDOWN_MS = 400;
@@ -96,11 +90,16 @@ const COUPLE_AMP_MAX = 60;
 const COUPLE_U_MIN = 10;
 const RIPPLE_MS = 700;
 
+/** 世界逐拍 → 视觉波。 */
+const TICK_WAVE_RATIO = 1.6;
+const TICK_WAVE_MIN = 6;
+const TICK_WAVE_MAX = 90;
+
 /** 对偶翻转。 */
 const DUAL_MS = 700;
 const DUAL_AMP_MIN = 170;
-const DUAL_LOW = 2;
-const DUAL_HIGH = 98;
+const DUAL_LOW = 0.02;
+const DUAL_HIGH = 0.98;
 
 /** trail（只焦点弦画）。 */
 const TRAIL_DECAY = 0.12;
@@ -118,10 +117,10 @@ const OVERVIEW_WAVE_PX = 26;
 const OVERVIEW_LABEL_X = 96;
 const OVERVIEW_STEPS = 256;
 
-/** 左侧常驻类名。 */
+/** 左侧常驻弦名。 */
 const LABEL_X = 64;
 const LABEL_FONT_PX = 12;
-/** 触点淡字 / Tab 类名。 */
+/** 触点淡字 / Tab 弦名。 */
 const GHOST_FONT_PX = 30;
 const GHOST_ALPHA = 0.35;
 const HINT_FONT_PX = 15;
@@ -148,7 +147,7 @@ interface Ripple {
   born: number;
 }
 
-/** 内部交点：a/b 是 KIND_ORDER 下标。 */
+/** 内部交点：a/b 是 lanes 下标。 */
 interface CrossingHit {
   a: number;
   b: number;
@@ -175,9 +174,17 @@ interface PointerDrag {
   startX: number;
   startY: number;
   startedAt: number;
-  startValue: number;
+  startNorm: number;
+  laneKind: StringKind;
+  laneMin: number;
+  laneMax: number;
   side: -1 | 1;
   moved: boolean;
+}
+
+export interface StringFieldProps {
+  view: WorldView;
+  onInject: (kind: StringKind, value: number) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -191,6 +198,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function rgba(color: Rgb, alpha: number): string {
   return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${clamp(alpha, 0, 1)})`;
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 /** 解析 CSS 颜色变量（#rgb / #rrggbb / rgb() / rgba()）成 RGB 三元组。 */
@@ -239,6 +250,9 @@ declare global {
   interface Window {
     __neurouString?: {
       state: () => {
+        world: string;
+        tick: number;
+        ended: string | null;
         kind: StringKind;
         kindIndex: number;
         mode: ViewMode;
@@ -247,6 +261,8 @@ declare global {
         keyCount: number;
         overviewRows: number;
         values: number[];
+        norms: number[];
+        lanes: Array<{ kind: StringKind; id: string; name: string; value: number; min: number; max: number }>;
         span: number;
         resonant: boolean;
         resonance: number | null;
@@ -256,8 +272,8 @@ declare global {
         amplitude: number;
       };
       u: () => number[];
-      curves: () => Array<{ kind: StringKind; value: number; baseline: number; samples: number[] }>;
-      crossings: () => Array<{ a: StringKind; b: StringKind; x: number; y: number }>;
+      curves: () => Array<{ kind: StringKind; name: string; value: number; baseline: number; samples: number[] }>;
+      crossings: () => Array<{ a: string; b: string; x: number; y: number }>;
       lastTouch: () => {
         x: number;
         y: number;
@@ -280,17 +296,25 @@ declare global {
  * 组件
  * ------------------------------------------------------------------ */
 
-export function StringField(): JSX.Element {
+export function StringField({ view, onInject }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewRef = useRef<WorldView>(view);
+  const injectRef = useRef(onInject);
+  viewRef.current = view;
+  injectRef.current = onInject;
+
+  const laneCount = view.lanes.length;
+  const [focusIndex, setFocusIndex] = useState(0);
+  const safeFocus = laneCount > 0 ? Math.min(focusIndex, laneCount - 1) : 0;
+  const focusLane = view.lanes[safeFocus] ?? null;
+  const focusKind = focusLane ? focusLane.kind : '叙事';
 
   const [mode, setMode] = useState<ViewMode>('strings');
-  const [focusIndex, setFocusIndex] = useState(0);
   const [plucks, setPlucks] = useState(0);
   const [pulling, setPulling] = useState(false);
   const [resting, setResting] = useState(true);
   const [audioState, setAudioState] = useState<StringAudioState>('off');
-  const [values, setValues] = useState<number[]>(() => KIND_ORDER.map((kind) => DEFAULT_VALUES[kind]));
   const [spanUi, setSpanUi] = useState(1);
   const [microUi, setMicroUi] = useState(0.5);
   const [dualUi, setDualUi] = useState(false);
@@ -320,13 +344,14 @@ export function StringField(): JSX.Element {
 
     const audio = getStringAudio();
     const keys = layoutKeyboard();
-    const sims: StringSim[] = KIND_ORDER.map(() => new StringSim(STRING_N, LOGICAL_W));
     const focusDispBuf = new Float32Array(STRING_N);
     const trailDispBuf = new Float32Array(STRING_N);
-    const curveBufs: number[][] = KIND_ORDER.map(() => new Array<number>(STRING_N).fill(0));
+    const curveBufs: number[][] = [];
+    let sims: StringSim[] = [];
 
     /* —— 可变状态（闭包内，避免每帧 setState） —— */
-    const valuesNow: number[] = KIND_ORDER.map((kind) => DEFAULT_VALUES[kind]);
+    let lanesNow: Lane[] = [];
+    let laneKey = '';
     let focusIdx = 0;
     let modeNow: ViewMode = 'strings';
     let plucksNow = 0;
@@ -338,12 +363,14 @@ export function StringField(): JSX.Element {
     let resonanceCenterNow: number | null = null;
     let dualNow = false;
     let dualStartedAt = 0;
-    let dualFromValue = 0;
+    let dualLaneIndex = 0;
+    let lastWorldTick = -1;
+    let prevNorms: number[] = [];
 
     let crossingsNow: CrossingHit[] = [];
     let crossingsCountNow = 0;
     let crossingTrail: CrossingTrailPoint[] = [];
-    const lastCouple: number[] = KIND_ORDER.map(() => Number.NEGATIVE_INFINITY);
+    const lastCouple: number[] = [];
 
     let drag: PointerDrag | null = null;
     let pointerNow: { x: number; y: number } | null = null;
@@ -375,8 +402,12 @@ export function StringField(): JSX.Element {
     } | null = null;
 
     /* —— 基础读取 —— */
+    function laneAt(index: number): Lane | null {
+      return lanesNow[index] ?? null;
+    }
+
     function kindOf(index: number): StringKind {
-      return KIND_ORDER[index] ?? '叙事';
+      return lanesNow[index]?.kind ?? '叙事';
     }
 
     function profileOf(index: number): KindVisualProfile {
@@ -384,7 +415,7 @@ export function StringField(): JSX.Element {
     }
 
     function baselineOf(index: number): number {
-      return valueToY(valuesNow[index] ?? 0);
+      return valueToY((lanesNow[index]?.norm ?? 0) * 100);
     }
 
     function focusGeom(): { xL: number; xR: number; width: number } {
@@ -397,10 +428,11 @@ export function StringField(): JSX.Element {
       return baselineOf(focusIdx);
     }
 
-    /** 某根弦在屏幕 x 处的物理曲线 y。 */
+    /** 某根 lane 在屏幕 x 处的物理曲线 y。 */
     function curveYAt(index: number, screenX: number): number {
-      const sim = sims[index] ?? sims[0]!;
+      const sim = sims[index];
       const baseline = baselineOf(index);
+      if (!sim) return baseline;
       const sp = sim.u();
       if (index === focusIdx) {
         const geom = focusGeom();
@@ -448,27 +480,6 @@ export function StringField(): JSX.Element {
       setLastDirection(direction < 0 ? 'up' : 'down');
     }
 
-    function applyValue(index: number, value: number): void {
-      const nextValue = clamp(value, 0, 100);
-      if (valuesNow[index] === nextValue) return;
-      valuesNow[index] = nextValue;
-      setValues(valuesNow.slice());
-      if (index === focusIdx) updateResonanceUi();
-    }
-
-    function updateResonanceUi(): void {
-      const info = resonanceOf(kindOf(focusIdx), valuesNow[focusIdx] ?? 0);
-      if (info.resonant !== resonantNow) {
-        resonantNow = info.resonant;
-        setResonantUi(info.resonant);
-      }
-      const center = info.resonant ? info.center : null;
-      if (center !== resonanceCenterNow) {
-        resonanceCenterNow = center;
-        setResonanceUi(center);
-      }
-    }
-
     function setSpanValue(nextSpan: number): void {
       spanNow = clamp(nextSpan, SPAN_MIN, 1);
       setSpanUi(spanNow);
@@ -484,6 +495,33 @@ export function StringField(): JSX.Element {
       if (crossingsCountNow === value) return;
       crossingsCountNow = value;
       setCrossingsCountUi(value);
+    }
+
+    /** 共振：焦点 lane 接近悬崖线 / 安全线（±0.035 norm）。 */
+    function updateResonanceFromLanes(): void {
+      const lane = laneAt(focusIdx);
+      let best: number | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      if (lane) {
+        for (const threshold of [lane.vergeNorm, lane.safeNorm]) {
+          if (typeof threshold !== 'number' || !Number.isFinite(threshold)) continue;
+          const distance = Math.abs(lane.norm - threshold);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = threshold;
+          }
+        }
+      }
+      const resonant = best !== null && bestDistance <= RESONANCE_BAND_NORM;
+      if (resonant !== resonantNow) {
+        resonantNow = resonant;
+        setResonantUi(resonant);
+      }
+      const center = resonant && best !== null ? Math.round(best * 1000) / 10 : null;
+      if (center !== resonanceCenterNow) {
+        resonanceCenterNow = center;
+        setResonanceUi(center);
+      }
     }
 
     /* —— 主题与画布尺寸 —— */
@@ -519,22 +557,90 @@ export function StringField(): JSX.Element {
       };
     }
 
+    /* —— lane 运行时同步（世界可能换世界 / 增减弦） —— */
+    function syncLanes(): void {
+      const current = viewRef.current;
+      const key = `${current.name}|${current.lanes.map((lane) => lane.id).join('|')}`;
+      if (key !== laneKey) {
+        laneKey = key;
+        lanesNow = current.lanes.slice();
+        sims = lanesNow.map(() => new StringSim(STRING_N, LOGICAL_W));
+        curveBufs.length = 0;
+        for (let i = 0; i < lanesNow.length; i += 1) curveBufs.push(new Array<number>(STRING_N).fill(0));
+        lastCouple.length = 0;
+        for (let i = 0; i < lanesNow.length; i += 1) lastCouple.push(Number.NEGATIVE_INFINITY);
+        prevNorms = lanesNow.map((lane) => lane.norm);
+        lastWorldTick = current.tick;
+        focusIdx = 0;
+        setFocusIndex(0);
+        crossingsNow = [];
+        crossingTrail = [];
+        ripples = [];
+        ghostMarks.length = 0;
+        hintMark = null;
+        drag = null;
+        setPullingUi(false);
+        clearTrail();
+        setCrossingsCount(0);
+        updateResonanceFromLanes();
+        setRestingUi(true);
+        return;
+      }
+      lanesNow = current.lanes;
+      if (focusIdx >= lanesNow.length) {
+        focusIdx = 0;
+        setFocusIndex(0);
+        updateResonanceFromLanes();
+      }
+    }
+
+    /** 世界每走一拍：值变化 → 对应弦注入视觉波（只视觉，不写回世界）。 */
+    function processWorldTick(current: WorldView): void {
+      if (lastWorldTick < 0) {
+        lastWorldTick = current.tick;
+        prevNorms = current.lanes.map((lane) => lane.norm);
+        return;
+      }
+      if (current.tick === lastWorldTick) return;
+      for (let i = 0; i < current.lanes.length; i += 1) {
+        const lane = current.lanes[i]!;
+        const sim = sims[i];
+        if (!sim) continue;
+        const previous = prevNorms[i] ?? lane.norm;
+        const delta = lane.norm - previous;
+        if (Math.abs(delta) <= 0.001) continue;
+        const profile = KIND_VISUAL[lane.kind];
+        const amplitude = clamp(Math.abs(delta) * profile.maxPull * TICK_WAVE_RATIO, TICK_WAVE_MIN, TICK_WAVE_MAX);
+        const direction: 1 | -1 = delta > 0 ? -1 : 1;
+        const geom = i === focusIdx ? focusGeom() : { xL: 0, width: LOGICAL_W };
+        sim.pluck({ x: geom.width / 2, y: 0, amplitude, direction, key: null }, profile);
+        if (i === focusIdx) {
+          trailSettle = 0;
+          setRestingUi(false);
+        }
+      }
+      lastWorldTick = current.tick;
+      prevNorms = current.lanes.map((lane) => lane.norm);
+    }
+
     /* —— sim 重建 —— */
     function rebuildFocusSim(): void {
+      if (!sims[focusIdx]) return;
       sims[focusIdx] = new StringSim(STRING_N, focusGeom().width);
       clearTrail();
       setRestingUi(true);
     }
 
     function changeFocus(index: number): void {
-      if (index === focusIdx) return;
-      // 旧焦点回归全宽（清掉它的局部波），新焦点按当前 span 重建。
-      sims[focusIdx] = new StringSim(STRING_N, LOGICAL_W);
-      focusIdx = clamp(index, 0, KIND_ORDER.length - 1);
+      if (!lanesNow.length) return;
+      const next = clamp(index, 0, lanesNow.length - 1);
+      if (next === focusIdx) return;
+      if (sims[focusIdx]) sims[focusIdx] = new StringSim(STRING_N, LOGICAL_W);
+      focusIdx = next;
       setFocusIndex(focusIdx);
-      sims[focusIdx] = new StringSim(STRING_N, focusGeom().width);
+      if (sims[focusIdx]) sims[focusIdx] = new StringSim(STRING_N, focusGeom().width);
       clearTrail();
-      updateResonanceUi();
+      updateResonanceFromLanes();
       setRestingUi(true);
     }
 
@@ -555,7 +661,8 @@ export function StringField(): JSX.Element {
       trailCtx.globalAlpha = 1;
       trailCtx.globalCompositeOperation = 'source-over';
       trailCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-      const sim = sims[focusIdx]!;
+      const sim = sims[focusIdx];
+      if (!sim) return;
       const u = sim.u();
       for (let i = 0; i < STRING_N; i += 1) trailDispBuf[i] = u[i] ?? 0;
       trailCtx.filter = `blur(${TRAIL_BLUR_PX}px)`;
@@ -627,7 +734,8 @@ export function StringField(): JSX.Element {
 
     /** 非焦点弦：不同粗细 / 不同透明度的细线（有耦合波时略深一点）。 */
     function drawOtherString(index: number): void {
-      const sim = sims[index]!;
+      const sim = sims[index];
+      if (!sim) return;
       const profile = profileOf(index);
       const baseline = baselineOf(index);
       const u = sim.u();
@@ -654,8 +762,8 @@ export function StringField(): JSX.Element {
 
     /** 焦点弦显示位移：物理 u + 高频驻波抖动（+ 共振泛音）。 */
     function focusDisplayU(now: number, includeResonance: boolean): Float32Array {
-      const sim = sims[focusIdx]!;
-      const u = sim.u();
+      const sim = sims[focusIdx];
+      const u = sim ? sim.u() : new Float32Array(STRING_N);
       const count = u.length;
       const resonance = includeResonance && resonantNow;
       for (let i = 0; i < count; i += 1) {
@@ -684,7 +792,8 @@ export function StringField(): JSX.Element {
 
     function drawCompactNode(geom: { xL: number; width: number }): void {
       const nodeX = geom.xL + 0.62 * geom.width;
-      const sim = sims[focusIdx]!;
+      const sim = sims[focusIdx];
+      if (!sim) return;
       const local = nodeX - geom.xL;
       const x01 = geom.width > 0 ? local / geom.width : 0.5;
       const nodeY = focusBaseline() + sampleAt(Array.from(sim.u()), x01);
@@ -713,12 +822,13 @@ export function StringField(): JSX.Element {
     }
 
     function drawResonanceTicks(): void {
-      const bands = KIND_RESONANCE[kindOf(focusIdx)] ?? [];
-      if (bands.length === 0) return;
+      const lane = laneAt(focusIdx);
+      if (!lane) return;
       ctx.strokeStyle = rgba(ink, 0.18);
       ctx.lineWidth = 1;
-      for (const band of bands) {
-        const y = valueToY(band);
+      for (const threshold of [lane.vergeNorm, lane.safeNorm]) {
+        if (typeof threshold !== 'number' || !Number.isFinite(threshold)) continue;
+        const y = valueToY(threshold * 100);
         ctx.beginPath();
         ctx.moveTo(40, y);
         ctx.lineTo(52, y);
@@ -730,9 +840,10 @@ export function StringField(): JSX.Element {
       ctx.font = `${LABEL_FONT_PX}px ${serif}`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      for (let i = 0; i < KIND_ORDER.length; i += 1) {
+      for (let i = 0; i < lanesNow.length; i += 1) {
+        const lane = lanesNow[i]!;
         ctx.fillStyle = rgba(ink, i === focusIdx ? 0.55 : 0.2);
-        ctx.fillText(profileOf(i).label, LABEL_X, baselineOf(i) - 7);
+        ctx.fillText(lane.name, LABEL_X, baselineOf(i) - 7);
       }
       ctx.textAlign = 'center';
     }
@@ -800,12 +911,14 @@ export function StringField(): JSX.Element {
         }
       }
       if (hoverPairNow) {
+        const labelA = lanesNow[hoverPairNow.a]?.name ?? '';
+        const labelB = lanesNow[hoverPairNow.b]?.name ?? '';
         const anchorX = (pointerNow ? pointerNow.x : (hoverCrossNow?.x ?? 0)) + 12;
         const anchorY = pointerNow ? pointerNow.y - 16 : (hoverCrossNow?.y ?? 0) - 16;
         ctx.font = `11px ${serif}`;
         ctx.textAlign = 'left';
         ctx.fillStyle = rgba(ink, 0.35);
-        ctx.fillText(`${profileOf(hoverPairNow.a).label} × ${profileOf(hoverPairNow.b).label}`, anchorX, anchorY);
+        ctx.fillText(`${labelA} × ${labelB}`, anchorX, anchorY);
         ctx.textAlign = 'center';
       }
     }
@@ -818,7 +931,7 @@ export function StringField(): JSX.Element {
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
 
       const geom = focusGeom();
-      for (let i = 0; i < KIND_ORDER.length; i += 1) {
+      for (let i = 0; i < lanesNow.length; i += 1) {
         if (i !== focusIdx) drawOtherString(i);
       }
 
@@ -856,12 +969,13 @@ export function StringField(): JSX.Element {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       if (alpha <= 0) return;
+      const focusKindNow = kindOf(focusIdx);
       const rowGap = (OVERVIEW_BOTTOM - OVERVIEW_TOP) / (KIND_ORDER.length - 1);
       for (let i = 0; i < KIND_ORDER.length; i += 1) {
-        const kind = kindOf(i);
+        const kind = KIND_ORDER[i]!;
         const profile = KIND_VISUAL[kind];
         const rowY = OVERVIEW_TOP + rowGap * i;
-        const active = i === focusIdx;
+        const active = kind === focusKindNow;
         ctx.font = `14px ${serif}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -887,35 +1001,41 @@ export function StringField(): JSX.Element {
 
     /* —— 干涉 / 耦合 —— */
     function buildCrossings(): CrossingHit[] {
-      const baselines = KIND_ORDER.map((_, index) => baselineOf(index));
-      const curveAmp: number[] = KIND_ORDER.map(() => 0);
-      for (let index = 0; index < KIND_ORDER.length; index += 1) {
-        const sim = sims[index]!;
-        const u = sim.u();
-        const buf = curveBufs[index]!;
-        if (index === focusIdx) {
-          const geom = focusGeom();
-          const flat = Array.from(u);
-          for (let sample = 0; sample < STRING_N; sample += 1) {
-            const x = (sample / (STRING_N - 1)) * LOGICAL_W;
-            const t = geom.width > 0 ? (x - geom.xL) / geom.width : 0.5;
-            buf[sample] = t < 0 || t > 1 ? 0 : sampleAt(flat, t);
+      const baselines: number[] = [];
+      const curveAmp: number[] = [];
+      for (let index = 0; index < lanesNow.length; index += 1) {
+        const sim = sims[index];
+        const buf = curveBufs[index] ?? new Array<number>(STRING_N).fill(0);
+        curveBufs[index] = buf;
+        if (sim) {
+          const u = sim.u();
+          if (index === focusIdx) {
+            const geom = focusGeom();
+            const flat = Array.from(u);
+            for (let sample = 0; sample < STRING_N; sample += 1) {
+              const x = (sample / (STRING_N - 1)) * LOGICAL_W;
+              const t = geom.width > 0 ? (x - geom.xL) / geom.width : 0.5;
+              buf[sample] = t < 0 || t > 1 ? 0 : sampleAt(flat, t);
+            }
+          } else {
+            for (let sample = 0; sample < STRING_N; sample += 1) buf[sample] = u[sample] ?? 0;
           }
         } else {
-          for (let sample = 0; sample < STRING_N; sample += 1) buf[sample] = u[sample] ?? 0;
+          buf.fill(0);
         }
         let amp = 0;
         for (let sample = 0; sample < STRING_N; sample += 1) {
           const abs = Math.abs(buf[sample] ?? 0);
           if (abs > amp) amp = abs;
         }
-        curveAmp[index] = amp;
+        baselines.push(baselineOf(index));
+        curveAmp.push(amp);
       }
       const list: CrossingHit[] = [];
-      for (let a = 0; a < KIND_ORDER.length; a += 1) {
-        for (let b = a + 1; b < KIND_ORDER.length; b += 1) {
+      for (let a = 0; a < lanesNow.length; a += 1) {
+        for (let b = a + 1; b < lanesNow.length; b += 1) {
           const diff = Math.abs(baselines[a]! - baselines[b]!);
-          // 基线几乎重合且两根都静止 = 两条线叠在一起，不产生「交点」（否则会刷出一整条线）。
+          // 基线几乎重合且两根都静止 = 两条线叠在一起，不产生「交点」。
           if (diff < 0.75 && curveAmp[a]! < 0.5 && curveAmp[b]! < 0.5) continue;
           const hits = curveCrossings(curveBufs[a]!, baselines[a]!, curveBufs[b]!, baselines[b]!);
           for (const hit of hits) {
@@ -953,7 +1073,9 @@ export function StringField(): JSX.Element {
         const otherProfile = profileOf(other);
         const away: 1 | -1 = baselineOf(other) < focusBaseline() ? -1 : 1;
         const amplitude = clamp(Math.abs(focusU) * COUPLE_AMP_RATIO, COUPLE_AMP_MIN, COUPLE_AMP_MAX);
-        sims[other]!.pluck(
+        const otherSim = sims[other];
+        if (!otherSim) continue;
+        otherSim.pluck(
           { x: clamp(hit.x01 * LOGICAL_W, 0, LOGICAL_W), y: 0, amplitude, direction: away, key: null },
           otherProfile,
         );
@@ -968,8 +1090,10 @@ export function StringField(): JSX.Element {
     }
 
     function chordOnPluck(center01: number, amplitude: number): void {
-      for (let other = 0; other < KIND_ORDER.length; other += 1) {
+      for (let other = 0; other < lanesNow.length; other += 1) {
         if (other === focusIdx) continue;
+        const otherSim = sims[other];
+        if (!otherSim) continue;
         let target01 = 0.5;
         for (const hit of crossingsNow) {
           if ((hit.a === focusIdx && hit.b === other) || (hit.b === focusIdx && hit.a === other)) {
@@ -979,7 +1103,7 @@ export function StringField(): JSX.Element {
         }
         const otherProfile = profileOf(other);
         const away: 1 | -1 = baselineOf(other) < focusBaseline() ? -1 : 1;
-        sims[other]!.pluck(
+        otherSim.pluck(
           {
             x: clamp(target01 * LOGICAL_W, 0, LOGICAL_W),
             y: 0,
@@ -990,35 +1114,40 @@ export function StringField(): JSX.Element {
           otherProfile,
         );
       }
-      const focusKind = kindOf(focusIdx);
-      audioBegin(focusKind, clamp(center01 + 0.1, 0, 1), 0.5, 0.8, (1 / spanNow) * 1.5);
+      audioBegin(kindOf(focusIdx), clamp(center01 + 0.1, 0, 1), 0.5, 0.8, (1 / spanNow) * 1.5);
     }
 
     function startDual(): void {
+      const lane = laneAt(focusIdx);
+      if (!lane) return;
       dualNow = true;
       dualStartedAt = performance.now();
-      dualFromValue = valuesNow[focusIdx] ?? 0;
+      dualLaneIndex = focusIdx;
       setDualUi(true);
       drag = null;
       setPullingUi(false);
+      // 立刻把真实值翻到对侧（世界下一拍照常传导）。
+      const flippedNorm = clamp(1 - lane.norm, 0, 1);
+      injectRef.current(lane.kind, lane.min + flippedNorm * (lane.max - lane.min));
     }
 
     function finishDual(): void {
-      const nextValue = clamp(100 - dualFromValue, 0, 100);
-      valuesNow[focusIdx] = nextValue;
-      setValues(valuesNow.slice());
-      updateResonanceUi();
-      sims[focusIdx] = new StringSim(STRING_N, focusGeom().width);
+      const index = dualLaneIndex;
+      if (sims[index]) {
+        sims[index] = new StringSim(STRING_N, index === focusIdx ? focusGeom().width : LOGICAL_W);
+      }
       clearTrail();
       dualNow = false;
       setDualUi(false);
       setRestingUi(true);
-      audioBegin(kindOf(focusIdx), 0.5, 0.5, 0.8, (1 / spanNow) * 2);
+      audioBegin(kindOf(index), 0.5, 0.5, 0.8, (1 / spanNow) * 2);
     }
 
-    /** 一次拨动焦点弦：screen 坐标为逻辑坐标。 */
-    function pluckFocus(screenX: number, screenY: number, keyCode: string, ghostText?: string): void {
+    /** 拨动焦点弦：视觉波 + 推动真实值约 8% 量程。 */
+    function pluckFocus(screenX: number, screenY: number, keyCode: string, ghostText?: string, pushWorld = true): void {
       if (dualNow) return;
+      const lane = laneAt(focusIdx);
+      if (!lane) return;
       const geom = focusGeom();
       const baseline = focusBaseline();
       const profile = profileOf(focusIdx);
@@ -1029,14 +1158,19 @@ export function StringField(): JSX.Element {
       noteTouch(screenX, screenY, amplitude, direction, keyCode);
       bumpPlucks();
       if (ghostText) pushGhost(ghostText, screenX, screenY);
-      const focusValue = valuesNow[focusIdx] ?? 0;
-      if ((focusValue <= DUAL_LOW || focusValue >= DUAL_HIGH) && amplitude > DUAL_AMP_MIN) {
+      if ((lane.norm <= DUAL_LOW || lane.norm >= DUAL_HIGH) && amplitude > DUAL_AMP_MIN) {
         startDual();
         return;
       }
-      sims[focusIdx]!.pluck({ x: localX, y: screenY, amplitude, direction, key: null }, profile);
+      sims[focusIdx]?.pluck({ x: localX, y: screenY, amplitude, direction, key: null }, profile);
+      if (pushWorld) {
+        // 值变大 = 基线上移；direction=-1 是向上拨 → 推高值。
+        const deltaNorm = -direction * (amplitude / Math.max(1, profile.maxPull)) * PLUCK_WORLD_RATIO;
+        const nextNorm = clamp(lane.norm + deltaNorm, 0, 1);
+        injectRef.current(lane.kind, lane.min + nextNorm * (lane.max - lane.min));
+      }
       audioBegin(
-        kindOf(focusIdx),
+        lane.kind,
         clamp(center01, 0, 1),
         clamp(screenY / LOGICAL_H, 0, 1),
         clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
@@ -1047,27 +1181,31 @@ export function StringField(): JSX.Element {
       setRestingUi(false);
     }
 
+    /** Tab / 总览点行：只演示视觉拨弦，不写世界。 */
     function demoPluck(): void {
       if (dualNow) return;
+      const sim = sims[focusIdx];
+      const lane = laneAt(focusIdx);
+      if (!sim || !lane) return;
       const geom = focusGeom();
       const profile = profileOf(focusIdx);
-      sims[focusIdx]!.pluck(
+      sim.pluck(
         { x: geom.width / 2, y: focusBaseline(), amplitude: profile.maxPull * 0.5, direction: 1, key: null },
         profile,
       );
       bumpPlucks();
-      audioBegin(kindOf(focusIdx), 0.5, 0.5, 0.5, 1 / spanNow);
+      audioBegin(lane.kind, 0.5, 0.5, 0.5, 1 / spanNow);
       trailSettle = 0;
       setRestingUi(false);
     }
 
     /* —— 焦点切换 / 总览 —— */
     function switchFocus(step: number, demonstrate: boolean): void {
-      if (dualNow) return;
-      const next = nextKind(kindOf(focusIdx), step);
-      const nextIndex = KIND_ORDER.indexOf(next);
-      changeFocus(nextIndex < 0 ? 0 : nextIndex);
-      hintMark = { text: `${profileOf(focusIdx).label}弦`, born: performance.now() };
+      if (dualNow || lanesNow.length === 0) return;
+      const count = lanesNow.length;
+      const next = ((focusIdx + (step % count)) + count) % count;
+      changeFocus(next);
+      hintMark = { text: lanesNow[focusIdx]?.name ?? '', born: performance.now() };
       if (demonstrate) demoPluck();
     }
 
@@ -1082,7 +1220,8 @@ export function StringField(): JSX.Element {
       ripples = [];
       audio.reset();
       clearTrail();
-      setRestingUi(sims[focusIdx]!.resting());
+      const sim = sims[focusIdx];
+      setRestingUi(sim ? sim.resting() : true);
     }
 
     function leaveOverview(): void {
@@ -1101,10 +1240,13 @@ export function StringField(): JSX.Element {
       if (dualNow) return;
       const rowGap = (OVERVIEW_BOTTOM - OVERVIEW_TOP) / (KIND_ORDER.length - 1);
       const row = clamp(Math.round((logicalY - OVERVIEW_TOP) / rowGap), 0, KIND_ORDER.length - 1);
-      changeFocus(row);
+      const kind = KIND_ORDER[row]!;
+      const laneIndex = lanesNow.findIndex((lane) => lane.kind === kind);
       setModeUi('strings');
       chartTarget = 0;
-      hintMark = { text: `${profileOf(focusIdx).label}弦`, born: performance.now() };
+      if (laneIndex < 0) return;
+      changeFocus(laneIndex);
+      hintMark = { text: lanesNow[focusIdx]?.name ?? '', born: performance.now() };
       demoPluck();
       clearTrail();
     }
@@ -1120,16 +1262,20 @@ export function StringField(): JSX.Element {
         return;
       }
       if (dualNow) return;
+      const lane = laneAt(focusIdx);
+      if (!lane) return;
       event.preventDefault();
       const geom = focusGeom();
       const baseline = focusBaseline();
-      const startValue = valuesNow[focusIdx] ?? 0;
       const common = {
         pointerId: event.pointerId,
         startX: point.x,
         startY: point.y,
         startedAt: performance.now(),
-        startValue,
+        startNorm: lane.norm,
+        laneKind: lane.kind,
+        laneMin: lane.min,
+        laneMax: lane.max,
         moved: false,
       };
       try {
@@ -1149,7 +1295,7 @@ export function StringField(): JSX.Element {
         };
         return;
       }
-      // 2) 焦点弦曲线 ±16px：上下拖动改 value；几乎没动则是点触。
+      // 2) 焦点弦曲线 ±16px：上下拖动改真实值；几乎没动则是点触。
       if (Math.abs(point.y - curveYAt(focusIdx, point.x)) <= VALUE_DRAG_PX) {
         drag = { ...common, kind: 'value', side: 1 };
         return;
@@ -1164,9 +1310,14 @@ export function StringField(): JSX.Element {
       if (!drag || event.pointerId !== drag.pointerId) return;
       const dx = point.x - drag.startX;
       const dy = point.y - drag.startY;
-      if (Math.hypot(dx, dy) > TAP_MOVE_PX) drag.moved = true;
+      const distance = Math.hypot(dx, dy);
+      if (!drag.moved && distance <= TAP_MOVE_PX) return;
+      drag.moved = true;
       if (drag.kind === 'value') {
-        applyValue(focusIdx, yToValue(valueToY(drag.startValue) + dy));
+        const startY = valueToY(drag.startNorm * 100);
+        const nextNorm = clamp(yToValue(startY + dy) / 100, 0, 1);
+        const raw = drag.laneMin + nextNorm * (drag.laneMax - drag.laneMin);
+        injectRef.current(drag.laneKind, raw);
       } else if (drag.kind === 'membrane') {
         const half = LOGICAL_W / 2;
         const nextSpan = drag.side < 0 ? 1 - point.x / half : point.x / half - 1;
@@ -1191,15 +1342,8 @@ export function StringField(): JSX.Element {
       setPullingUi(false);
       const elapsed = performance.now() - current.startedAt;
       const quickTap = !current.moved && elapsed < TAP_MS;
-      if (current.kind === 'value') {
-        if (quickTap) {
-          applyValue(focusIdx, current.startValue);
-          const key = keyAtPoint(keys, current.startX, current.startY);
-          pluckFocus(current.startX, current.startY, key ? key.code : '', key ? key.label : '');
-        }
-        return;
-      }
-      if (current.kind === 'pluck' && quickTap) {
+      if (!quickTap) return;
+      if (current.kind === 'value' || current.kind === 'pluck') {
         const key = keyAtPoint(keys, current.startX, current.startY);
         pluckFocus(current.startX, current.startY, key ? key.code : '', key ? key.label : '');
       }
@@ -1237,21 +1381,22 @@ export function StringField(): JSX.Element {
 
     /* —— 每帧 —— */
     function stepSims(dt: number): void {
-      const focusSim = sims[focusIdx]!;
-      if (!dualNow && !focusSim.resting()) {
+      const focusSim = sims[focusIdx];
+      if (focusSim && !dualNow && !focusSim.resting()) {
         const base = profileOf(focusIdx);
         focusSim.step(dt, { ...base, damping: base.damping * (0.45 + microNow * 1.6) });
       }
-      for (let i = 0; i < KIND_ORDER.length; i += 1) {
+      for (let i = 0; i < sims.length; i += 1) {
         if (i === focusIdx) continue;
-        const sim = sims[i]!;
-        if (sim.resting()) continue;
+        const sim = sims[i];
+        if (!sim || sim.resting()) continue;
         sim.step(dt, profileOf(i));
       }
     }
 
     function updateTrailState(dt: number): void {
-      const sim = sims[focusIdx]!;
+      const sim = sims[focusIdx];
+      if (!sim) return;
       if (!sim.resting()) {
         updateTrail();
         trailActive = true;
@@ -1276,7 +1421,6 @@ export function StringField(): JSX.Element {
       const nodeY = curveYAt(focusIdx, nodeX);
       hoverNodeNow = Math.hypot(pointerNow.x - nodeX, pointerNow.y - nodeY) <= NODE_HOVER_PX;
 
-      // 交点：16px 内命中；行波上的交点移动极快，也认最近 250ms 经过的轨迹点。
       let nearest: CrossingHit | null = null;
       let bestDistance = CROSS_HOVER_PX;
       for (const hit of crossingsNow) {
@@ -1298,7 +1442,15 @@ export function StringField(): JSX.Element {
           }
         }
         if (bestTrail) {
-          nearest = { a: bestTrail.a, b: bestTrail.b, x: bestTrail.x, y: bestTrail.y, x01: bestTrail.x / LOGICAL_W, uA: 0, uB: 0 };
+          nearest = {
+            a: bestTrail.a,
+            b: bestTrail.b,
+            x: bestTrail.x,
+            y: bestTrail.y,
+            x01: bestTrail.x / LOGICAL_W,
+            uA: 0,
+            uB: 0,
+          };
         }
       }
       if (nearest) {
@@ -1332,6 +1484,11 @@ export function StringField(): JSX.Element {
             : Math.max(chartTarget, chartAlpha - stepSize);
       }
       pruneMarks(now);
+
+      syncLanes();
+      const currentView = viewRef.current;
+      processWorldTick(currentView);
+      updateResonanceFromLanes();
       if (dualNow && now - dualStartedAt >= DUAL_MS) finishDual();
 
       if (modeNow === 'strings') {
@@ -1353,7 +1510,8 @@ export function StringField(): JSX.Element {
         setCrossingsCount(0);
       }
       updateHoverState();
-      setRestingUi(sims[focusIdx]!.resting());
+      const focusSim = sims[focusIdx];
+      setRestingUi(focusSim ? focusSim.resting() : true);
 
       if (modeNow === 'overview' || chartAlpha > 0) {
         drawOverviewScene();
@@ -1362,16 +1520,14 @@ export function StringField(): JSX.Element {
       renderStringsScene(now);
     }
 
-    /* —— 安装：调试钩子 / 音频 / 事件 —— */
+    /* —— 本地复位（不动世界值） —— */
     function resetField(): void {
       audio.reset();
-      for (let i = 0; i < KIND_ORDER.length; i += 1) {
-        valuesNow[i] = DEFAULT_VALUES[kindOf(i)];
-        sims[i] = new StringSim(STRING_N, LOGICAL_W);
+      for (let i = 0; i < sims.length; i += 1) {
+        if (sims[i]) sims[i] = new StringSim(STRING_N, LOGICAL_W);
       }
       focusIdx = 0;
       setFocusIndex(0);
-      setValues(valuesNow.slice());
       spanNow = 1;
       setSpanUi(1);
       microNow = 0.5;
@@ -1399,51 +1555,66 @@ export function StringField(): JSX.Element {
       pointerNow = null;
       hoverNodeNow = false;
       hoverCrossNow = null;
+      hoverPairNow = null;
+      hoverLatchUntil = 0;
       for (let i = 0; i < lastCouple.length; i += 1) lastCouple[i] = Number.NEGATIVE_INFINITY;
       lastTouchNow = null;
       setLastKey('');
       setLastAmplitude(0);
       setLastDirection('down');
       clearTrail();
-      updateResonanceUi();
+      updateResonanceFromLanes();
       setRestingUi(true);
     }
 
-    readTheme();
-    resize();
-    updateResonanceUi();
+    /* —— 调试钩子 —— */
+    function laneDebug(): Array<{ kind: StringKind; id: string; name: string; value: number; min: number; max: number }> {
+      return lanesNow.map((lane) => ({
+        kind: lane.kind,
+        id: lane.id,
+        name: lane.name,
+        value: round4(lane.value),
+        min: lane.min,
+        max: lane.max,
+      }));
+    }
 
     const debugApi: NonNullable<Window['__neurouString']> = {
       state: () => ({
+        world: viewRef.current.name,
+        tick: viewRef.current.tick,
+        ended: viewRef.current.ended,
         kind: kindOf(focusIdx),
         kindIndex: focusIdx,
         mode: modeNow,
         plucks: plucksNow,
         audio: audio.getState(),
-        keyCount: KEY_COUNT,
+        keyCount: 46,
         overviewRows: modeNow === 'overview' ? KIND_ORDER.length : 0,
-        values: valuesNow.map((value) => Math.round(value * 100) / 100),
+        values: lanesNow.map((lane) => round4(lane.value)),
+        norms: lanesNow.map((lane) => round4(lane.norm)),
+        lanes: laneDebug(),
         span: Math.round(spanNow * 100) / 100,
         resonant: resonantNow,
         resonance: resonanceCenterNow,
         micro: Math.round(microNow * 100) / 100,
         dual: dualNow,
         crossings: crossingsCountNow,
-        amplitude: sims[focusIdx]!.amplitude(),
+        amplitude: sims[focusIdx]?.amplitude() ?? 0,
       }),
-      u: () => Array.from(sims[focusIdx]!.u()),
+      u: () => Array.from(sims[focusIdx]?.u() ?? []),
       curves: () =>
-        KIND_ORDER.map((kind, index) => ({
-          kind,
-          value: Math.round((valuesNow[index] ?? 0) * 100) / 100,
+        lanesNow.map((lane, index) => ({
+          kind: lane.kind,
+          name: lane.name,
+          value: round4(lane.value),
           baseline: Math.round(baselineOf(index) * 100) / 100,
-          samples: Array.from(sims[index]!.u()),
+          samples: Array.from(sims[index]?.u() ?? []),
         })),
       crossings: () =>
         crossingsNow.map((hit) => ({
-          a: kindOf(hit.a),
-          b: kindOf(hit.b),
-          // x 用 0..1 归一化（官方验收按 x*1440 换算），y 是逻辑像素。
+          a: lanesNow[hit.a]?.name ?? '',
+          b: lanesNow[hit.b]?.name ?? '',
           x: Math.round(hit.x01 * 10000) / 10000,
           y: Math.round(hit.y * 10) / 10,
         })),
@@ -1454,7 +1625,7 @@ export function StringField(): JSX.Element {
           chartTarget = 0;
           chartAlpha = 0;
         }
-        pluckFocus(clamp(x, 0, LOGICAL_W), clamp(y, 0, LOGICAL_H), '');
+        pluckFocus(clamp(x, 0, LOGICAL_W), clamp(y, 0, LOGICAL_H), '', undefined, false);
       },
       pressKey: (code: string) => {
         if (code === 'Tab') {
@@ -1473,15 +1644,20 @@ export function StringField(): JSX.Element {
       },
       reset: () => resetField(),
       setValue: (kind: StringKind, value: number) => {
-        const index = KIND_ORDER.indexOf(kind);
-        if (index < 0) return;
-        applyValue(index, value);
+        const lane = lanesNow.find((item) => item.kind === kind);
+        if (!lane) return;
+        injectRef.current(lane.kind, clamp(value, lane.min, lane.max));
       },
       setSpan: (value: number) => setSpanValue(value),
       setMicro: (value: number) => setMicroValue(value),
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
+
+    readTheme();
+    resize();
+    syncLanes();
+    updateResonanceFromLanes();
 
     setAudioState(audio.getState());
     const unsubscribeAudio = audio.subscribe((state) => {
@@ -1519,28 +1695,35 @@ export function StringField(): JSX.Element {
     };
   }, []);
 
-  const focusKind = KIND_ORDER[focusIndex] ?? '叙事';
-  const valuesJson = JSON.stringify(values.map((value) => Math.round(value * 100) / 100));
+  const normsJson = JSON.stringify(view.lanes.map((lane) => round4(lane.norm)));
+  const valuesJson = JSON.stringify(view.lanes.map((lane) => round4(lane.value)));
+  const kindsJson = JSON.stringify(view.lanes.map((lane) => lane.kind));
 
   return (
     <div
       ref={hostRef}
       className="string-field"
       data-testid="string-field"
+      data-world={view.name}
+      data-tick={view.tick}
+      data-ended={view.ended ?? ''}
       data-mode={mode}
       data-kind={focusKind}
-      data-kind-index={focusIndex}
+      data-kind-index={safeFocus}
       data-plucks={plucks}
       data-values={valuesJson}
+      data-norms={normsJson}
+      data-kinds={kindsJson}
+      data-lane-count={laneCount}
       data-span={spanUi.toFixed(2)}
       data-resonant={resonantUi ? 'true' : 'false'}
-      data-resonance={resonanceUi === null ? '' : String(resonanceUi)}
+      data-resonance={resonanceUi === null ? '' : resonanceUi.toFixed(1)}
       data-micro={microUi.toFixed(2)}
       data-dual={dualUi ? 'true' : 'false'}
       data-crossings={crossingsCountUi}
       data-pulling={pulling ? 'true' : 'false'}
       data-resting={resting ? 'true' : 'false'}
-      data-key-count={KEY_COUNT}
+      data-key-count={46}
       data-overview-rows={mode === 'overview' ? KIND_ORDER.length : 0}
       data-audio={audioState}
       data-last-key={lastKey}

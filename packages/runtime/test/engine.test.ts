@@ -213,3 +213,59 @@ describe('运行时：一拍之内发生了什么', () => {
     expect(['红', '绿', '黄']).toContain(r.health.grade);
   });
 });
+
+describe('外部注入：调律台的手指驱动世界', () => {
+  const COUPLED = BASE + `耦合 甲 → 乙 同向 1.0\n结局 完: 当 甲 <= 0\n`;
+
+  it('注入会在下一拍沿耦合传导（不再是「拖了也不动」）', () => {
+    const u = new Universe(world(COUPLED));
+    const delta = u.inject('甲', 70);
+    expect(delta).toBe(20);
+    expect(u.number('甲')).toBe(70);
+    expect(u.number('乙')).toBe(50); // 还在路上
+    u.tick();
+    expect(u.number('乙')).toBe(70); // +0.2 归一化 × 强度 1.0 × 量程 100
+  });
+
+  it('注入被量程夹住，夹掉的部分不传导', () => {
+    const u = new Universe(world(COUPLED));
+    expect(u.inject('甲', 500)).toBe(50); // 50 → 100
+    u.tick();
+    expect(u.number('甲')).toBe(100);
+    expect(u.number('乙')).toBe(100);
+  });
+
+  it('注入也遵守耦合延迟', () => {
+    const ir = world(BASE + `耦合 甲 → 乙 同向 1.0 延迟 1\n结局 完: 当 甲 <= 0\n`);
+    const u = new Universe(ir);
+    u.inject('甲', 60);
+    u.tick();
+    expect(u.number('乙')).toBe(50); // 延迟 1：本拍还没到
+    u.tick();
+    expect(u.number('乙')).toBe(60);
+  });
+
+  it('注入的改动会在下一拍触发信号/公理/结局', () => {
+    const ir = world(
+      BASE +
+        `信号 告急
+  当 甲 < 30
+  字幕 "告急"
+结局 完: 当 甲 <= 10
+`,
+    );
+    const u = new Universe(ir);
+    u.inject('甲', 20);
+    const first = u.tick();
+    expect(first.cues.some((c) => c.signal === '告急')).toBe(true);
+    u.inject('甲', 5);
+    const second = u.tick();
+    expect(second.ending?.name).toBe('完');
+  });
+
+  it('注入未知弦返回 0，不抛异常', () => {
+    const u = new Universe(world(COUPLED));
+    expect(u.inject('不存在', 10)).toBe(0);
+    expect(u.number('甲')).toBe(50);
+  });
+});

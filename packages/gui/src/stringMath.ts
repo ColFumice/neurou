@@ -211,7 +211,7 @@ export interface TouchPoint {
   key: KeyCell | null;
 }
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return (min + max) / 2;
   return value < min ? min : value > max ? max : value;
 }
@@ -491,7 +491,36 @@ export function yToValue(y: number): number {
 }
 
 /**
- * 8 类弦的默认设置值：从上到下均匀铺开，像八根悬在纸上的蛛丝。
+ * 调律台的一根弦：由真实世界的 `IRString` + 运行时值投影而来。
+ * `norm` ∈ 0..1 决定基线纵坐标；阈值也归一化到 0..1（共振点 = 接近阈值）。
+ */
+export interface Lane {
+  kind: StringKind;
+  /** 世界里的弦 id（实体弦为「实体.名字」）。 */
+  id: string;
+  /** 世界里的弦名（界面上左侧浮现的名字）。 */
+  name: string;
+  /** 运行时原始值。 */
+  value: number;
+  min: number;
+  max: number;
+  /** 0..1：(value - min) / (max - min)。 */
+  norm: number;
+  /** 悬崖线 / 安全线的归一化位置。 */
+  vergeNorm?: number;
+  safeNorm?: number;
+}
+
+/** 调律台读取的一份世界切片。 */
+export interface WorldView {
+  name: string;
+  tick: number;
+  ended: string | null;
+  lanes: Lane[];
+}
+
+/**
+ * 每类弦的默认设置值：从上到下均匀铺开，像八根悬在纸上的蛛丝。
  * 这些值只是调律台的初始状态，不是某个世界的真实数据。
  */
 export const DEFAULT_VALUES: Record<StringKind, number> = {

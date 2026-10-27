@@ -1,8 +1,9 @@
 /**
- * 八弦叠影（v0.7）演示视频：默认八弦 → 拨动 → Tab 换焦点 → 干涉 → 共振 → ESC 总谱。
+ * 八弦调律台 v0.8 演示视频：真实世界驱动。
+ * 默认八弦 → 拨动 → 拖弦写回世界 → 耦合波 → Tab 换焦点 → 阈值共振 → ESC 总谱。
  *
  * 运行：node scripts/string-video.mjs
- * 产出：docs/media/string-8s.mp4（80 帧 × 100ms = 8s）
+ * 产出：docs/media/string-9s.mp4（90 帧 × 100ms = 9s）
  */
 import { chromium } from 'playwright';
 import { mkdirSync, rmSync, readdirSync } from 'node:fs';
@@ -24,29 +25,30 @@ await page.goto('http://127.0.0.1:5188/', { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]');
 await page.waitForTimeout(1000);
 
-const FRAMES = 80;
+const baseY = await page.evaluate(() => {
+  const lane = window.__neurouString.state().lanes[0];
+  const norm = Math.min(1, Math.max(0, (lane.value - lane.min) / (lane.max - lane.min || 1)));
+  return 790 - norm * 680;
+});
+
+const FRAMES = 90;
 for (let i = 0; i < FRAMES; i++) {
-  if (i === 6) await page.mouse.click(720, 300); // 拨动焦点弦
-  if (i === 14) await page.keyboard.press('Tab'); // 焦点换到视觉弦
-  if (i === 18) await page.mouse.click(500, 560); // 再拨
-  if (i === 24) {
-    // 让叙事/视觉两根弦靠近，制造干涉
-    await page.evaluate(() => {
-      window.__neurouString.setValue('叙事', 50);
-      window.__neurouString.setValue('视觉', 52);
-    });
-    await page.keyboard.press('Tab'); // 回到叙事
-  }
-  if (i === 28) await page.mouse.click(420, 360); // 拨动 → 波穿过交点
-  if (i === 38) await page.evaluate(() => window.__neurouString.setValue('叙事', 50));
-  if (i === 42) await page.mouse.click(760, 360); // 共振态拨弦 = 和弦
-  if (i === 52) {
+  if (i === 6) await page.mouse.click(720, 300); // 拨动信任：值 + 视觉波
+  if (i === 14) await page.mouse.move(720, Math.round(baseY));
+  if (i === 16) await page.mouse.down();
+  if (i >= 17 && i <= 24) await page.mouse.move(720, Math.round(baseY) + (i - 16) * 14, { steps: 0 });
+  if (i === 26) await page.mouse.up(); // 写回世界；下一拍耦合
+  if (i === 32) await page.mouse.click(560, 420); // 再拨一根
+  if (i === 40) await page.keyboard.press('Tab'); // 焦点换到色温
+  if (i === 48) await page.evaluate(() => window.__neurouString.setValue('叙事', 26)); // 阈值共振
+  if (i === 52) await page.mouse.click(760, 360); // 共振和弦
+  if (i === 60) {
     await page.evaluate(() => window.__neurouString.reset());
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(100);
     await page.keyboard.press('Escape'); // 总谱
   }
-  if (i === 68) await page.keyboard.press('Escape'); // 回到八弦
-  if (i === 72) await page.keyboard.press('Tab');
+  if (i === 76) await page.keyboard.press('Escape'); // 回到八弦
+  if (i === 80) await page.keyboard.press('Tab');
 
   await page.screenshot({ path: `artifacts/string-frame-${String(i).padStart(3, '0')}.png` });
   await page.waitForTimeout(100);
@@ -66,11 +68,11 @@ const args = [
   'yuv420p',
   '-movflags',
   '+faststart',
-  'docs/media/string-8s.mp4',
+  'docs/media/string-9s.mp4',
 ];
 const result = spawnSync('ffmpeg', args, { stdio: 'inherit' });
 if (result.status !== 0) {
   console.error('ffmpeg failed');
   process.exit(result.status ?? 1);
 }
-console.log('docs/media/string-8s.mp4');
+console.log('docs/media/string-9s.mp4');

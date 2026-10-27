@@ -12,6 +12,9 @@ import type { Span } from './source.js';
 export const STRING_KINDS = ['叙事', '视觉', '动画', '物理', '控制', '空间', '认知', '关系'] as const;
 export type StringKind = (typeof STRING_KINDS)[number];
 
+/** 8 类弦的固定顺序（与 STRING_KINDS 同源，供调律台等视图使用）。 */
+export const KIND_ORDER = STRING_KINDS;
+
 export const STRING_KEYWORDS: Record<string, StringKind> = {
   叙事弦: '叙事',
   视觉弦: '视觉',

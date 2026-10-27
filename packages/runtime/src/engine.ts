@@ -179,6 +179,74 @@ export class Universe {
     return true;
   }
 
+  /**
+   * 外部注入：把一根弦推到一个新值（拖弦、拨弦、外部工具都走这里）。
+   *
+   * 和直接改 state.values 的区别：注入会把变化沿耦合排进 pending，
+   * 于是下一拍邻弦会真的收到这阵涟漪——调律台的手指因此能驱动世界的数据流。
+   * 返回实际发生的变化量（已被量程夹住）。
+   */
+  inject(id: string, value: RuntimeValue): number {
+    const s = this.strings.get(id);
+    if (!s) return 0;
+    const before = this.state.values[id];
+    switch (s.domain.type) {
+      case 'number': {
+        const nextNumber = typeof value === 'number' ? value : asNumber(value);
+        const current = typeof before === 'number' ? before : asNumber(before ?? null);
+        const next = clampString(s, nextNumber);
+        this.state.values[id] = next;
+        const delta = next - current;
+        if (delta !== 0) this.queueFrom(id, delta, 'inject');
+        return delta;
+      }
+      case 'boolean': {
+        this.state.values[id] = truthy(value);
+        return 0;
+      }
+      case 'set': {
+        const current = before instanceof Set ? before : new Set<string>();
+        if (value === null) {
+          this.state.values[id] = new Set<string>();
+        } else if (value instanceof Set) {
+          this.state.values[id] = new Set([...value].map(String));
+        } else if (Array.isArray(value)) {
+          this.state.values[id] = new Set(value.map(String));
+        } else {
+          current.add(String(value));
+          this.state.values[id] = current;
+        }
+        return 0;
+      }
+      default: {
+        this.state.values[id] = value === null ? null : String(value);
+        return 0;
+      }
+    }
+  }
+
+  /** 把一次外部注入的变化排进耦合队列（与 tick 内 propagate 同一套公式）。 */
+  private queueFrom(id: string, delta: number, detail: string): void {
+    const outs = this.couplingByFrom.get(id);
+    if (!outs) return;
+    const from = this.strings.get(id);
+    if (!from || from.domain.type !== 'number') return;
+    const fromRange = rangeOf(from, 100);
+    for (const c of outs) {
+      if (c.guard && !truthy(evalExpr(c.guard, this.state))) continue;
+      const target = this.strings.get(c.to);
+      if (!target) continue;
+      const targetRange = rangeOf(target, 100);
+      const normalized = delta / fromRange;
+      const factor = curveFactor(c.curve, Math.abs(normalized));
+      const applied = normalized * c.strength * c.polarity * factor * targetRange;
+      // 下一拍抵达：state.tick 已经指向下一拍。
+      this.state.pending.push({ due: this.state.tick + c.delay, id: c.to, delta: applied });
+      this.stats.couplingFired.add(c.id);
+      this.log({ tick: this.state.tick, kind: 'coupling', id: `${c.from}→${c.to}`, detail: `${detail} ${applied}` });
+    }
+  }
+
   /** 推进一拍。 */
   tick(): TickResult {
     const cues: EmittedCue[] = [];

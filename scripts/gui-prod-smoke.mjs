@@ -1,5 +1,5 @@
 /**
- * 生产包冒烟：vite build 之后用 vite preview（5189）跑一遍八弦叠影。
+ * 生产包冒烟：vite build 之后用 vite preview（5189）跑一遍八弦调律台 v0.8。
  * 运行前：
  *   pnpm --filter @neurou/gui exec vite preview --host 127.0.0.1 --port 5189 --strictPort
  *   node scripts/gui-prod-smoke.mjs
@@ -24,70 +24,64 @@ await page.waitForTimeout(900);
 
 const field = page.locator('[data-testid="string-field"]');
 const attr = async (name) => field.getAttribute(name);
+const values = async () => JSON.parse(String((await attr('data-values')) ?? '[]'));
 const bg = await page.locator('[data-testid="ink-app"]').evaluate((n) => getComputedStyle(n).backgroundColor);
 const canvases = await page.locator('[data-testid="string-canvas"]').count();
 const extraUi = await page.locator('button, input, textarea, select').count();
-const values = JSON.parse(String(await attr('data-values')));
-const rows = await page.evaluate(() => {
-  const canvas = document.querySelector('[data-testid="string-canvas"]');
-  const ctx = canvas.getContext('2d');
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  const counts = new Array(canvas.height).fill(0);
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
-      if (data[(y * canvas.width + x) * 4 + 3] > 10) counts[y]++;
-    }
-  }
-  let bands = 0;
-  let inBand = false;
-  let gap = 0;
-  for (const count of counts) {
-    if (count > 120) {
-      if (!inBand) bands++;
-      inBand = true;
-      gap = 0;
-    } else if (inBand) {
-      gap++;
-      if (gap > 12) inBand = false;
-    }
-  }
-  return bands;
+const world = await attr('data-world');
+const lanes = Number(await attr('data-lane-count'));
+const initial = await values();
+await page.screenshot({ path: 'artifacts/60-prod-world.png' });
+
+// 拖弦写回世界 → 下一拍耦合传导
+const baseY = await page.evaluate(() => {
+  const lane = window.__neurouString.state().lanes[0];
+  const norm = Math.min(1, Math.max(0, (lane.value - lane.min) / (lane.max - lane.min || 1)));
+  return 790 - norm * 680;
 });
-await page.screenshot({ path: 'artifacts/60-prod-eight.png' });
+await page.mouse.move(720, Math.round(baseY));
+await page.mouse.down();
+await page.mouse.move(720, Math.round(baseY) + 90, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(1200);
+const afterDrag = await values();
+const coupled = afterDrag.filter((v, i) => i > 0 && Math.abs(v - initial[i]) > 0.5).length;
 
-await page.mouse.click(720, 300);
-await page.waitForTimeout(160);
-const afterClick = {
-  plucks: Number(await attr('data-plucks')),
-  direction: await attr('data-last-direction'),
-  audio: await attr('data-audio'),
-  rms: await page.evaluate(() => window.__neurouString?.rms?.() ?? -1),
-  amplitude: await page.evaluate(() => window.__neurouString?.state?.().amplitude ?? 0),
-};
-await page.screenshot({ path: 'artifacts/61-prod-wave.png' });
+// 阈值共振
+await page.evaluate(() => window.__neurouString.setValue('叙事', 26));
+await page.waitForTimeout(200);
+const threshold = { resonant: await attr('data-resonant'), value: await attr('data-resonance') };
+await page.screenshot({ path: 'artifacts/61-prod-threshold.png' });
 
+// Tab / ESC
 await page.keyboard.press('Tab');
-await page.waitForTimeout(200);
+await page.waitForTimeout(180);
 const kindAfterTab = await attr('data-kind');
-
-// 焦点回到叙事弦，再把设置值调到共振点
-await page.keyboard.press('Shift+Tab');
-await page.waitForTimeout(160);
-await page.evaluate(() => window.__neurouString.setValue('叙事', 50));
-await page.waitForTimeout(200);
-const resonant = await attr('data-resonant');
-
 await page.keyboard.press('Escape');
 await page.waitForTimeout(320);
-const overview = {
-  mode: await attr('data-mode'),
-  rows: Number(await attr('data-overview-rows')),
-};
+const overview = { mode: await attr('data-mode'), rows: Number(await attr('data-overview-rows')) };
 await page.screenshot({ path: 'artifacts/62-prod-overview.png' });
 
+const audioState = await attr('data-audio');
+const rms = await page.evaluate(() => window.__neurouString?.rms?.() ?? -1);
 console.log(
   JSON.stringify(
-    { bg, canvases, extraUi, values, rows, afterClick, kindAfterTab, resonant, overview, errors },
+    {
+      bg,
+      canvases,
+      extraUi,
+      world,
+      lanes,
+      initial,
+      afterDrag,
+      coupled,
+      threshold,
+      kindAfterTab,
+      overview,
+      audioState,
+      rms,
+      errors,
+    },
     null,
     2,
   ),
@@ -97,13 +91,15 @@ process.exitCode =
   bg === 'rgb(250, 250, 250)' &&
   canvases === 1 &&
   extraUi === 0 &&
-  JSON.stringify(values) === JSON.stringify([85, 76, 67, 58, 49, 40, 31, 22]) &&
-  rows === 8 &&
-  afterClick.plucks === 1 &&
-  afterClick.audio !== 'unavailable' &&
-  afterClick.amplitude > 40 &&
+  world === '调律台' &&
+  lanes === 8 &&
+  initial.length === 8 &&
+  Math.abs(initial[0] - 55) < 1 &&
+  Math.abs(initial[7] - 0.58) < 0.05 &&
+  coupled >= 2 &&
+  threshold.resonant === 'true' &&
+  Math.abs(Number(threshold.value) - 25) <= 0.6 &&
   kindAfterTab === '视觉' &&
-  resonant === 'true' &&
   overview.mode === 'overview' &&
   overview.rows === 8 &&
   errors.length === 0
