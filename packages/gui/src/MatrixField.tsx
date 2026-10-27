@@ -134,6 +134,9 @@ const CURSOR_ARM_PX = 11;
 const CURSOR_CENTER_GAP_PX = 4;
 const CURSOR_THIN_WIDTH = 1;
 const CURSOR_THICK_WIDTH = 3;
+/** 贯穿全屏的细十字半透明；准星保持满强度。 */
+const CURSOR_LINE_ALPHA = 0.5;
+const CURSOR_RETICLE_ALPHA = 1;
 const CURSOR_FADE_MS = 160;
 /** 命中容差：视差弹簧还没追上时也能稳定点到目标格。 */
 const HIT_TOLERANCE_PX = 10;
@@ -771,7 +774,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.save();
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       ctx.globalCompositeOperation = 'difference';
-      ctx.globalAlpha = clamp(fade, 0, 1);
+      ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_LINE_ALPHA;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = CURSOR_THIN_WIDTH;
       ctx.lineCap = 'butt';
@@ -781,6 +784,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.moveTo(snappedX, 0);
       ctx.lineTo(snappedX, LOGICAL_H);
       ctx.stroke();
+      // 准星满强度，只有贯穿线是半透明。
+      ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_RETICLE_ALPHA;
       ctx.lineWidth = CURSOR_THICK_WIDTH;
       ctx.beginPath();
       ctx.moveTo(snappedX - CURSOR_ARM_PX, snappedY);
