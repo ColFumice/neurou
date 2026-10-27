@@ -2,6 +2,7 @@ import type { IREffect, IRString, WorldIR } from '@neurou/core';
 import { preferenceOf, wellnessOf } from '@neurou/core';
 import { Universe } from './engine.js';
 import { asNumber, evalExpr } from './eval.js';
+import { scoreReference, type ReferenceScore, type ReferenceSpec } from './reference.js';
 
 /** 确定性随机数（mulberry32）。同一 seed 必须得到同一局。 */
 export class Rng {
@@ -216,6 +217,8 @@ export interface RunSummary {
   firedSignals: string[];
   usedActions: string[];
   signature: string;
+  /** v2.1b：指定参考谱/弦时，这一局轨迹与参考曲线的贴合度。 */
+  reference?: ReferenceScore;
 }
 
 export interface RunOptions {
@@ -223,10 +226,29 @@ export interface RunOptions {
   seed: number;
   model: ModelKind;
   learner?: LearnerPolicy;
+  reference?: ReferenceSpec;
 }
 
 export function runOnce(ir: WorldIR, opts: RunOptions): RunSummary {
   const u = new Universe(ir, { seed: opts.seed, log: false });
+  const refSpec = opts.reference;
+  const refSpectrum = refSpec ? ir.spectra.find((s) => s.id === refSpec.spectrumId) : undefined;
+  const refString = refSpec ? ir.strings.find((s) => s.id === refSpec.stringId) : undefined;
+  if (refSpec && (!refSpectrum || !refString)) {
+    throw new Error(
+      `参考谱/参考弦不存在：谱「${refSpec.spectrumId}」${refSpectrum ? '' : '（缺失）'}、弦「${refSpec.stringId}」${refString ? '' : '（缺失）'}`,
+    );
+  }
+  const refSeries: number[] = [];
+  const refMin = refString?.domain.type === 'number' ? (refString.domain.min ?? 0) : 0;
+  const refMax = refString?.domain.type === 'number' ? (refString.domain.max ?? 100) : 100;
+  const pushRefSample = (): void => {
+    if (!refString) return;
+    const raw = u.get(refString.id);
+    const value = typeof raw === 'number' ? raw : refMin;
+    refSeries.push(Math.max(0, Math.min(1, (value - refMin) / (refMax - refMin || 1))));
+  };
+  pushRefSample();
   const rng = new Rng(opts.seed ^ 0x9e3779b9);
   const policy: Policy =
     opts.model === 'learner' ? (opts.learner ?? new LearnerPolicy(ir)) : opts.model === 'greedy' ? new GreedyPolicy() : new RandomPolicy();
@@ -239,6 +261,7 @@ export function runOnce(ir: WorldIR, opts: RunOptions): RunSummary {
     if (actionId) u.act(actionId);
     const before = wellness(u);
     u.tick();
+    pushRefSample();
     const after = wellness(u);
     const reward = (after - before) * 10 + (u.ended ? 1 : 0);
     const nextKey = policy.stateKey?.(u) ?? '';
@@ -258,6 +281,9 @@ export function runOnce(ir: WorldIR, opts: RunOptions): RunSummary {
     firedSignals: [...u.stats.signalFired],
     usedActions: [...u.stats.actionUsed.keys()],
     signature: signatureOf(u),
+    ...(refSpectrum && refString
+      ? { reference: { ...scoreReference(refSeries, refSpectrum), stringId: refString.id } }
+      : {}),
   };
 }
 
@@ -286,6 +312,18 @@ export interface SimOptions {
   maxTicks: number;
   models: ModelKind[];
   seed: number;
+  /** v2.1b：把一条谱当作目标曲线，衡量指定弦的轨迹。 */
+  reference?: ReferenceSpec;
+}
+
+export interface ReferenceBatch {
+  spectrumId: string;
+  stringId: string;
+  runs: number;
+  meanScore: number;
+  meanMae: number;
+  meanRmse: number;
+  models: { model: ModelKind; score: number; mae: number; rmse: number; runs: number }[];
 }
 
 export interface ModelStats {
@@ -334,6 +372,8 @@ export interface BatchResult {
   health: HealthReport;
   options: SimOptions;
   elapsedMs: number;
+  /** v2.1b：配置了参考谱时的批量贴合度。 */
+  reference?: ReferenceBatch;
 }
 
 const ALL_MODELS: ModelKind[] = ['random', 'greedy', 'learner'];
@@ -344,6 +384,7 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
     maxTicks: opts.maxTicks ?? 120,
     models: opts.models ?? ALL_MODELS,
     seed: opts.seed ?? 1,
+    ...(opts.reference ? { reference: opts.reference } : {}),
   };
   const started = Date.now();
   const runs: RunSummary[] = [];
@@ -359,6 +400,7 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
           maxTicks: options.maxTicks,
           seed: options.seed + i * 7919 + model.length * 104729,
           learner,
+          ...(options.reference ? { reference: options.reference } : {}),
         }),
       );
     }
@@ -372,6 +414,33 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
   const overall = summarize(runs, 'overall', allForcings, allSignals, allActions);
   const health = diagnose(overall, ir);
 
+  let reference: ReferenceBatch | undefined;
+  if (options.reference) {
+    const matched = runs.filter((r) => r.reference);
+    if (matched.length > 0) {
+      const avg = (values: number[]): number => values.reduce((a, b) => a + b, 0) / Math.max(1, values.length);
+      const byModel = options.models.map((model) => {
+        const list = matched.filter((r) => r.model === model);
+        return {
+          model,
+          score: avg(list.map((r) => r.reference!.score)),
+          mae: avg(list.map((r) => r.reference!.mae)),
+          rmse: avg(list.map((r) => r.reference!.rmse)),
+          runs: list.length,
+        };
+      });
+      reference = {
+        spectrumId: options.reference.spectrumId,
+        stringId: options.reference.stringId,
+        runs: matched.length,
+        meanScore: avg(matched.map((r) => r.reference!.score)),
+        meanMae: avg(matched.map((r) => r.reference!.mae)),
+        meanRmse: avg(matched.map((r) => r.reference!.rmse)),
+        models: byModel,
+      };
+    }
+  }
+
   return {
     ir,
     runs,
@@ -380,6 +449,7 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
     health,
     options,
     elapsedMs: Date.now() - started,
+    ...(reference ? { reference } : {}),
   };
 }
 

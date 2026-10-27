@@ -33,6 +33,7 @@ sim / run 选项：
   --ticks <n>      每局拍数上限（默认 120）
   --model <名字>   random | greedy | learner | all（默认 all）
   --seed <n>       随机种子（默认 1）
+  --ref <谱>:<弦>  参考谱目标曲线（v2.1b，比较该弦轨迹与谱的贴合度）
   --json           输出机器可读的摘要
   --no-color       关闭颜色
 
@@ -163,7 +164,20 @@ async function main(): Promise<void> {
       const maxTicks = Number(args.flags['ticks'] ?? 120);
       const seed = Number(args.flags['seed'] ?? 1);
       const models = pickModels(args.flags);
-      const result = simulate(world.ir, { runs, maxTicks, seed, models });
+      const refRaw = typeof args.flags['ref'] === 'string' ? args.flags['ref'] : undefined;
+      const reference = refRaw
+        ? (() => {
+            const [spectrumId, stringId] = refRaw.split(':');
+            if (!spectrumId || !stringId) {
+              console.error('用法：--ref <谱名>:<弦名>');
+              process.exitCode = 2;
+              return undefined;
+            }
+            return { spectrumId, stringId };
+          })()
+        : undefined;
+      if (refRaw && !reference) return;
+      const result = simulate(world.ir, { runs, maxTicks, seed, models, ...(reference ? { reference } : {}) });
       if (args.flags['json']) {
         const payload = {
           world: world.ir.name,
@@ -179,6 +193,7 @@ async function main(): Promise<void> {
           violations: result.overall.violations,
           notes: result.health.notes,
           models: result.models.map((m) => ({ model: m.model, endings: m.endings, meanTicks: m.meanTicks })),
+          ...(result.reference ? { reference: result.reference } : {}),
         };
         console.log(JSON.stringify(payload, null, 2));
         return;

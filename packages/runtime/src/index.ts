@@ -51,7 +51,9 @@ export {
   type HealthReport,
   type HealthDimension,
   type BatchResult,
+  type ReferenceBatch,
 } from './simulate.js';
+export { sampleReference, scoreReference, type ReferenceSpec, type ReferenceScore } from './reference.js';
 export {
   renderBatchReport,
   renderRun,
