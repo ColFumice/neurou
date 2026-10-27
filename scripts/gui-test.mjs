@@ -964,6 +964,31 @@ const curveUndo = JSON.parse(String((await matrixRoot.getAttribute('data-selecte
 check('曲线 Ctrl+Z 撤销', Math.abs(Number(curveUndo[1]) - Number(selectedCurve[1])) < 1e-3, JSON.stringify(curveUndo));
 await page.keyboard.press('ArrowLeft');
 await page.waitForTimeout(300);
+// v2.3.1：选中曲线格按 Enter → 聚焦放大编辑
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(260);
+await page.keyboard.press('Enter');
+await page.waitForTimeout(760);
+const focusActive = (await matrixRoot.getAttribute('data-focus')) === 'true';
+const focusCurveRaw = String((await matrixRoot.getAttribute('data-focus-curve')) ?? '');
+const focusCurve = focusCurveRaw ? JSON.parse(focusCurveRaw) : [];
+const focusCell = String((await matrixRoot.getAttribute('data-focus-cell')) ?? '');
+check('Enter 进入曲线聚焦编辑', focusActive && focusCell === '0,1' && focusCurve.length === 3, `${focusActive}/${focusCell}/${JSON.stringify(focusCurve)}`);
+const focusPoints = await page.evaluate(() => window.__neurouMatrix?.focusCurvePositions() ?? []);
+const focusMid = focusPoints.find((p) => p.index === 1);
+if (focusMid) {
+  await page.mouse.move(focusMid.x, focusMid.y);
+  await page.mouse.down();
+  await page.mouse.move(focusMid.x, focusMid.y - 60, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(900);
+}
+const focusAfterRaw = String((await matrixRoot.getAttribute('data-focus-curve')) ?? '');
+const focusAfter = focusAfterRaw ? JSON.parse(focusAfterRaw) : [];
+check('聚焦曲线拖点改值并写回', Number(focusAfter[1]) > Number(focusCurve[1]) + 0.05 && Number(await appAttr('data-matrix-curve-edits')) >= 2, `${JSON.stringify(focusCurve)}→${JSON.stringify(focusAfter)}`);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(760);
+check('Esc 退出聚焦回到矩阵', (await matrixRoot.getAttribute('data-focus')) === 'false' && (await appAttr('data-screen')) === 'matrix', `${await matrixRoot.getAttribute('data-focus')}`);
 await page.mouse.move(720, 450);
 await page.waitForTimeout(300);
 await page.mouse.move(720, 450);
@@ -994,7 +1019,7 @@ await page.mouse.move(1100, 300);
 await page.waitForTimeout(700);
 const depthCells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);
 const whiteCell = depthCells.find((c) => c.row === 0 && c.col === 0);
-const darkCell = depthCells.find((c) => c.row === 0 && c.col === 2);
+const darkCell = depthCells.find((c) => c.row === 2 && c.col === 0);
 check('越白的格子视差移动越快（伪 3D 差速）', (whiteCell?.dx ?? 0) > (darkCell?.dx ?? 0) + 5, `${whiteCell?.dx?.toFixed(2)} vs ${darkCell?.dx?.toFixed(2)}`);
 check('越白的格子尺寸越大（大格覆盖层）', (whiteCell?.size ?? 0) > (darkCell?.size ?? 0) + 8, `${whiteCell?.size?.toFixed(1)} vs ${darkCell?.size?.toFixed(1)}`);
 await page.mouse.move(720, 450);

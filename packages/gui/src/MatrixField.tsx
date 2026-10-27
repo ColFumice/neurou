@@ -86,6 +86,14 @@ interface MatrixDebugState {
   navSfx: number;
   selectedCurve: { row: string; col: string; bands: number[] } | null;
   curveBandEdits: number;
+  focus: {
+    active: boolean;
+    progress: number;
+    cell: CellRef | null;
+    curve: { row: string; col: string; bands: number[] } | null;
+    bandIndex: number | null;
+  };
+  focusBandEdits: number;
 }
 
 declare global {
@@ -94,6 +102,7 @@ declare global {
       state: () => MatrixDebugState;
       cellPositions: () => CellPosition[];
       curvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
+      focusCurvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
       setCell: (row: number, col: number, value: number) => void;
     };
   }
@@ -180,10 +189,10 @@ const SELECTION_RING_WIDTH = 2;
 const SELECTION_RING_RADIUS_EXTRA = 4;
 
 /** 每格曲线：格内极淡 sparkline + 选中曲线格底部无面板编辑器。 */
-const CURVE_EDITOR_LEFT = 240;
-const CURVE_EDITOR_RIGHT = 1200;
-const CURVE_EDITOR_TOP = 790;
-const CURVE_EDITOR_BOTTOM = 850;
+const CURVE_EDITOR_LEFT = 200;
+const CURVE_EDITOR_RIGHT = 1240;
+const CURVE_EDITOR_TOP = 770;
+const CURVE_EDITOR_BOTTOM = 860;
 const CURVE_EDITOR_FADE_MS = 200;
 const CURVE_EDITOR_SAMPLES = 120;
 const CURVE_SPARK_SAMPLES = 24;
@@ -191,9 +200,26 @@ const CURVE_SPARK_ALPHA = 0.22;
 const CURVE_SPARK_HOVER_ALPHA = 0.3;
 const CURVE_LINE_ALPHA = 0.42;
 const CURVE_POINT_ALPHA = 0.7;
-const CURVE_POINT_RADIUS = 2.6;
-const CURVE_POINT_SELECTED_RADIUS = 4.2;
+const CURVE_POINT_RADIUS = 4.6;
+const CURVE_POINT_SELECTED_RADIUS = 6.4;
+const CURVE_HIT_RADIUS = 16;
 const CURVE_VALUE_EASE_TAU_S = 0.12;
+
+/** 聚焦编辑：双击曲线格（或选中后 Enter）用 iOS spring 放大成中央大圆角矩形。 */
+const FOCUS_PANEL_WIDTH = 960;
+const FOCUS_PANEL_HEIGHT = 480;
+const FOCUS_PANEL_RADIUS = 30;
+const FOCUS_REST_ALPHA = 0.12;
+const FOCUS_SPRING_RESPONSE = 0.42;
+const FOCUS_SPRING_DAMPING = 0.86;
+const FOCUS_GRAPH_INSET_X = 90;
+const FOCUS_GRAPH_INSET_TOP = 150;
+const FOCUS_GRAPH_INSET_BOTTOM = 80;
+const FOCUS_POINT_RADIUS = 4;
+const FOCUS_POINT_SELECTED_RADIUS = 7;
+const FOCUS_ARROW_ACCEL_SECONDS = 1.2;
+const FOCUS_ARROW_DECEL_SECONDS = 0.22;
+const FOCUS_VALUE_EASE_TAU_S = 0.12;
 
 /** 伪 3D：越白的格子略大（0.94..1.05），且视差移动更快（0.78..1.22 × 组 offset）。 */
 const CELL_VALUE_SCALE_MIN = 0.94;
@@ -373,6 +399,10 @@ export function MatrixField({
   const [navSfxUi, setNavSfxUi] = useState(0);
   const [selectedCurveUi, setSelectedCurveUi] = useState<number[] | null>(null);
   const [curveBandEditsUi, setCurveBandEditsUi] = useState(0);
+  const [focusUi, setFocusUi] = useState(false);
+  const [focusCellUi, setFocusCellUi] = useState('');
+  const [focusCurveUi, setFocusCurveUi] = useState('');
+  const [focusBandEditsUi, setFocusBandEditsUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -385,7 +415,7 @@ export function MatrixField({
   const curveCount = current?.curves?.length ?? 0;
   const selectedCurveAttr =
     selectedCurveUi === null ? '' : JSON.stringify(selectedCurveUi.map((value) => round4(value)));
-
+  const focusAttr = focusUi ? 'true' : 'false';
   useEffect(() => {
     const hostElement = hostRef.current;
     const canvasElement = canvasRef.current;
@@ -451,6 +481,30 @@ export function MatrixField({
     let curvePointScales: Spring[] = [];
     let curveBandEditsNow = 0;
     let curveUiNow: number[] | null = null;
+    /** 聚焦编辑：spring 进度、聚焦格/曲线、大曲线拖点/方向键惯性。 */
+    const focusSpring = new Spring(0, FOCUS_SPRING_RESPONSE, FOCUS_SPRING_DAMPING);
+    let focusTargetActive = false;
+    let focusCell: CellRef | null = null;
+    let focusRow = '';
+    let focusCol = '';
+    let focusMatrixId = '';
+    let focusCurveBands: number[] = [];
+    let focusCurveTargets: number[] = [];
+    let focusSelectedIndex: number | null = null;
+    let focusPointScales: Spring[] = [];
+    let focusStartRect = { x: LOGICAL_W / 2, y: LOGICAL_H / 2, size: 144 };
+    let focusDrag: {
+      pointerId: number;
+      index: number;
+      startY: number;
+      startValue: number;
+      moved: boolean;
+    } | null = null;
+    let focusArrow: { dir: 1 | -1; velocity: number; held: boolean; startValue: number } | null = null;
+    let focusBandEditsNow = 0;
+    let focusUiNow = false;
+    let focusCellUiNow = '';
+    let focusCurveUiNow = '';
     /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
     let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
@@ -730,6 +784,208 @@ export function MatrixField({
       }
     }
 
+    /* —— 聚焦编辑（双击/Enter 放大到中央大圆角矩形） —— */
+    function focusPanelRect(progress: number): { left: number; top: number; width: number; height: number; radius: number } {
+      const p = clamp(progress, 0, 1);
+      const targetLeft = (LOGICAL_W - FOCUS_PANEL_WIDTH) / 2;
+      const targetTop = (LOGICAL_H - FOCUS_PANEL_HEIGHT) / 2;
+      const startLeft = focusStartRect.x - focusStartRect.size / 2;
+      const startTop = focusStartRect.y - focusStartRect.size / 2;
+      return {
+        left: lerp(startLeft, targetLeft, p),
+        top: lerp(startTop, targetTop, p),
+        width: lerp(focusStartRect.size, FOCUS_PANEL_WIDTH, p),
+        height: lerp(focusStartRect.size, FOCUS_PANEL_HEIGHT, p),
+        radius: lerp(layout.radius + 4, FOCUS_PANEL_RADIUS, p),
+      };
+    }
+
+    function focusGraphRect(progress: number): { left: number; top: number; right: number; bottom: number } {
+      const panel = focusPanelRect(progress);
+      return {
+        left: panel.left + FOCUS_GRAPH_INSET_X,
+        top: panel.top + FOCUS_GRAPH_INSET_TOP,
+        right: panel.left + panel.width - FOCUS_GRAPH_INSET_X,
+        bottom: panel.top + panel.height - FOCUS_GRAPH_INSET_BOTTOM,
+      };
+    }
+
+    function focusCurvePointX(matrix: MatrixView, index: number, count: number): number {
+      const graph = focusGraphRect(focusSpring.value);
+      if (count <= 1) return (graph.left + graph.right) / 2;
+      const ratio = matrix.loop ? index / count : index / (count - 1);
+      return lerp(graph.left, graph.right, clamp(ratio, 0, 1));
+    }
+
+    function focusValueToY(value: number): number {
+      const graph = focusGraphRect(focusSpring.value);
+      return lerp(graph.bottom, graph.top, clamp(value, 0, 1));
+    }
+
+    function focusCurvePositionsData(): Array<{ index: number; x: number; y: number; value: number }> {
+      const matrix = currentMatrix();
+      if (!matrix || focusCurveBands.length < 2) return [];
+      const count = focusCurveBands.length;
+      return focusCurveBands.map((value, index) => ({
+        index,
+        x: Math.round(focusCurvePointX(matrix, index, count) * 100) / 100,
+        y: Math.round(focusValueToY(value) * 100) / 100,
+        value: round4(value),
+      }));
+    }
+
+    function bumpFocusBandEdits(): void {
+      focusBandEditsNow += 1;
+      setFocusBandEditsUi(focusBandEditsNow);
+    }
+
+    function pushFocusUi(force = false): void {
+      const active = focusTargetActive;
+      const cellAttr = active && focusCell ? `${focusCell.row},${focusCell.col}` : '';
+      const curveAttr =
+        active && focusCurveBands.length > 0
+          ? JSON.stringify(focusCurveBands.map((value) => round4(value)))
+          : '';
+      let changed = force;
+      if (focusUiNow !== active) {
+        focusUiNow = active;
+        setFocusUi(active);
+        changed = true;
+      }
+      if (focusCellUiNow !== cellAttr) {
+        focusCellUiNow = cellAttr;
+        setFocusCellUi(cellAttr);
+        changed = true;
+      }
+      if (focusCurveUiNow !== curveAttr) {
+        focusCurveUiNow = curveAttr;
+        setFocusCurveUi(curveAttr);
+        changed = true;
+      }
+      void changed;
+    }
+
+    function focusIsOpen(): boolean {
+      return focusTargetActive || focusSpring.value > 0.01;
+    }
+
+    function finalizeFocusArrow(persist = true): void {
+      const arrow = focusArrow;
+      if (!arrow) return;
+      focusArrow = null;
+      const index = focusSelectedIndex;
+      if (!persist || index === null || !focusTargetActive) return;
+      const value = clampValue(focusCurveTargets[index] ?? arrow.startValue);
+      if (Math.abs(value - arrow.startValue) > 1e-6) {
+        curveEditRef.current?.(focusMatrixId, focusRow, focusCol, index, value, true);
+        bumpFocusBandEdits();
+      }
+    }
+
+    function beginFocus(matrix: MatrixView, now: number): void {
+      if (focusTargetActive || !selected) return;
+      const curve = selectedCurveInfo(matrix);
+      if (!curve || curve.bands.length === 0) return;
+      focusTargetActive = true;
+      focusCell = selected;
+      focusRow = curve.row;
+      focusCol = curve.col;
+      focusMatrixId = matrix.id;
+      focusCurveBands = curve.bands.map((value) => clampValue(value));
+      focusCurveTargets = focusCurveBands.slice();
+      focusSelectedIndex = 0;
+      focusPointScales = focusCurveBands.map(() => new Spring(1));
+      const value = displayed[selected.row]?.[selected.col] ?? 0;
+      const base = cellCenter(layout, selected.row, selected.col);
+      const factor = frozenFactors?.[selected.row]?.[selected.col] ?? valueParallaxFactor(value);
+      focusStartRect = {
+        x: base.x + parallaxX.value * factor,
+        y: base.y + parallaxY.value * factor,
+        size: cellDisplaySize(selected.row, selected.col, value),
+      };
+      focusSpring.target = 1;
+      hover = null;
+      pushUi();
+      pushFocusUi(true);
+      void now;
+    }
+
+    function closeFocus(): void {
+      if (!focusTargetActive && focusSpring.value < 0.01) return;
+      finalizeFocusArrow(true);
+      focusTargetActive = false;
+      focusSpring.target = 0;
+      focusDrag = null;
+      pushFocusUi(true);
+    }
+
+    function stepFocus(now: number, dt: number): void {
+      focusSpring.step(dt);
+      if (!focusTargetActive && focusSpring.value < 0.01 && focusCell !== null) {
+        focusSpring.value = 0;
+        focusSpring.velocity = 0;
+        focusCell = null;
+        focusCurveBands = [];
+        focusCurveTargets = [];
+        focusSelectedIndex = null;
+        focusPointScales = [];
+        focusDrag = null;
+        finalizeFocusArrow(false);
+        pushFocusUi(true);
+      }
+      if (focusCurveBands.length > 0) {
+        const factor = 1 - Math.exp(-dt / FOCUS_VALUE_EASE_TAU_S);
+        let changed = false;
+        for (let i = 0; i < focusCurveTargets.length; i += 1) {
+          const currentValue = focusCurveBands[i] ?? 0;
+          const targetValue = focusCurveTargets[i] ?? currentValue;
+          const delta = targetValue - currentValue;
+          if (Math.abs(delta) < 0.0002) {
+            if (currentValue !== targetValue) {
+              focusCurveBands[i] = targetValue;
+              changed = true;
+            }
+          } else {
+            focusCurveBands[i] = currentValue + delta * factor;
+            changed = true;
+          }
+        }
+        if (changed) pushFocusUi();
+        for (let i = 0; i < focusPointScales.length; i += 1) {
+          const spring = focusPointScales[i];
+          if (!spring) continue;
+          spring.target = i === focusSelectedIndex ? 1.35 : 1;
+          spring.step(dt);
+        }
+      }
+      // ↑/↓ 按住连续调值：线性加速到 vmax，松开线性减速到 0，到界停下。
+      if (focusArrow && focusSelectedIndex !== null) {
+        const vmax = 1 / FOCUS_ARROW_ACCEL_SECONDS;
+        const targetV = focusArrow.dir * vmax;
+        if (focusArrow.held) {
+          const accel = vmax / FOCUS_ARROW_ACCEL_SECONDS;
+          if (focusArrow.velocity < targetV) focusArrow.velocity = Math.min(targetV, focusArrow.velocity + accel * dt);
+          else if (focusArrow.velocity > targetV) focusArrow.velocity = Math.max(targetV, focusArrow.velocity - accel * dt);
+        } else {
+          const decel = vmax / FOCUS_ARROW_DECEL_SECONDS;
+          if (focusArrow.velocity > 0) focusArrow.velocity = Math.max(0, focusArrow.velocity - decel * dt);
+          else if (focusArrow.velocity < 0) focusArrow.velocity = Math.min(0, focusArrow.velocity + decel * dt);
+        }
+        if (focusArrow.velocity !== 0) {
+          const index = focusSelectedIndex;
+          const before = focusCurveTargets[index] ?? 0;
+          const next = clampValue(before + focusArrow.velocity * dt);
+          if (next !== before) {
+            focusCurveTargets[index] = next;
+            pushFocusUi();
+          }
+          if (next <= 0 || next >= 1) focusArrow.velocity = 0;
+        }
+        if (!focusArrow.held && focusArrow.velocity === 0) finalizeFocusArrow(true);
+      }
+      void now;
+    }
+
     function resetScales(rows: number, cols: number): void {
       scales = [];
       for (let r = 0; r < rows; r += 1) {
@@ -883,6 +1139,45 @@ export function MatrixField({
       cursorFade = 1;
       expandCursor();
       updateCursorUi(point);
+      // 聚焦模式：只接受大曲线段点拖动，矩阵手势全部隐藏。
+      if (focusIsOpen()) {
+        event.preventDefault();
+        if (focusTargetActive && focusCurveTargets.length > 0 && focusSpring.value > 0.6) {
+          const graph = focusGraphRect(focusSpring.value);
+          if (
+            point.x >= graph.left - CURVE_HIT_RADIUS &&
+            point.x <= graph.right + CURVE_HIT_RADIUS &&
+            point.y >= graph.top - CURVE_HIT_RADIUS &&
+            point.y <= graph.bottom + CURVE_HIT_RADIUS
+          ) {
+            const count = focusCurveTargets.length;
+            let best = 0;
+            let bestDistance = Number.POSITIVE_INFINITY;
+            for (let i = 0; i < count; i += 1) {
+              const distance = Math.abs(point.x - focusCurvePointX(matrix, i, count));
+              if (distance < bestDistance) {
+                bestDistance = distance;
+                best = i;
+              }
+            }
+            try {
+              canvas.setPointerCapture(event.pointerId);
+            } catch {
+              /* ignore */
+            }
+            focusSelectedIndex = best;
+            focusDrag = {
+              pointerId: event.pointerId,
+              index: best,
+              startY: point.y,
+              startValue: focusCurveTargets[best] ?? 0,
+              moved: false,
+            };
+            pushFocusUi(true);
+          }
+        }
+        return;
+      }
       // 底部曲线编辑器：只有编辑器区域内的 pointerdown 才拦截矩阵手势。
       const curve = selectedCurveInfo(matrix);
       if (curve && curveEditorContains(point)) {
@@ -953,6 +1248,17 @@ export function MatrixField({
       cursorFade = 1;
       expandCursor();
       updateCursorUi(point);
+      // 聚焦模式：拖动大曲线段点 / 其余矩阵 hover 全部隐藏。
+      if (focusIsOpen()) {
+        if (focusDrag && event.pointerId === focusDrag.pointerId) {
+          if (Math.abs(point.y - focusDrag.startY) > 2) focusDrag.moved = true;
+          const graph = focusGraphRect(focusSpring.value);
+          const value = clampValue((graph.bottom - point.y) / (graph.bottom - graph.top));
+          focusCurveTargets[focusDrag.index] = value;
+          pushFocusUi(true);
+        }
+        return;
+      }
       // 拖动曲线段点：垂直改该段 0..1。
       if (curveDrag && event.pointerId === curveDrag.pointerId) {
         if (Math.abs(point.y - curveDrag.startY) > 2) curveDrag.moved = true;
@@ -996,6 +1302,21 @@ export function MatrixField({
     }
 
     function onPointerUp(event: PointerEvent): void {
+      if (focusDrag && event.pointerId === focusDrag.pointerId) {
+        const session = focusDrag;
+        focusDrag = null;
+        try {
+          if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        } catch {
+          /* ignore */
+        }
+        if (session.moved && focusTargetActive) {
+          const value = clampValue(focusCurveTargets[session.index] ?? session.startValue);
+          curveEditRef.current?.(focusMatrixId, focusRow, focusCol, session.index, value, true);
+          bumpFocusBandEdits();
+        }
+        return;
+      }
       if (curveDrag && event.pointerId === curveDrag.pointerId) {
         const session = curveDrag;
         curveDrag = null;
@@ -1029,10 +1350,12 @@ export function MatrixField({
     function onPointerCancel(event: PointerEvent): void {
       if (drag && event.pointerId === drag.pointerId) drag = null;
       if (curveDrag && event.pointerId === curveDrag.pointerId) curveDrag = null;
+      if (focusDrag && event.pointerId === focusDrag.pointerId) focusDrag = null;
     }
 
-    /** 双击格子 → 归零（persist）。 */
+    /** 双击：有曲线格 → 聚焦编辑；无曲线格 → 归零（persist）。 */
     function onDoubleClick(event: MouseEvent): void {
+      if (focusIsOpen()) return;
       const matrix = currentMatrix();
       if (!matrix) return;
       const point = pointToLogical(event.clientX, event.clientY);
@@ -1040,6 +1363,12 @@ export function MatrixField({
       if (!cell) return;
       event.preventDefault();
       selected = cell;
+      pushUi();
+      const curve = curveForCell(matrix, matrix.rows[cell.row] ?? '', matrix.cols[cell.col] ?? '');
+      if (curve && curve.bands.length > 0) {
+        beginFocus(matrix, performance.now());
+        return;
+      }
       const rowTargets = (targets[cell.row] ??= []);
       rowTargets[cell.col] = 0;
       drag = null;
@@ -1052,6 +1381,7 @@ export function MatrixField({
       const matrix = currentMatrix();
       if (!matrix) return;
       event.preventDefault();
+      if (focusIsOpen()) return; // 聚焦内矩阵滚轮无效。
       wheelFreezeUntil = performance.now() + WHEEL_FREEZE_MS;
       const point = pointToLogical(event.clientX, event.clientY);
       cursor = point;
@@ -1096,13 +1426,72 @@ export function MatrixField({
       if (event.code === 'Tab') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (focusIsOpen()) closeFocus();
         cycleRef.current(event.shiftKey ? -1 : 1);
         return;
       }
-      if (event.code === 'F3' || event.code === 'Escape') {
+      if (event.code === 'F3') {
         event.preventDefault();
         event.stopImmediatePropagation();
         startClosing(performance.now());
+        return;
+      }
+      if (event.code === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (focusIsOpen()) {
+          closeFocus();
+          return;
+        }
+        startClosing(performance.now());
+        return;
+      }
+      if (event.code === 'Enter' && !focusTargetActive) {
+        const matrix = currentMatrix();
+        if (matrix && selectedCurveInfo(matrix)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          beginFocus(matrix, performance.now());
+          return;
+        }
+      }
+      if (focusIsOpen()) {
+        // 聚焦内：←/→ 切段点，↑/↓ 按住连续调值；矩阵手势全部隐藏。
+        if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const count = focusCurveTargets.length;
+          if (count > 0) {
+            const step = event.code === 'ArrowRight' ? 1 : -1;
+            focusSelectedIndex = clamp((focusSelectedIndex ?? 0) + step, 0, count - 1);
+            pushFocusUi(true);
+          }
+          return;
+        }
+        if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const count = focusCurveTargets.length;
+          if (count === 0) return;
+          if (focusSelectedIndex === null) focusSelectedIndex = 0;
+          const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
+          if (!focusArrow) {
+            focusArrow = {
+              dir,
+              velocity: 0,
+              held: true,
+              startValue: focusCurveTargets[focusSelectedIndex] ?? 0,
+            };
+          } else {
+            focusArrow.dir = dir;
+            focusArrow.held = true;
+          }
+          pushFocusUi();
+          return;
+        }
+        if (event.code === 'Equal' || event.code === 'Minus' || event.code === 'NumpadAdd' || event.code === 'NumpadSubtract') {
+          return;
+        }
         return;
       }
       const matrix = currentMatrix();
@@ -1147,6 +1536,15 @@ export function MatrixField({
         adjustSelectedValue(-KEY_STEP);
         return;
       }
+    }
+
+    function onKeyUp(event: KeyboardEvent): void {
+      if (event.code !== 'ArrowUp' && event.code !== 'ArrowDown') return;
+      if (!focusArrow) return;
+      const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
+      if (focusArrow.dir !== dir) return;
+      focusArrow.held = false;
+      if (focusArrow.velocity === 0) finalizeFocusArrow(true);
     }
 
     /* —— 绘制 —— */
@@ -1211,8 +1609,9 @@ export function MatrixField({
     }
 
     /** 自定义光标：全屏 1px 十字 + 22px/3px 粗准星（中心 4px 空隙）；difference 自动反色。
-     *  spread 0..1：方向键移动时以光标位置为中心收拢（长度 1→0）。 */
-    function drawCursor(pos: { x: number; y: number }, fade: number, spread: number): void {
+     *  spread 0..1：方向键移动时以光标位置为中心收拢（长度 1→0）。
+     *  showFullLines=false：聚焦编辑时隐藏全屏贯穿线，只留准星（更极简）。 */
+    function drawCursor(pos: { x: number; y: number }, fade: number, spread: number, showFullLines: boolean): void {
       const spreadValue = clamp(spread, 0, 1);
       if (spreadValue <= 0.002) return;
       // 对齐物理像素中心，避免 1px 线跨两行抗锯齿后 only 50% 强度（difference 会变成半灰）。
@@ -1223,16 +1622,18 @@ export function MatrixField({
       ctx.save();
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       ctx.globalCompositeOperation = 'difference';
-      ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_LINE_ALPHA;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = CURSOR_THIN_WIDTH;
-      ctx.lineCap = 'butt';
-      ctx.beginPath();
-      ctx.moveTo(snappedX - snappedX * spreadValue, snappedY);
-      ctx.lineTo(snappedX + (LOGICAL_W - snappedX) * spreadValue, snappedY);
-      ctx.moveTo(snappedX, snappedY - snappedY * spreadValue);
-      ctx.lineTo(snappedX, snappedY + (LOGICAL_H - snappedY) * spreadValue);
-      ctx.stroke();
+      if (showFullLines) {
+        ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_LINE_ALPHA;
+        ctx.lineWidth = CURSOR_THIN_WIDTH;
+        ctx.lineCap = 'butt';
+        ctx.beginPath();
+        ctx.moveTo(snappedX - snappedX * spreadValue, snappedY);
+        ctx.lineTo(snappedX + (LOGICAL_W - snappedX) * spreadValue, snappedY);
+        ctx.moveTo(snappedX, snappedY - snappedY * spreadValue);
+        ctx.lineTo(snappedX, snappedY + (LOGICAL_H - snappedY) * spreadValue);
+        ctx.stroke();
+      }
       // 准星满强度，只有贯穿线是半透明。
       if (arm > 0.4) {
         ctx.globalAlpha = clamp(fade, 0, 1) * CURSOR_RETICLE_ALPHA;
@@ -1253,6 +1654,7 @@ export function MatrixField({
 
     /** 选中曲线格 → 矩阵下方无面板曲线编辑器（淡入淡出 200ms、段点 spring）。 */
     function drawCurveEditor(matrix: MatrixView, now: number, contentAlpha: number): void {
+      if (focusIsOpen()) return;
       if (curveAlpha <= 0.004 || curveBands.length < 2) return;
       const editorAlpha = clamp(contentAlpha * curveAlpha, 0, 1);
       if (editorAlpha <= 0.004) return;
@@ -1297,6 +1699,71 @@ export function MatrixField({
       ctx.restore();
     }
 
+    /** 聚焦编辑：中央大圆角矩形 + 大曲线（spring 放大/缩回）。 */
+    function drawFocusPanel(matrix: MatrixView, now: number, contentAlpha: number): void {
+      const progress = clamp(focusSpring.value, 0, 1);
+      if (progress <= 0.002 || !focusCell) return;
+      const panel = focusPanelRect(progress);
+      const value = displayed[focusCell.row]?.[focusCell.col] ?? 0;
+      const panelAlpha = clamp(contentAlpha * clamp(progress * 1.25, 0, 1), 0, 1);
+      if (panelAlpha <= 0.002) return;
+      ctx.save();
+      ctx.globalAlpha = panelAlpha;
+      // 大圆角矩形：近黑 #121212 + 极淡边。
+      ctx.fillStyle = '#121212';
+      ctx.beginPath();
+      ctx.roundRect(panel.left, panel.top, panel.width, panel.height, panel.radius);
+      ctx.fill();
+      ctx.strokeStyle = rgba(LABEL_RGB, 0.16);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(panel.left, panel.top, panel.width, panel.height, panel.radius);
+      ctx.stroke();
+      // 大曲线（progress > 0.35 才出现，避免放大中途闪烁）
+      if (progress > 0.35 && focusCurveBands.length > 1) {
+        const graph = focusGraphRect(progress);
+        ctx.strokeStyle = rgba(LABEL_RGB, 0.55);
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
+          const ratio = step / CURVE_EDITOR_SAMPLES;
+          const x = lerp(graph.left, graph.right, ratio);
+          const y = lerp(graph.bottom, graph.top, sampleCurveBands(matrix, focusCurveBands, ratio));
+          if (step === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        const count = focusCurveBands.length;
+        for (let i = 0; i < count; i += 1) {
+          const x = focusCurvePointX(matrix, i, count);
+          const y = focusValueToY(focusCurveBands[i] ?? 0);
+          const spring = focusPointScales[i];
+          const scaleValue = spring?.value ?? 1;
+          const radius =
+            (i === focusSelectedIndex ? FOCUS_POINT_SELECTED_RADIUS : FOCUS_POINT_RADIUS) * scaleValue;
+          ctx.fillStyle = rgba(LABEL_RGB, CURVE_POINT_ALPHA);
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // 底部极淡「行 × 列」
+      if (progress > 0.6) {
+        const rowName = matrix.rows[focusCell.row] ?? '';
+        const colName = matrix.cols[focusCell.col] ?? '';
+        ctx.font = `${NAME_FONT_PX}px ${DEFAULT_SERIF}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = rgba(LABEL_RGB, NAME_ALPHA);
+        ctx.fillText(`${rowName} × ${colName}`, panel.left + panel.width / 2, panel.top + panel.height - 34);
+      }
+      ctx.restore();
+      void now;
+      void value;
+    }
+
     function draw(matrix: MatrixView | null, now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = rgbGrey(BG_RGB[0]);
@@ -1313,9 +1780,10 @@ export function MatrixField({
       const closingProgress = closing ? easeOutCubic((now - closing.start) / FADE_MS) : 0;
       const alpha = fadeProgress * (1 - closingProgress);
       const scale = lerp(FADE_SCALE_FROM, 1, fadeProgress) * (1 - 0.02 * closingProgress);
+      const focusRestFactor = 1 - (1 - FOCUS_REST_ALPHA) * clamp(focusSpring.value, 0, 1);
 
       ctx.save();
-      ctx.globalAlpha = clamp(alpha, 0, 1);
+      ctx.globalAlpha = clamp(alpha * focusRestFactor, 0, 1);
       // 淡入缩放绕屏幕中心；组视差在下面按元素分别叠加（格子还要叠亮度差速）。
       ctx.translate(LOGICAL_W / 2, LOGICAL_H / 2);
       ctx.scale(scale, scale);
@@ -1425,8 +1893,13 @@ export function MatrixField({
 
       ctx.restore();
 
+      // 聚焦编辑面板（矩阵淡到 α.12，面板画在其上）。
+      drawFocusPanel(matrix, now, alpha);
+
       // 自定义光标画在最上层，不受矩阵视差影响（difference 反色）。
-      if (cursor && cursorVisible && (cursorActive || cursorFade > 0)) drawCursor(cursor, cursorFade, crosshairScale);
+      if (cursor && cursorVisible && (cursorActive || cursorFade > 0)) {
+        drawCursor(cursor, cursorFade, crosshairScale, !focusIsOpen());
+      }
     }
 
     /* —— 每帧 —— */
@@ -1440,6 +1913,7 @@ export function MatrixField({
       const cols = targets[0]?.length ?? 0;
       syncCurveEditor(now, matrix);
       stepCurveEditor(now, dt);
+      stepFocus(now, dt);
 
       // 数值缓动（约 180ms）
       if (rows > 0) {
@@ -1484,8 +1958,8 @@ export function MatrixField({
         snapSelectionToSelected(dt);
       }
 
-      // 视差弹簧：光标相对屏幕中心的方向，位移与距离成比例；拖拽/滚轮编辑时冻结。
-      const frozen = drag !== null || now < wheelFreezeUntil;
+      // 视差弹簧：光标相对屏幕中心的方向，位移与距离成比例；拖拽/滚轮/聚焦时冻结。
+      const frozen = drag !== null || now < wheelFreezeUntil || focusIsOpen();
       if (frozen) {
         // 真正冻结：target 与速度都锁在当前位置，拖拽/滚轮时矩阵不漂。
         parallaxX.target = parallaxX.value;
@@ -1566,6 +2040,17 @@ export function MatrixField({
             ? { row: curveRow, col: curveCol, bands: curveBands.map((value) => round4(value)) }
             : null,
         curveBandEdits: curveBandEditsNow,
+        focus: {
+          active: focusTargetActive,
+          progress: Math.round(clamp(focusSpring.value, 0, 1) * 1000) / 1000,
+          cell: focusCell,
+          curve:
+            focusTargetActive && focusCurveBands.length > 0
+              ? { row: focusRow, col: focusCol, bands: focusCurveBands.map((value) => round4(value)) }
+              : null,
+          bandIndex: focusSelectedIndex,
+        },
+        focusBandEdits: focusBandEditsNow,
       };
     }
 
@@ -1607,6 +2092,7 @@ export function MatrixField({
           value: round4(value),
         }));
       },
+      focusCurvePositions: () => focusCurvePositionsData(),
       setCell: (row: number, col: number, value: number) => {
         const matrix = currentMatrix();
         if (!matrix) return;
@@ -1636,6 +2122,7 @@ export function MatrixField({
     canvas.addEventListener('dblclick', onDoubleClick);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
     const observer = new ResizeObserver(() => {
       resize();
@@ -1658,6 +2145,7 @@ export function MatrixField({
       canvas.removeEventListener('dblclick', onDoubleClick);
       canvas.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
       if (window.__neurouMatrix === debugApi) delete window.__neurouMatrix;
     };
   }, []);
@@ -1683,6 +2171,10 @@ export function MatrixField({
       data-curve-count={curveCount}
       data-selected-curve={selectedCurveAttr}
       data-curve-band-edits={curveBandEditsUi}
+      data-focus={focusAttr}
+      data-focus-cell={focusCellUi}
+      data-focus-curve={focusCurveUi}
+      data-focus-band-edits={focusBandEditsUi}
       style={{
         position: 'absolute',
         inset: 0,
