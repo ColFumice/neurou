@@ -158,4 +158,34 @@ describe('世界 → 调律台投影', () => {
     expect(trustToFear?.polarity).toBe(-1);
     expect(trustToFear?.loop).toBeUndefined();
   });
+
+  it('弦的「音色」引用会投影成 Lane.timbre（v2.0）', () => {
+    const src = `世界 音色投影
+谱 情绪
+  段 0 1 0.4
+  插值 平滑
+  循环 是
+叙事弦 信任
+  类型 数值 0..100
+  基线 50
+  音色 情绪
+视觉弦 色温
+  类型 数值 0..100
+  基线 60
+`;
+    const compiled = compileText(src, 'timbre-projection.nro');
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    const universe = new Universe(compiled.ir, { seed: 7 });
+    const lanes = collectLanes(universe, compiled.ir);
+    const trust = lanes.find((lane) => lane.id === '信任');
+    expect(trust?.timbre).toEqual({
+      bands: [0, 1, 0.4],
+      min: 0,
+      max: 1,
+      smooth: true,
+      loop: true,
+    });
+    expect(lanes.find((lane) => lane.id === '色温')?.timbre).toBeUndefined();
+  });
 });

@@ -60,6 +60,8 @@ export interface IRString {
   owner?: string;
   /** 关系弦的客体 */
   target?: string;
+  /** 音色引用：某条谱的 id（v2.0） */
+  timbre?: string;
   note?: string;
   span?: Span;
 }

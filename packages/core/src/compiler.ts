@@ -210,6 +210,19 @@ class Compiler {
 
     // 弦和实体可能声明在谱之后；名字冲突必须等所有顶层名字都收集完再查。
     this.checkSpectrumNameConflicts();
+    this.checkTimbreReferences();
+  }
+
+  /** v2.0：弦的 `音色 谱名` 必须指向真实存在的谱。 */
+  private checkTimbreReferences(): void {
+    for (const string of this.strings.values()) {
+      if (!string.timbre) continue;
+      if (!this.spectrumNames.has(string.timbre)) {
+        this.error('NRO2101', `弦「${string.id}」的音色引用了不存在的谱「${string.timbre}」。`, string.span ?? zeroSpan(), {
+          hint: '先声明「谱 名字」，再在弦里写「音色 名字」。',
+        });
+      }
+    }
   }
 
   private declareSpectrum(d: SpectrumDecl): void {
@@ -367,6 +380,7 @@ class Compiler {
       response: d.response ?? '线性',
       owner,
       target: d.target,
+      ...(d.timbre ? { timbre: d.timbre } : {}),
       note: d.note,
       span: d.span,
     };

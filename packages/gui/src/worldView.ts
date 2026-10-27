@@ -31,7 +31,7 @@ export function numericStringsByKind(ir: WorldIR): Record<StringKind, IRString[]
   return groups;
 }
 
-function laneOf(universe: Universe, string: IRString): Lane {
+function laneOf(universe: Universe, string: IRString, spectra: WorldIR['spectra']): Lane {
   const [min, max] = laneRange(string);
   const span = max - min || 1;
   const raw = universe.get(string.id);
@@ -45,6 +45,18 @@ function laneOf(universe: Universe, string: IRString): Lane {
   if (string.safe !== undefined) {
     lane.safe = string.safe;
     lane.safeNorm = clamp((string.safe - min) / span, 0, 1);
+  }
+  if (string.timbre) {
+    const spectrum = spectra.find((s) => s.id === string.timbre);
+    if (spectrum) {
+      lane.timbre = {
+        bands: [...spectrum.bands],
+        min: spectrum.min,
+        max: spectrum.max,
+        smooth: spectrum.interpolation === '平滑',
+        loop: spectrum.loop,
+      };
+    }
   }
   return lane;
 }
@@ -64,7 +76,7 @@ export function collectLanes(
     const candidates = groups[kind];
     if (candidates.length === 0) continue;
     const index = ((selected[kind] ?? 0) % candidates.length + candidates.length) % candidates.length;
-    lanes.push(laneOf(universe, candidates[index]!));
+    lanes.push(laneOf(universe, candidates[index]!, ir.spectra));
   }
   return lanes;
 }

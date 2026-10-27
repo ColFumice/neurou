@@ -339,6 +339,8 @@ export interface KsPluckOptions {
   brightness?: number;
   /** 固定种子，便于测试与缓存。 */
   seed?: number;
+  /** v2.0：谱作为音色（初始激励/波表）。 */
+  timbre?: { bands: readonly number[]; min?: number; max?: number; smooth?: boolean; loop?: boolean };
 }
 
 function mulberry32(seed: number): () => number {
@@ -373,12 +375,48 @@ export function ksPluckBuffer(options: KsPluckOptions): Float32Array {
   const out = new Float32Array(length);
   const random = mulberry32(seed * 2654435761 + Math.round(freq * 1000));
 
-  // 激励噪声：亮度越高，低通越弱（高频越多）。
-  const alpha = 0.28 + 0.55 * brightness;
-  let smoothing = 0;
-  for (let i = 0; i < delay; i++) {
-    smoothing += alpha * (random() * 2 - 1 - smoothing);
-    out[i] = smoothing;
+  // 激励：有谱音色时，用谱采样作为初始波形；否则用噪声。
+  const timbre = options.timbre;
+  const bands = timbre?.bands ?? [];
+  if (timbre && bands.length >= 2) {
+    const tMin = finiteOr(timbre.min ?? 0, 0);
+    const tMax = finiteOr(timbre.max ?? 1, 1);
+    const span = tMax - tMin || 1;
+    const smooth = timbre.smooth === true;
+    const loop = timbre.loop === true;
+    const wave: number[] = [];
+    let mean = 0;
+    for (let i = 0; i < delay; i++) {
+      let phase = i / delay;
+      if (loop) phase = phase - Math.floor(phase);
+      else phase = clamp(phase, 0, 1);
+      const at = phase * (bands.length - 1);
+      const i0 = Math.floor(at);
+      const i1 = Math.min(bands.length - 1, i0 + 1);
+      let t = at - i0;
+      if (smooth) t = (1 - Math.cos(Math.PI * t)) / 2;
+      const a = (bands[i0]! - tMin) / span;
+      const b = (bands[i1]! - tMin) / span;
+      const v = (loop ? a : a) * (1 - t) + b * t;
+      wave.push(v);
+      mean += v;
+    }
+    mean /= delay;
+    let peak = 0;
+    for (let i = 0; i < delay; i++) {
+      wave[i] = wave[i]! - mean;
+      peak = Math.max(peak, Math.abs(wave[i]!));
+    }
+    const scale = peak > 1e-6 ? 1 / peak : 0;
+    for (let i = 0; i < delay; i++) out[i] = wave[i]! * scale;
+  } else {
+    // 激励噪声：亮度越高，低通越弱（高频越多）。
+    const alpha = 0.28 + 0.55 * brightness;
+    let smoothing = 0;
+    for (let i = 0; i < delay; i++) {
+      smoothing += alpha * (random() * 2 - 1 - smoothing);
+      out[i] = smoothing;
+    }
   }
 
   // 延迟线反馈：平均 + 轻微损耗。

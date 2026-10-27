@@ -497,6 +497,16 @@ export function yToValue(y: number): number {
  * 调律台的一根弦：由真实世界的 `IRString` + 运行时值投影而来。
  * `norm` ∈ 0..1 决定基线纵坐标；阈值也归一化到 0..1（共振点 = 接近阈值）。
  */
+/** 谱作为音色时的曲线（v2.0）。 */
+export interface TimbreCurve {
+  /** 原始段值（在 min..max 范围内）。 */
+  bands: number[];
+  min: number;
+  max: number;
+  smooth: boolean;
+  loop: boolean;
+}
+
 export interface Lane {
   kind: StringKind;
   /** 世界里的弦 id（实体弦为「实体.名字」）。 */
@@ -515,6 +525,8 @@ export interface Lane {
   /** 悬崖线 / 安全线的原始值（阈值编辑手势用）。 */
   verge?: number;
   safe?: number;
+  /** v2.0：弦引用的音色谱（没有则不改变声音）。 */
+  timbre?: TimbreCurve;
 }
 
 /** 调律台读取的一份世界切片。 */

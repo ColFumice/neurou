@@ -82,6 +82,8 @@ export interface StringDecl extends DeclBase {
   response?: ResponseCurve;
   visible?: boolean;
   target?: string;
+  /** 音色引用：某条谱的名字（v2.0）。 */
+  timbre?: string;
   note?: string;
   /** 所属实体（嵌套声明时由 parser 填入） */
   owner?: string;

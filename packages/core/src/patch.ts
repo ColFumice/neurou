@@ -111,6 +111,7 @@ function stringStructure(string: IRString): string {
     response: string.response,
     owner: string.owner,
     target: string.target,
+    timbre: string.timbre,
     note: string.note,
   });
 }

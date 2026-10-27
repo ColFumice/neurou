@@ -10,6 +10,8 @@
  * 只负责画布与输入：值真正写回由 App 的 onEditBand 处理。
  */
 import { useEffect, useRef, useState } from 'react';
+import { getStringAudio } from './stringAudio.js';
+import { keyByCode, layoutKeyboard } from './stringMath.js';
 
 /* ------------------------------------------------------------------ *
  * 类型 / Prop 契约
@@ -62,6 +64,7 @@ declare global {
       bandPositions: () => Array<BandPosition & { index: number }>;
       setBand: (bandIndex: number, value: number) => void;
       easeTick: () => number[];
+      auditions: () => number;
     };
   }
 }
@@ -196,6 +199,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
   const [targetsUi, setTargetsUi] = useState<number[]>([]);
   const [selectedUi, setSelectedUi] = useState<number | null>(null);
   const [hoverUi, setHoverUi] = useState<number | null>(null);
+  const [auditionsUi, setAuditionsUi] = useState(0);
+  const [lastKeyUi, setLastKeyUi] = useState('');
 
   const bandsJson = formatBandList(valuesUi);
   const targetsJson = formatBandList(targetsUi);
@@ -210,6 +215,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     const host = hostElement;
     const canvas = canvasElement;
     const ctx = contextMaybe;
+    const audio = getStringAudio();
+    const keys = layoutKeyboard();
 
     /* —— 可变状态 —— */
     let displayed: number[] = [];
@@ -218,6 +225,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     let hover: number | null = null;
     let drag: { pointerId: number; band: number; startY: number; moved: boolean } | null = null;
     let spectrumKey = '';
+    let auditionsNow = 0;
+    let lastKeyNow = '';
     let scaleX = 1;
     let scaleY = 1;
     let ink: Rgb = FALLBACK_INK;
@@ -297,6 +306,11 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       });
       setSelectedUi((previous) => (previous === selected ? previous : selected));
       setHoverUi((previous) => (previous === hover ? previous : hover));
+    }
+
+    function pushAuditionUi(): void {
+      setAuditionsUi(auditionsNow);
+      setLastKeyUi(lastKeyNow);
     }
 
     /** 谱切换 / 频段数量变化时：快照到新谱、清掉选中/hover/拖动。 */
@@ -531,6 +545,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     }
 
     function onKeyDown(event: KeyboardEvent): void {
+      if (event.repeat) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.code === 'Tab') {
         event.preventDefault();
@@ -542,6 +557,26 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         event.preventDefault();
         event.stopImmediatePropagation();
         exitRef.current();
+        return;
+      }
+      // 试听：复用 46 键物理映射（Tab/Esc/F2/方向键已在上面排除，修饰键在上面提前返回）。
+      const auditionKey = keyByCode(keys, event.code);
+      if (auditionKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const spectrum = currentSpectrum();
+        if (!spectrum) return;
+        auditionsNow += 1;
+        lastKeyNow = event.code;
+        pushAuditionUi();
+        void audio.ensureStarted();
+        audio.previewSpectrum(
+          spectrum.bands,
+          auditionKey.cx / LOGICAL_W,
+          0.5,
+          spectrum.interpolation === '平滑',
+          spectrum.loop,
+        );
         return;
       }
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight' || event.code === 'ArrowUp' || event.code === 'ArrowDown') {
@@ -649,6 +684,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         pushUi(true);
         return displayed.map((value) => round4(value));
       },
+      auditions: () => auditionsNow,
     };
 
     window.__neurouSpectrum = debugApi;
@@ -698,6 +734,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       data-band-targets={targetsJson}
       data-band-selected={selectedUi === null ? '' : String(selectedUi)}
       data-hover-band={hoverUi === null ? '' : String(hoverUi)}
+      data-auditions={auditionsUi}
+      data-last-key={lastKeyUi}
       style={{
         position: 'absolute',
         inset: 0,

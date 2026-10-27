@@ -368,4 +368,40 @@ describe('谱：解析、编译与验证', () => {
       loop: true,
     });
   });
+
+  it('弦可以用「音色」引用一条谱，序列化后仍保留', () => {
+    const src = `世界 音色测试
+谱 情绪
+  段 0.1 0.5 0.9
+叙事弦 信任
+  类型 数值 0..100
+  基线 50
+  音色 情绪
+`;
+    const r = compileText(src, 'timbre.nro');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ir.strings[0]?.timbre).toBe('情绪');
+    const text = serialize(r.ir);
+    expect(text).toContain('音色 情绪');
+    const again = compileText(text, 'timbre-roundtrip.nro');
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.ir.strings[0]?.timbre).toBe('情绪');
+  });
+
+  it('音色引用不存在的谱会报 NRO2101', () => {
+    const r = compileText(
+      `世界 坏音色
+叙事弦 信任
+  类型 数值 0..100
+  基线 50
+  音色 不存在
+`,
+      'bad-timbre.nro',
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostics.errors.some((e) => e.code === 'NRO2101')).toBe(true);
+  });
 });

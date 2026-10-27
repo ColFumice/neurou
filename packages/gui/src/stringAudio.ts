@@ -8,6 +8,7 @@
  */
 import type { StringKind } from '@neurou/core';
 import { WAVE_WIDTH, ksPluckBuffer, pitchForX } from './waveMath.js';
+import type { TimbreCurve } from './stringMath.js';
 
 export type StringAudioState = 'off' | 'running' | 'suspended' | 'unavailable';
 
@@ -152,17 +153,43 @@ export class StringAudioEngine {
    * amplitudeNorm 0..1 只影响音量与轻微亮度；
    * pitchScale 用来表现 D-膜跨度（弦越短，音越高）。
    */
-  pluck(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm = 0.7, pitchScale = 1): void {
+  pluck(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm = 0.7, pitchScale = 1, timbre?: TimbreCurve): void {
     if (this.failed) return;
     if (!this.ctx) {
       // 手势可能已经把 context 创建起来了；没有就尝一次，失败则不响。
-      void this.ensureStarted().then(() => this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale));
+      void this.ensureStarted().then(() => this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale, timbre));
       return;
     }
-    this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale);
+    this.play(kind, xNorm, yNorm, amplitudeNorm, pitchScale, timbre);
   }
 
-  private play(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm: number, pitchScale: number): void {
+  /** v2.0：谱模式里按下一个键，用当前谱作为音色试听。 */
+  previewSpectrum(
+    bands: readonly number[],
+    xNorm: number,
+    yNorm: number,
+    smooth: boolean,
+    loop: boolean,
+    amplitudeNorm = 0.62,
+  ): void {
+    if (bands.length < 2) return;
+    this.pluck('叙事', xNorm, yNorm, amplitudeNorm, 1, {
+      bands: [...bands],
+      min: 0,
+      max: 1,
+      smooth,
+      loop,
+    });
+  }
+
+  private play(
+    kind: StringKind,
+    xNorm: number,
+    yNorm: number,
+    amplitudeNorm: number,
+    pitchScale: number,
+    timbre?: TimbreCurve,
+  ): void {
     const ctx = this.ctx;
     const master = this.master;
     if (!ctx || !master) return;
@@ -174,7 +201,10 @@ export class StringAudioEngine {
     const degree = Math.round(x * 15);
     const pitchBucket = Math.round(scale * 20);
     const amp = clamp(amplitudeNorm, 0, 1);
-    const cacheKey = `${kind}:${degree}:${pitchBucket}`;
+    const timbreKey = timbre
+      ? `:t${timbre.bands.map((v) => Math.round(v * 1000)).join('.')}${timbre.smooth ? 's' : 'l'}${timbre.loop ? 'o' : ''}`
+      : '';
+    const cacheKey = `${kind}:${degree}:${pitchBucket}${timbreKey}`;
 
     let buffer = this.bufferCache.get(cacheKey);
     if (!buffer) {
@@ -184,6 +214,7 @@ export class StringAudioEngine {
         sampleRate: ctx.sampleRate,
         brightness: clamp(profile.brightness + (Math.abs(yNorm - 0.5) - 0.25) * 0.2, 0, 1),
         seed: degree + 1,
+        ...(timbre ? { timbre } : {}),
       });
       const created = ctx.createBuffer(1, samples.length, ctx.sampleRate);
       created.copyToChannel(samples, 0);

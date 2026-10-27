@@ -33,6 +33,7 @@ import {
   yToValue,
   type KindVisualProfile,
   type Lane,
+  type TimbreCurve,
   type WorldView,
 } from './stringMath.js';
 import { getStringAudio, type StringAudioState } from './stringAudio.js';
@@ -1583,9 +1584,16 @@ export function StringField({
     }
 
     /* —— 拨动 / 和弦 / 对偶 —— */
-    function audioBegin(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm: number, pitchScale: number): void {
+    function audioBegin(
+      kind: StringKind,
+      xNorm: number,
+      yNorm: number,
+      amplitudeNorm: number,
+      pitchScale: number,
+      timbre?: TimbreCurve,
+    ): void {
       void audio.ensureStarted();
-      audio.pluck(kind, xNorm, yNorm, amplitudeNorm, pitchScale);
+      audio.pluck(kind, xNorm, yNorm, amplitudeNorm, pitchScale, timbre);
     }
 
     function chordOnPluck(center01: number, amplitude: number): void {
@@ -1613,7 +1621,7 @@ export function StringField({
           otherProfile,
         );
       }
-      audioBegin(kindOf(focusIdx), clamp(center01 + 0.1, 0, 1), 0.5, 0.8, (1 / spanNow) * 1.5);
+      audioBegin(kindOf(focusIdx), clamp(center01 + 0.1, 0, 1), 0.5, 0.8, (1 / spanNow) * 1.5, laneAt(focusIdx)?.timbre);
     }
 
     function startDual(persist = true): void {
@@ -1641,7 +1649,7 @@ export function StringField({
       dualNow = false;
       setDualUi(false);
       setRestingUi(true);
-      audioBegin(kindOf(index), 0.5, 0.5, 0.8, (1 / spanNow) * 2);
+      audioBegin(kindOf(index), 0.5, 0.5, 0.8, (1 / spanNow) * 2, laneAt(index)?.timbre);
     }
 
     /** 拨动焦点弦：视觉波 + 推动真实值约 8% 量程。persist=true = 用户手势（要落盘）。 */
@@ -1683,6 +1691,7 @@ export function StringField({
         clamp(screenY / LOGICAL_H, 0, 1),
         clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
         1 / spanNow,
+        lane.timbre,
       );
       if (resonantNow) chordOnPluck(center01, amplitude);
       trailSettle = 0;
@@ -1702,7 +1711,7 @@ export function StringField({
         profile,
       );
       bumpPlucks();
-      audioBegin(lane.kind, 0.5, 0.5, 0.5, 1 / spanNow);
+      audioBegin(lane.kind, 0.5, 0.5, 0.5, 1 / spanNow, lane.timbre);
       trailSettle = 0;
       setRestingUi(false);
     }

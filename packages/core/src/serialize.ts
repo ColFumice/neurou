@@ -166,6 +166,7 @@ function stringBlock(w: Writer, s: IRString, indent: number): void {
   if (s.safe !== undefined) w.line(inner, `安全 ${numberText(s.safe)}`);
   if (s.response !== '线性') w.line(inner, `响应 ${s.response}`);
   if (s.target) w.line(inner, `对象 ${s.target}`);
+  if (s.timbre) w.line(inner, `音色 ${s.timbre}`);
   if (s.note) w.line(inner, `描述 ${stringText(s.note)}`);
   w.blank();
 }
@@ -180,6 +181,7 @@ export function stringBlockLines(s: IRString): string[] {
   if (s.safe !== undefined) lines.push(`  安全 ${numberText(s.safe)}`);
   if (s.response !== '线性') lines.push(`  响应 ${s.response}`);
   if (s.target) lines.push(`  对象 ${s.target}`);
+  if (s.timbre) lines.push(`  音色 ${s.timbre}`);
   if (s.note) lines.push(`  描述 ${stringText(s.note)}`);
   return lines;
 }

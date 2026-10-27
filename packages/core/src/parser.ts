@@ -653,11 +653,14 @@ class Parser {
       case '对象':
         decl.target = this.readName('关系对象');
         return;
+      case '音色':
+        decl.timbre = this.readName('音色谱名');
+        return;
       case '描述':
         decl.note = this.readString('描述');
         return;
       default:
-        this.fail(`弦上不认识「${key}」这个字段。`, this.peek().span, '可用字段：类型、范围、基线、悬崖、安全、响应、可见、对象、描述。');
+        this.fail(`弦上不认识「${key}」这个字段。`, this.peek().span, '可用字段：类型、范围、基线、悬崖、安全、响应、可见、对象、音色、描述。');
         this.skipToLineEnd();
     }
   }
