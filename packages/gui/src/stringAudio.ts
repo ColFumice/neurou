@@ -7,7 +7,7 @@
  * - AnalyserNode 挂在 master 之后，`rms()` 给自动验收一个真实的非静音信号。
  */
 import type { StringKind } from '@neurou/core';
-import { WAVE_WIDTH, ksPluckBuffer, pitchForX, spectrumWaveSamples } from './waveMath.js';
+import { WAVE_WIDTH, ksPluckBuffer, pitchForX, spectrumFourier } from './waveMath.js';
 import type { TimbreCurve } from './stringMath.js';
 
 export type StringAudioState = 'off' | 'running' | 'suspended' | 'unavailable';
@@ -56,7 +56,7 @@ export class StringAudioEngine {
   private listeners = new Set<(state: StringAudioState) => void>();
   private bufferCache = new Map<string, AudioBuffer>();
   private sources = new Set<AudioBufferSourceNode>();
-  private voices = new Map<number, { source: AudioBufferSourceNode; gain: GainNode; pan: StereoPannerNode | null }>();
+  private voices = new Map<number, { osc: OscillatorNode; gain: GainNode; pan: StereoPannerNode | null }>();
   private voiceSeq = 0;
 
   getState(): StringAudioState {
@@ -284,13 +284,11 @@ export class StringAudioEngine {
     const x = clamp(xNorm, 0, 1);
     const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
     const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
-    const period = Math.max(8, Math.round(ctx.sampleRate / freq));
-    const wave = spectrumWaveSamples(bands, { min: 0, max: 1, smooth, loop }, period);
-    const buffer = ctx.createBuffer(1, wave.length, ctx.sampleRate);
-    buffer.copyToChannel(wave, 0);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
+    const fourier = spectrumFourier(bands, { min: 0, max: 1, smooth, loop });
+    const wave = ctx.createPeriodicWave(fourier.real, fourier.imag);
+    const osc = ctx.createOscillator();
+    osc.setPeriodicWave(wave);
+    osc.frequency.value = freq;
     const gain = ctx.createGain();
     const target = clamp(profile.gain * (0.4 + amplitudeNorm * 0.5), 0.02, 0.3);
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
@@ -298,17 +296,30 @@ export class StringAudioEngine {
     const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
     if (pan) {
       pan.pan.value = (x * 2 - 1) * 0.4;
-      source.connect(gain);
+      osc.connect(gain);
       gain.connect(pan);
       pan.connect(master);
     } else {
-      source.connect(gain);
+      osc.connect(gain);
       gain.connect(master);
     }
-    source.start();
+    osc.start();
     const id = ++this.voiceSeq;
-    this.voices.set(id, { source, gain, pan });
+    this.voices.set(id, { osc, gain, pan });
     return id;
+  }
+
+  /** 实时更新持续音的波形（拖段点/键盘改段值后音色跟随）。 */
+  updateSustainedSpectrum(id: number, bands: readonly number[], smooth: boolean, loop: boolean): void {
+    const voice = this.voices.get(id);
+    const ctx = this.ctx;
+    if (!voice || !ctx || bands.length < 2) return;
+    const fourier = spectrumFourier(bands, { min: 0, max: 1, smooth, loop });
+    try {
+      voice.osc.setPeriodicWave(ctx.createPeriodicWave(fourier.real, fourier.imag));
+    } catch {
+      /* ignore */
+    }
   }
 
   stopSustainedSpectrum(id: number): void {
@@ -321,16 +332,15 @@ export class StringAudioEngine {
       voice.gain.gain.cancelScheduledValues(ctx?.currentTime ?? 0);
       voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), ctx?.currentTime ?? 0);
       voice.gain.gain.exponentialRampToValueAtTime(0.0001, end);
-      voice.source.stop(end + 0.02);
+      voice.osc.stop(end + 0.02);
     } catch {
       try {
-        voice.source.stop();
+        voice.osc.stop();
       } catch {
         /* ignore */
       }
     }
-    voice.source.onended = () => {
-      try {
+    voice.osc.onended = () => {      try {
         voice.gain.disconnect();
         voice.pan?.disconnect();
       } catch {

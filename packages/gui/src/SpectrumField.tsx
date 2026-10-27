@@ -60,6 +60,26 @@ interface BandPosition {
   value: number;
 }
 
+/** 一个映射键按住期间改动的段（keyup 时若值变了持久化一次）。 */
+interface KeyBandEdit {
+  band: number;
+  spectrumId: string;
+  startValue: number;
+  voiceId: number;
+  smooth: boolean;
+  loop: boolean;
+}
+
+/** 上下键惯性移动状态（速度线性加速/减速，位置逐帧连续）。 */
+interface ArrowTuneState {
+  band: number;
+  spectrumId: string;
+  dir: 1 | -1;
+  velocity: number;
+  held: boolean;
+  startValue: number;
+}
+
 declare global {
   interface Window {
     __neurouSpectrum?: {
@@ -68,6 +88,7 @@ declare global {
       setBand: (bandIndex: number, value: number) => void;
       easeTick: () => number[];
       auditions: () => number;
+      bandTargets: () => number[];
     };
   }
 }
@@ -116,12 +137,16 @@ const DOTS_CURRENT_ALPHA = 0.55;
 /** 显示值缓动：每帧收敛 18%（~60fps 下约 160ms 视觉追平，任务允许「每帧 0.18」）。 */
 const EASE_PER_FRAME = 0.18;
 const EASE_EPSILON = 0.0005;
-/** 键盘微调步长 = (max-min) / KEY_STEP_DIVISOR。 */
-const KEY_STEP_DIVISOR = 100;
 /** 段点命中半径（按 x 距离，宽松些）。 */
 const HIT_RADIUS_PX = 40;
 /** 拖动判定阈值：超过这么多像素才算改值（纯点击只选段）。 */
 const DRAG_THRESHOLD_PX = 2;
+
+/** 上下键惯性：线性加速到 vmax=(量程)/1.1 每秒，松开 0.22s 线性减速到 0。 */
+const ARROW_VMAX_SECONDS = 1.1;
+const ARROW_DECEL_SECONDS = 0.22;
+/** 持续音色随曲线实时更新：每 ~60ms 换一次波表。 */
+const SUSTAINED_UPDATE_MS = 60;
 
 /** 按键反馈：键位 x 处极淡短竖线 + 底部该键字符；拨弦 300ms 淡出，持续按住保持。 */
 const FEEDBACK_LINE_ALPHA = 0.2;
@@ -214,6 +239,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
   const [auditionsUi, setAuditionsUi] = useState(0);
   const [lastKeyUi, setLastKeyUi] = useState('');
   const [sustainedCountUi, setSustainedCountUi] = useState(0);
+  const [lastBandUi, setLastBandUi] = useState<number | null>(null);
 
   const bandsJson = formatBandList(valuesUi);
   const targetsJson = formatBandList(targetsUi);
@@ -240,8 +266,12 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     let spectrumKey = '';
     let auditionsNow = 0;
     let lastKeyNow = '';
-    /** 持续音（拉奏/吹奏）：keyCode → audio voice id，多键各自独立。 */
-    const sustainedVoices = new Map<string, number>();
+    let lastBandNow: number | null = null;
+    /** 映射键按住改动中的段：keyCode → edit（持续谱带 voice）。 */
+    const keyEdits = new Map<string, KeyBandEdit>();
+    /** 上下键惯性状态（同一时间一段）。 */
+    let arrowTune: ArrowTuneState | null = null;
+    let lastVoiceUpdate = 0;
     /** 按键反馈：keyCode → 位置/字符/按下与松开时间（松开后 300ms 淡出）。 */
     const auditionMarks = new Map<
       string,
@@ -337,11 +367,73 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       setSustainedCountUi(value);
     }
 
-    /** 停掉全部持续音（Tab/切谱/Esc/卸载时调用）。 */
-    function stopAllSustained(updateUi = true): void {
-      for (const id of sustainedVoices.values()) audio.stopSustainedSpectrum(id);
-      sustainedVoices.clear();
-      if (updateUi) setSustainedCount(0);
+    function setLastBand(band: number | null): void {
+      if (lastBandNow === band) return;
+      lastBandNow = band;
+      setLastBandUi(band);
+    }
+
+    function activeVoiceCount(): number {
+      let count = 0;
+      for (const edit of keyEdits.values()) if (edit.voiceId > 0) count += 1;
+      return count;
+    }
+
+    /** 一个映射键松开（或切谱/退出）时结算：停 voice；若段值变了持久化一次。 */
+    function flushKeyEdit(code: string, persist = true): void {
+      const edit = keyEdits.get(code);
+      if (!edit) return;
+      keyEdits.delete(code);
+      if (edit.voiceId > 0) audio.stopSustainedSpectrum(edit.voiceId);
+      if (persist) {
+        const spectrum = currentSpectrum();
+        if (spectrum) {
+          const value = clamp(targets[edit.band] ?? edit.startValue, spectrum.min, spectrum.max);
+          if (Math.abs(value - edit.startValue) > 1e-6) editRef.current(edit.spectrumId, edit.band, value, true);
+        }
+      }
+      setSustainedCount(activeVoiceCount());
+    }
+
+    function flushAllKeyEdits(persist = true): void {
+      for (const code of [...keyEdits.keys()]) flushKeyEdit(code, persist);
+    }
+
+    /** 持续音色：按住期间每 ~60ms 用当前显示曲线换一次波表，声音跟着曲线变。 */
+    function syncSustainedVoices(now: number, force = false): void {
+      if (keyEdits.size === 0) return;
+      if (!force && now - lastVoiceUpdate < SUSTAINED_UPDATE_MS) return;
+      lastVoiceUpdate = now;
+      for (const edit of keyEdits.values()) {
+        if (edit.voiceId > 0) audio.updateSustainedSpectrum(edit.voiceId, displayed, edit.smooth, edit.loop);
+      }
+    }
+
+    /** 结算上下键惯性：松开减速到 0 / 切谱 / 退出时调用。 */
+    function finalizeArrowTune(persist = true): void {
+      const tune = arrowTune;
+      if (!tune) return;
+      arrowTune = null;
+      if (!persist) return;
+      const value = targets[tune.band];
+      if (value === undefined) return;
+      if (Math.abs(value - tune.startValue) > 1e-6) editRef.current(tune.spectrumId, tune.band, value, true);
+    }
+
+    /** key.cx → 最近段索引；key.cy → 目标值（曲线区 y 上高下低）。 */
+    function nearestBandIndex(spectrum: SpectrumView, x: number): number {
+      const count = targets.length;
+      if (count === 0) return 0;
+      let best = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < count; i += 1) {
+        const distance = Math.abs(x - bandX(spectrum, i, count));
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = i;
+        }
+      }
+      return best;
     }
 
     /** 谱切换 / 频段数量变化时：快照到新谱、清掉选中/hover/拖动。 */
@@ -356,7 +448,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
           selected = null;
           hover = null;
           drag = null;
-          stopAllSustained();
+          flushAllKeyEdits(true);
+          finalizeArrowTune(true);
           auditionMarks.clear();
           pushUi(true);
         }
@@ -371,13 +464,14 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         selected = null;
         hover = null;
         drag = null;
-        stopAllSustained();
+        flushAllKeyEdits(true);
+        finalizeArrowTune(true);
         auditionMarks.clear();
         pushUi(true);
         return spectrum;
       }
-      // 外部（App）回传的新段值：非拖动时温和跟随，不闪烁。
-      if (!drag && spectrum.bands.length === targets.length) {
+      // 外部（App）回传的新段值：非拖动、且没有键盘/方向键正在本地改值时温和跟随，不闪烁。
+      if (!drag && keyEdits.size === 0 && arrowTune === null && spectrum.bands.length === targets.length) {
         let changed = false;
         for (let i = 0; i < targets.length; i += 1) {
           const next = clamp(spectrum.bands[i] ?? spectrum.min, spectrum.min, spectrum.max);
@@ -543,6 +637,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       if (event.pointerType === 'mouse' && event.button !== 0) return;
       const spectrum = currentSpectrum();
       if (!spectrum) return;
+      // 鼠标是「最新输入」：先把方向键惯性/映射键按住改动结算掉，避免两个 target 打架。
+      finalizeArrowTune(true);
       const point = pointToLogical(event.clientX, event.clientY);
       const hit = hitBand(spectrum, point.x);
       event.preventDefault();
@@ -558,6 +654,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         return;
       }
       selected = hit;
+      setLastBand(hit);
       drag = { pointerId: event.pointerId, band: hit, startY: point.y, moved: false };
       pushUi();
     }
@@ -608,7 +705,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       if (event.code === 'Tab') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        stopAllSustained();
+        flushAllKeyEdits(true);
+        finalizeArrowTune(true);
         auditionMarks.clear();
         cycleRef.current(event.shiftKey ? -1 : 1);
         return;
@@ -616,47 +714,47 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       if (event.code === 'Escape' || event.code === 'F2') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        stopAllSustained();
+        flushAllKeyEdits(true);
+        finalizeArrowTune(true);
         auditionMarks.clear();
         exitRef.current();
         return;
       }
-      // 试听：复用 46 键物理映射（Tab/Esc/F2/方向键已在上面排除，修饰键在上面提前返回）。
+      // 物理键映射：改曲线（最近段 + 按键 y 的目标值）+ 立即发声，keyup 时持久化一次。
       const auditionKey = keyByCode(keys, event.code);
       if (auditionKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
         const spectrum = currentSpectrum();
         if (!spectrum) return;
+        finalizeArrowTune(true);
+        if (keyEdits.has(event.code)) flushKeyEdit(event.code, true);
+        const band = nearestBandIndex(spectrum, auditionKey.cx);
+        const value = yToValue(spectrum, auditionKey.cy);
+        targets[band] = value;
+        selected = band;
+        setLastBand(band);
         auditionsNow += 1;
         lastKeyNow = event.code;
         pushAuditionUi();
         const now = performance.now();
         auditionMarks.set(event.code, { x: auditionKey.cx, label: auditionKey.label, pressedAt: now, releasedAt: null });
         void audio.ensureStarted();
-        const xNorm = auditionKey.cx / LOGICAL_W;
+        const smooth = spectrum.interpolation === '平滑';
+        const loop = spectrum.loop;
+        const startValue = spectrum.bands[band] ?? value;
         if (spectrum.articulation === '持续') {
-          // 持续（拉奏/吹奏）：按 keyCode 各持一个循环 voice，松手才停。
-          const voiceId = audio.startSustainedSpectrum(
-            spectrum.bands,
-            xNorm,
-            0.5,
-            spectrum.interpolation === '平滑',
-            spectrum.loop,
-          );
-          if (voiceId > 0) {
-            sustainedVoices.set(event.code, voiceId);
-            setSustainedCount(sustainedVoices.size);
-          }
+          // 持续（拉奏/吹奏）：按住期间 voice 用显示曲线实时换波表。
+          const voiceId = audio.startSustainedSpectrum(displayed, auditionKey.cx / LOGICAL_W, 0.5, smooth, loop);
+          keyEdits.set(event.code, { band, spectrumId: spectrum.id, startValue, voiceId, smooth, loop });
+          setSustainedCount(activeVoiceCount());
+          syncSustainedVoices(now, true);
         } else {
-          audio.previewSpectrum(
-            spectrum.bands,
-            xNorm,
-            0.5,
-            spectrum.interpolation === '平滑',
-            spectrum.loop,
-          );
+          // 拨弦：one-shot；仍记录改动，keyup 时持久化。
+          audio.previewSpectrum(displayed, auditionKey.cx / LOGICAL_W, 0.5, smooth, loop);
+          keyEdits.set(event.code, { band, spectrumId: spectrum.id, startValue, voiceId: 0, smooth, loop });
         }
+        pushUi();
         return;
       }
       if (event.code === 'ArrowLeft' || event.code === 'ArrowRight' || event.code === 'ArrowUp' || event.code === 'ArrowDown') {
@@ -675,25 +773,42 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         pushUi();
         return;
       }
-      // ↑/↓ 微调选中段的值（步长 = 量程/100），persist=true
+      // ↑/↓：按住连续 + 惯性（速度从 0 线性加速到 vmax，松开 0.22s 线性减速到 0）。
       if (selected === null) selected = 0;
-      const step = spectrumSpan(spectrum) / KEY_STEP_DIVISOR;
-      const direction = event.code === 'ArrowUp' ? 1 : -1;
       const bandIndex = selected;
-      const nextValue = clamp((targets[bandIndex] ?? spectrum.min) + direction * step, spectrum.min, spectrum.max);
-      targets[bandIndex] = nextValue;
+      const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
+      if (arrowTune && arrowTune.band === bandIndex) {
+        // 反向按住：保留速度，加速度让它平滑过零。
+        arrowTune.dir = dir;
+        arrowTune.held = true;
+        arrowTune.spectrumId = spectrum.id;
+      } else {
+        if (arrowTune) finalizeArrowTune(true);
+        arrowTune = {
+          band: bandIndex,
+          spectrumId: spectrum.id,
+          dir,
+          velocity: 0,
+          held: true,
+          startValue: targets[bandIndex] ?? spectrum.min,
+        };
+      }
+      setLastBand(bandIndex);
       pushUi();
-      editRef.current(spectrum.id, bandIndex, nextValue, true);
     }
 
     function onKeyUp(event: KeyboardEvent): void {
       const mark = auditionMarks.get(event.code);
       if (mark && mark.releasedAt === null) mark.releasedAt = performance.now();
-      const voiceId = sustainedVoices.get(event.code);
-      if (voiceId !== undefined) {
-        audio.stopSustainedSpectrum(voiceId);
-        sustainedVoices.delete(event.code);
-        setSustainedCount(sustainedVoices.size);
+      // 映射键松开：停 voice + 该段若变了持久化一次。
+      flushKeyEdit(event.code, true);
+      // ↑/↓ 松开：进入线性减速；velocity 到 0 时再持久化一次。
+      if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
+        if (arrowTune && arrowTune.dir === dir) {
+          arrowTune.held = false;
+          if (arrowTune.velocity === 0) finalizeArrowTune(true);
+        }
       }
     }
 
@@ -723,6 +838,35 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         }
         if (changed) pushUi();
       }
+      // 上下键惯性：速度线性加速/减速，位置逐帧连续；到 min/max 停下。
+      if (arrowTune && spectrum) {
+        const tune = arrowTune;
+        const vmax = spectrumSpan(spectrum) / ARROW_VMAX_SECONDS;
+        if (tune.held) {
+          const targetV = tune.dir * vmax;
+          const accel = vmax / ARROW_VMAX_SECONDS;
+          if (tune.velocity < targetV) tune.velocity = Math.min(targetV, tune.velocity + accel * dt);
+          else if (tune.velocity > targetV) tune.velocity = Math.max(targetV, tune.velocity - accel * dt);
+        } else {
+          const decel = vmax / ARROW_DECEL_SECONDS;
+          if (tune.velocity > 0) tune.velocity = Math.max(0, tune.velocity - decel * dt);
+          else if (tune.velocity < 0) tune.velocity = Math.min(0, tune.velocity + decel * dt);
+        }
+        if (tune.velocity !== 0) {
+          const before = targets[tune.band] ?? spectrum.min;
+          const next = clamp(before + tune.velocity * dt, spectrum.min, spectrum.max);
+          if (next !== before) {
+            targets[tune.band] = next;
+            pushUi();
+          }
+          if (next === spectrum.min || next === spectrum.max) tune.velocity = 0;
+        }
+        if (!tune.held && tune.velocity === 0) finalizeArrowTune(true);
+      } else if (arrowTune) {
+        finalizeArrowTune(false);
+      }
+      // 持续音色实时跟随显示曲线（每 ~60ms 换一次波表）。
+      syncSustainedVoices(now);
       draw(spectrum, now);
     }
 
@@ -777,6 +921,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         return displayed.map((value) => round4(value));
       },
       auditions: () => auditionsNow,
+      bandTargets: () => targets.map((value) => round4(value)),
     };
 
     window.__neurouSpectrum = debugApi;
@@ -811,7 +956,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      stopAllSustained(false);
+      flushAllKeyEdits(false);
+      finalizeArrowTune(false);
       auditionMarks.clear();
       if (window.__neurouSpectrum === debugApi) delete window.__neurouSpectrum;
     };
@@ -834,6 +980,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       data-last-key={lastKeyUi}
       data-articulation={current?.articulation ?? '拨弦'}
       data-sustained-count={sustainedCountUi}
+      data-last-band={lastBandUi === null ? '' : String(lastBandUi)}
       style={{
         position: 'absolute',
         inset: 0,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ksPluckBuffer } from '../src/waveMath.js';
+import { ksPluckBuffer, spectrumFourier } from '../src/waveMath.js';
 
 const base = { freq: 220, seconds: 0.25, sampleRate: 8000, seed: 7 };
 
@@ -34,5 +34,14 @@ describe('ksPluckBuffer：谱音色激励', () => {
     expect(Array.from(one)).not.toEqual(Array.from(two));
     const noise = ksPluckBuffer(base);
     expect(Array.from(noise)).not.toEqual(Array.from(one));
+  });
+
+  it('持续音色的傅里叶系数有限、去直流，不同谱不同', () => {
+    const a = spectrumFourier([0, 1, 0.2, 0.8], { smooth: true, loop: true });
+    const b = spectrumFourier([0.8, 0.2, 1, 0], { smooth: true, loop: true });
+    expect(a.real).toHaveLength(33);
+    expect(a.real[0]).toBe(0);
+    for (const value of [...a.real, ...a.imag]) expect(Number.isFinite(value)).toBe(true);
+    expect(Array.from(a.imag)).not.toEqual(Array.from(b.imag));
   });
 });

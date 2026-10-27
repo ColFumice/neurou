@@ -403,6 +403,31 @@ export function spectrumWaveSamples(
   return out;
 }
 
+/** v2.0.2：把谱转成 PeriodicWave 的傅里叶系数（持续音色可实时换波）。 */
+export function spectrumFourier(
+  bands: readonly number[],
+  options: { min?: number; max?: number; smooth?: boolean; loop?: boolean } = {},
+  harmonics = 32,
+): { real: Float32Array; imag: Float32Array } {
+  const count = Math.max(8, Math.min(256, harmonics * 4));
+  const wave = spectrumWaveSamples(bands, options, count);
+  const h = Math.max(1, Math.round(harmonics));
+  const real = new Float32Array(h + 1);
+  const imag = new Float32Array(h + 1);
+  for (let k = 1; k <= h; k++) {
+    let re = 0;
+    let im = 0;
+    for (let i = 0; i < wave.length; i++) {
+      const angle = (2 * Math.PI * k * i) / wave.length;
+      re += wave[i]! * Math.cos(angle);
+      im += wave[i]! * Math.sin(angle);
+    }
+    real[k] = (2 * re) / wave.length;
+    imag[k] = (2 * im) / wave.length;
+  }
+  return { real, imag };
+}
+
 /**
  * Karplus-Strong：噪声激励 + 延迟线 + 低通反馈，最后叠一条指数衰减包络。
  * 返回长度 = round(seconds * sampleRate) 的缓冲；峰值归一化到 ~0.92，无 NaN。
