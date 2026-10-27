@@ -55,6 +55,8 @@ interface MatrixDebugState {
   selected: CellRef | null;
   hover: CellRef | null;
   cellEdits: number;
+  cursor: { x: number; y: number } | null;
+  offset: { x: number; y: number };
 }
 
 declare global {
@@ -120,6 +122,22 @@ const VALUE_EPSILON = 0.0004;
 const FADE_MS = 260;
 const FADE_SCALE_FROM = 0.98;
 
+/** 视差：矩阵整体沿「光标相对屏幕中心」的方向平移，位移 = 距离 × PARALLAX。 */
+const PARALLAX = 0.08;
+/** 视差 spring：更缓一点（response 0.4s / damping 0.9）。 */
+const PARALLAX_SPRING_RESPONSE = 0.4;
+const PARALLAX_SPRING_DAMPING = 0.9;
+/** 滚轮编辑后短暂冻结视差，避免读数时矩阵漂移。 */
+const WHEEL_FREEZE_MS = 280;
+/** 自定义光标：1px 全屏白十字 + 22px/3px 粗准星（中心留 4px 空隙），difference 自动反色。 */
+const CURSOR_ARM_PX = 11;
+const CURSOR_CENTER_GAP_PX = 4;
+const CURSOR_THIN_WIDTH = 1;
+const CURSOR_THICK_WIDTH = 3;
+const CURSOR_FADE_MS = 160;
+/** 命中容差：视差弹簧还没追上时也能稳定点到目标格。 */
+const HIT_TOLERANCE_PX = 10;
+
 /** 交互灵敏度。 */
 const DRAG_VALUE_PER_PX = 1 / 220;
 const WHEEL_STEP = 0.02;
@@ -177,15 +195,19 @@ class Spring {
   value: number;
   velocity = 0;
   target: number;
+  response: number;
+  damping: number;
 
-  constructor(value: number) {
+  constructor(value: number, response = SPRING_RESPONSE, damping = SPRING_DAMPING) {
     this.value = value;
     this.target = value;
+    this.response = response;
+    this.damping = damping;
   }
 
   step(dt: number): void {
-    const omega = (2 * Math.PI) / SPRING_RESPONSE;
-    const zeta = SPRING_DAMPING;
+    const omega = (2 * Math.PI) / this.response;
+    const zeta = this.damping;
     const acceleration = -omega * omega * (this.value - this.target) - 2 * zeta * omega * this.velocity;
     this.velocity += acceleration * dt;
     this.value += this.velocity * dt;
@@ -258,9 +280,20 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
   const [valuesUi, setValuesUi] = useState<number[][]>([]);
   const [selectedUi, setSelectedUi] = useState<CellRef | null>(null);
   const [cellEditsUi, setCellEditsUi] = useState(0);
+  const [cursorUi, setCursorUi] = useState<{ x: number; y: number } | null>({
+    x: LOGICAL_W / 2,
+    y: LOGICAL_H / 2,
+  });
+  const [offsetUi, setOffsetUi] = useState({ x: 0, y: 0 });
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
+  const offsetAttr = JSON.stringify([
+    Math.round(offsetUi.x * 100) / 100,
+    Math.round(offsetUi.y * 100) / 100,
+  ]);
+  const cursorAttr =
+    cursorUi === null ? '' : `${Math.round(cursorUi.x)},${Math.round(cursorUi.y)}`;
 
   useEffect(() => {
     const hostElement = hostRef.current;
@@ -291,6 +324,17 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     let cellEditsNow = 0;
     let scaleX = 1;
     let scaleY = 1;
+    /** 光标（逻辑屏幕坐标）；null = 指针不在页面内。初始在屏幕中心。 */
+    let cursor: { x: number; y: number } | null = { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
+    let cursorUiNow: { x: number; y: number } | null = { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
+    let cursorActive = true;
+    let cursorFade = 1;
+    /** 滚轮编辑后短暂冻结视差。 */
+    let wheelFreezeUntil = 0;
+    /** 视差弹簧：content 整体平移（response .4s / damping .9）。 */
+    const parallaxX = new Spring(0, PARALLAX_SPRING_RESPONSE, PARALLAX_SPRING_DAMPING);
+    const parallaxY = new Spring(0, PARALLAX_SPRING_RESPONSE, PARALLAX_SPRING_DAMPING);
+    let offsetUiNow = { x: 0, y: 0 };
 
     let scales: Spring[][] = [];
     let selectionX = new Spring(0);
@@ -346,6 +390,21 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     function bumpCellEdits(): void {
       cellEditsNow += 1;
       setCellEditsUi(cellEditsNow);
+    }
+
+    function updateCursorUi(point: { x: number; y: number } | null): void {
+      if (point === null) {
+        if (cursorUiNow !== null) {
+          cursorUiNow = null;
+          setCursorUi(null);
+        }
+        return;
+      }
+      if (cursorUiNow && Math.abs(cursorUiNow.x - point.x) < 0.3 && Math.abs(cursorUiNow.y - point.y) < 0.3) {
+        return;
+      }
+      cursorUiNow = { x: point.x, y: point.y };
+      setCursorUi(cursorUiNow);
     }
 
     function resetScales(rows: number, cols: number): void {
@@ -444,21 +503,37 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       };
     }
 
-    function cellAt(logicalX: number, logicalY: number): CellRef | null {
+    /** 矩阵空间坐标 → 格子（含少量容差，按最近中心取）。 */
+    function cellAtMatrix(logicalX: number, logicalY: number): CellRef | null {
       const matrix = currentMatrix();
       if (!matrix) return null;
       const rows = matrixRows(matrix);
       const cols = matrixCols(matrix);
-      const half = layout.cell / 2;
+      const half = layout.cell / 2 + HIT_TOLERANCE_PX;
+      let best: CellRef | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
       for (let r = 0; r < rows; r += 1) {
         for (let c = 0; c < cols; c += 1) {
           const center = cellCenter(layout, r, c);
-          if (Math.abs(logicalX - center.x) <= half && Math.abs(logicalY - center.y) <= half) {
-            return { row: r, col: c };
+          const dx = logicalX - center.x;
+          const dy = logicalY - center.y;
+          if (Math.abs(dx) > half || Math.abs(dy) > half) continue;
+          const distance = dx * dx + dy * dy;
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = { row: r, col: c };
           }
         }
       }
-      return null;
+      return best;
+    }
+
+    /** 屏幕坐标 → 格子：先按当前视差位移命中，视差弹簧未追上时退回未平移坐标。 */
+    function cellAtPointer(logicalX: number, logicalY: number): CellRef | null {
+      return (
+        cellAtMatrix(logicalX - parallaxX.value, logicalY - parallaxY.value) ??
+        cellAtMatrix(logicalX, logicalY)
+      );
     }
 
     /* —— 输入 —— */
@@ -467,7 +542,11 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const matrix = currentMatrix();
       if (!matrix) return;
       const point = pointToLogical(event.clientX, event.clientY);
-      const cell = cellAt(point.x, point.y);
+      cursor = point;
+      cursorActive = true;
+      cursorFade = 1;
+      updateCursorUi(point);
+      const cell = cellAtPointer(point.x, point.y);
       event.preventDefault();
       try {
         canvas.setPointerCapture(event.pointerId);
@@ -496,8 +575,12 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const matrix = currentMatrix();
       if (!matrix) return;
       const point = pointToLogical(event.clientX, event.clientY);
+      cursor = point;
+      cursorActive = true;
+      cursorFade = 1;
+      updateCursorUi(point);
       if (!drag) {
-        const cell = cellAt(point.x, point.y);
+        const cell = cellAtPointer(point.x, point.y);
         if (!sameCell(cell, hover)) {
           hover = cell;
           pushUi();
@@ -511,6 +594,16 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const rowTargets = (targets[drag.row] ??= []);
       rowTargets[drag.col] = next;
       pushUi();
+    }
+
+    function onPointerLeave(): void {
+      // 指针离开页面：十字线淡出（位置停在最后处），视差回中；data-cursor 置空。
+      cursorActive = false;
+      updateCursorUi(null);
+      if (hover !== null) {
+        hover = null;
+        pushUi();
+      }
     }
 
     function onPointerUp(event: PointerEvent): void {
@@ -538,7 +631,7 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const matrix = currentMatrix();
       if (!matrix) return;
       const point = pointToLogical(event.clientX, event.clientY);
-      const cell = cellAt(point.x, point.y);
+      const cell = cellAtPointer(point.x, point.y);
       if (!cell) return;
       event.preventDefault();
       selected = cell;
@@ -554,7 +647,13 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       const matrix = currentMatrix();
       if (!matrix) return;
       event.preventDefault();
-      const target = hover ?? selected;
+      wheelFreezeUntil = performance.now() + WHEEL_FREEZE_MS;
+      const point = pointToLogical(event.clientX, event.clientY);
+      cursor = point;
+      cursorActive = true;
+      cursorFade = 1;
+      updateCursorUi(point);
+      const target = cellAtPointer(point.x, point.y) ?? hover ?? selected;
       if (!target) return;
       const currentValue = targets[target.row]?.[target.col] ?? 0;
       const next = clampValue(currentValue + (event.deltaY < 0 ? WHEEL_STEP : -WHEEL_STEP));
@@ -663,6 +762,39 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       ctx.fillText(`${rowName} × ${colName}    ${value.toFixed(2)}`, LOGICAL_W / 2, LOGICAL_H - 46);
     }
 
+    /** 自定义光标：全屏 1px 十字 + 22px/3px 粗准星（中心 4px 空隙）；difference 自动反色。 */
+    function drawCursor(pos: { x: number; y: number }, fade: number): void {
+      // 对齐物理像素中心，避免 1px 线跨两行抗锯齿后 only 50% 强度（difference 会变成半灰）。
+      const snappedX = (Math.floor(pos.x * scaleX) + scaleX / 2) / scaleX;
+      const snappedY = (Math.floor(pos.y * scaleY) + scaleY / 2) / scaleY;
+      const gap = CURSOR_CENTER_GAP_PX / 2;
+      ctx.save();
+      ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+      ctx.globalCompositeOperation = 'difference';
+      ctx.globalAlpha = clamp(fade, 0, 1);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = CURSOR_THIN_WIDTH;
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(0, snappedY);
+      ctx.lineTo(LOGICAL_W, snappedY);
+      ctx.moveTo(snappedX, 0);
+      ctx.lineTo(snappedX, LOGICAL_H);
+      ctx.stroke();
+      ctx.lineWidth = CURSOR_THICK_WIDTH;
+      ctx.beginPath();
+      ctx.moveTo(snappedX - CURSOR_ARM_PX, snappedY);
+      ctx.lineTo(snappedX - gap, snappedY);
+      ctx.moveTo(snappedX + gap, snappedY);
+      ctx.lineTo(snappedX + CURSOR_ARM_PX, snappedY);
+      ctx.moveTo(snappedX, snappedY - CURSOR_ARM_PX);
+      ctx.lineTo(snappedX, snappedY - gap);
+      ctx.moveTo(snappedX, snappedY + gap);
+      ctx.lineTo(snappedX, snappedY + CURSOR_ARM_PX);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     function draw(matrix: MatrixView | null, now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = rgbGrey(BG_RGB[0]);
@@ -682,7 +814,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
 
       ctx.save();
       ctx.globalAlpha = clamp(alpha, 0, 1);
-      ctx.translate(LOGICAL_W / 2, LOGICAL_H / 2);
+      // 视差：内容整体沿光标方向平移（不影响光标层）。
+      ctx.translate(LOGICAL_W / 2 + parallaxX.value, LOGICAL_H / 2 + parallaxY.value);
       ctx.scale(scale, scale);
       ctx.translate(-LOGICAL_W / 2, -LOGICAL_H / 2);
 
@@ -754,6 +887,9 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       }
 
       ctx.restore();
+
+      // 自定义光标画在最上层，不受矩阵视差影响（difference 反色）。
+      if (cursor && (cursorActive || cursorFade > 0)) drawCursor(cursor, cursorFade);
     }
 
     /* —— 每帧 —— */
@@ -809,6 +945,33 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         snapSelectionToSelected(dt);
       }
 
+      // 视差弹簧：光标相对屏幕中心的方向，位移与距离成比例；拖拽/滚轮编辑时冻结。
+      const frozen = drag !== null || now < wheelFreezeUntil;
+      if (frozen) {
+        // 真正冻结：target 与速度都锁在当前位置，拖拽/滚轮时矩阵不漂。
+        parallaxX.target = parallaxX.value;
+        parallaxY.target = parallaxY.value;
+        parallaxX.velocity = 0;
+        parallaxY.velocity = 0;
+      } else if (cursor && cursorActive) {
+        parallaxX.target = (cursor.x - LOGICAL_W / 2) * PARALLAX;
+        parallaxY.target = (cursor.y - LOGICAL_H / 2) * PARALLAX;
+      } else {
+        parallaxX.target = 0;
+        parallaxY.target = 0;
+      }
+      parallaxX.step(dt);
+      parallaxY.step(dt);
+      if (
+        Math.abs(parallaxX.value - offsetUiNow.x) > 0.1 ||
+        Math.abs(parallaxY.value - offsetUiNow.y) > 0.1
+      ) {
+        offsetUiNow = { x: parallaxX.value, y: parallaxY.value };
+        setOffsetUi(offsetUiNow);
+      }
+      // 指针离开后十字线淡出。
+      if (!cursorActive) cursorFade = Math.max(0, cursorFade - dt / (CURSOR_FADE_MS / 1000));
+
       draw(matrix, now);
 
       // 退出动画结束 → 通知 App
@@ -835,6 +998,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
         selected,
         hover,
         cellEdits: cellEditsNow,
+        cursor: cursor && cursorActive ? { x: Math.round(cursor.x * 10) / 10, y: Math.round(cursor.y * 10) / 10 } : null,
+        offset: { x: Math.round(parallaxX.value * 10) / 10, y: Math.round(parallaxY.value * 10) / 10 },
       };
     }
 
@@ -850,8 +1015,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
             result.push({
               row: r,
               col: c,
-              x: Math.round(center.x * 100) / 100,
-              y: Math.round(center.y * 100) / 100,
+              x: Math.round((center.x + parallaxX.value) * 100) / 100,
+              y: Math.round((center.y + parallaxY.value) * 100) / 100,
               value: round4(displayed[r]?.[c] ?? 0),
             });
           }
@@ -882,6 +1047,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
+    document.addEventListener('pointerleave', onPointerLeave);
+    window.addEventListener('blur', onPointerLeave);
     canvas.addEventListener('dblclick', onDoubleClick);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('keydown', onKeyDown);
@@ -902,6 +1069,8 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
+      document.removeEventListener('pointerleave', onPointerLeave);
+      window.removeEventListener('blur', onPointerLeave);
       canvas.removeEventListener('dblclick', onDoubleClick);
       canvas.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
@@ -921,17 +1090,20 @@ export function MatrixField({ matrices, index, onCycleMatrix, onEditCell, onExit
       data-cell-values={valuesJson}
       data-selected={selectedAttr}
       data-cell-edits={cellEditsUi}
+      data-matrix-offset={offsetAttr}
+      data-cursor={cursorAttr}
       style={{
         position: 'absolute',
         inset: 0,
         background: '#0a0a0a',
         touchAction: 'none',
         overflow: 'hidden',
+        cursor: 'none',
       }}
     >
       <canvas
         ref={canvasRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', cursor: 'none' }}
       />
     </div>
   );
