@@ -371,6 +371,7 @@ await page.mouse.move(720, Math.round(holdBaseY - 160));
 await page.mouse.down();
 await page.waitForTimeout(380);
 check('按住不动 → 弦被绷住（data-holding=true）', (await attr('data-holding')) === 'true', String(await attr('data-holding')));
+check('按住时只有一个 pin', Number(await attr('data-held-count')) === 1, String(await attr('data-held-count')));
 check('按住期间还没有拨弦', Number(await attr('data-plucks')) === 0, String(await attr('data-plucks')));
 const heldAmp = Number(await attr('data-held-amplitude'));
 check('绷住的幅度接近按住点位移', Math.abs(heldAmp - 160) <= 25, String(heldAmp));
@@ -397,6 +398,22 @@ check('键盘按住期间不拨弦', Number(await attr('data-plucks')) === 0, St
 await page.keyboard.up('a');
 await page.waitForTimeout(220);
 check('键盘松手拨一次', Number(await attr('data-plucks')) === 1, String(await attr('data-plucks')));
+
+// 键盘多键同时按：每键独立 pin / 独立拨弦
+await resetLocal();
+await page.keyboard.down('a');
+await page.keyboard.down('d');
+await page.waitForTimeout(380);
+check('同时按住两键 → 两个 pin', Number(await attr('data-held-count')) === 2 && (await attr('data-holding')) === 'true', String(await attr('data-held-count')));
+check('多键按住期间不拨弦', Number(await attr('data-plucks')) === 0, String(await attr('data-plucks')));
+const pinsWhileHeld = await page.evaluate(() => window.__neurouString.pins());
+check('pins() 给出两个按键 pin', Array.isArray(pinsWhileHeld) && pinsWhileHeld.length === 2, JSON.stringify(pinsWhileHeld));
+await page.keyboard.up('a');
+await page.waitForTimeout(160);
+check('松开一键只拨一次、余键仍按住', Number(await attr('data-plucks')) === 1 && Number(await attr('data-held-count')) === 1, `${await attr('data-plucks')}/${await attr('data-held-count')}`);
+await page.keyboard.up('d');
+await page.waitForTimeout(200);
+check('再松另一键 → 共拨两次', Number(await attr('data-plucks')) === 2 && Number(await attr('data-held-count')) === 0, String(await attr('data-plucks')));
 
 // ============ 4. 阈值共振：共振点来自悬崖/安全线 ============
 await resetLocal();

@@ -66,6 +66,14 @@ await page.waitForTimeout(380);
 await page.screenshot({ path: 'docs/images/string-hold.png' });
 await page.mouse.up();
 await page.waitForTimeout(900);
+// 1c2. 键盘多键同时按住：两个静态平滑峰
+await page.keyboard.down('a');
+await page.keyboard.down('d');
+await page.waitForTimeout(420);
+await page.screenshot({ path: 'docs/images/string-multikey.png' });
+await page.keyboard.up('a');
+await page.keyboard.up('d');
+await page.waitForTimeout(500);
 restoreWorld();
 await page.reload({ waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]');
