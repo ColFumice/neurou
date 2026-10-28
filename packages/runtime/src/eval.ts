@@ -1,6 +1,28 @@
 import type { LExpr } from '@neurou/core';
 import { sampleMatrixCurve, sampleSpectrum, type MatrixState, type RuntimeValue, type WorldState } from './state.js';
 
+/** v2.7：多矩阵联动——相位源可递归，编译器已保证无环；运行时仍留深度保护。 */
+function matrixTimePosition(name: string, state: WorldState, depth = 0): number {
+  const matrix = state.matrices?.[name];
+  if (!matrix || matrix.period === undefined) return 0;
+  let phase = matrix.phase ?? 0;
+  if (matrix.phaseSource && depth < 8) {
+    const source = state.matrices?.[matrix.phaseSource.matrix];
+    if (source && source.period !== undefined) {
+      const sourcePosition = matrixTimePosition(matrix.phaseSource.matrix, state, depth + 1);
+      const curve = source.curves.find(
+        (candidate) => candidate.row === matrix.phaseSource!.row && candidate.col === matrix.phaseSource!.col,
+      );
+      if (curve) {
+        const sampled = sampleMatrixCurve(curve, sourcePosition, source.interpolation, source.loop);
+        if (sampled !== undefined && Number.isFinite(sampled)) phase = sampled;
+      }
+    }
+  }
+  const raw = (state.tick / matrix.period) * (matrix.speed ?? 1) + phase;
+  return ((raw % 1) + 1) % 1;
+}
+
 /** 求值：把图上的表达式还原成一次具体的判断或数值。 */
 export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
   switch (e.k) {
@@ -63,10 +85,8 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
         }
         case '谱位': {
           const name = args[0];
-          const matrix = typeof name === 'string' ? state.matrices?.[name] : undefined;
-          if (!matrix || matrix.period === undefined) return 0;
-          const raw = (state.tick / matrix.period) * (matrix.speed ?? 1) + (matrix.phase ?? 0);
-          return ((raw % 1) + 1) % 1;
+          if (typeof name !== 'string') return 0;
+          return matrixTimePosition(name, state);
         }
         case '查关系谱': {
           // 三参数读取「段」的标量值；四参数在有曲线时按位置采样。

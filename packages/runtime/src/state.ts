@@ -78,6 +78,8 @@ export interface MatrixState {
   period?: number;
   speed?: number;
   phase?: number;
+  /** v2.7：相位源（多矩阵联动）。 */
+  phaseSource?: { matrix: string; row: string; col: string };
 }
 
 /** 从 IR 的作者数据生成一份初始矩阵状态（深拷贝，避免共享可变数组）。 */
@@ -92,6 +94,7 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
     ...(ir.period !== undefined ? { period: ir.period } : {}),
     speed: ir.speed ?? 1,
     phase: ir.phase ?? 0,
+    ...(ir.phaseSource ? { phaseSource: { ...ir.phaseSource } } : {}),
   };
 }
 
@@ -125,6 +128,15 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
     ...(period !== undefined ? { period } : {}),
     speed,
     phase: ((rawPhase % 1) + 1) % 1,
+    ...(s.phaseSource && typeof s.phaseSource.matrix === 'string'
+      ? {
+          phaseSource: {
+            matrix: s.phaseSource.matrix,
+            row: String(s.phaseSource.row),
+            col: String(s.phaseSource.col),
+          },
+        }
+      : {}),
   };
 }
 

@@ -1218,13 +1218,18 @@ const moonTime = await page.evaluate(() => {
 const moonTarget = moonTime && moonTime.tick !== undefined ? (((moonTime.tick / 30) * timeSpeed + timePhase) % 1 + 1) % 1 : -1;
 check('moon-tide 播放头跟随速度/相位后的时间轴', moonTime !== null && Math.abs(Number(moonTime.playhead) - moonTarget) < 0.2, JSON.stringify(moonTime) + '/' + moonTarget.toFixed(3));
 check('moon-tide 有两个关系谱', Number(await matrixRoot.getAttribute('data-matrix-count')) === 2, String(await matrixRoot.getAttribute('data-matrix-count')));
+check('月潮无相位源（静态相位 0.1）', (await matrixRoot.getAttribute('data-phase-source')) === 'false' && Math.abs(Number(await matrixRoot.getAttribute('data-time-phase')) - 0.1) < 1e-6, `${await matrixRoot.getAttribute('data-phase-source')}/${await matrixRoot.getAttribute('data-time-phase')}`);
 await page.keyboard.press('Tab');
 await page.waitForTimeout(700);
-const secondMatrix = { name: await matrixRoot.getAttribute('data-matrix-name'), speed: await matrixRoot.getAttribute('data-time-speed'), phase: await matrixRoot.getAttribute('data-time-phase') };
-check('Tab 切换到第二个关系谱（灯影）', secondMatrix.name === '灯影' && Number(secondMatrix.speed) === 0.8 && Math.abs(Number(secondMatrix.phase) - 0.3) < 1e-6, JSON.stringify(secondMatrix));
+const secondMatrix = { name: await matrixRoot.getAttribute('data-matrix-name'), speed: await matrixRoot.getAttribute('data-time-speed'), source: await matrixRoot.getAttribute('data-phase-source') };
+const linkedPhase1 = Number(await matrixRoot.getAttribute('data-time-phase'));
+await page.waitForTimeout(650);
+const linkedPhase2 = Number(await matrixRoot.getAttribute('data-time-phase'));
+check('Tab 切换到灯影：速度 0.8 + 相位源联动', secondMatrix.name === '灯影' && Number(secondMatrix.speed) === 0.8 && secondMatrix.source === 'true' && linkedPhase1 >= 0 && linkedPhase1 <= 1, JSON.stringify(secondMatrix) + '/' + linkedPhase1);
+check('灯影有效相位随源谱曲线变化', Math.abs(linkedPhase2 - linkedPhase1) > 1e-5, `${linkedPhase1}→${linkedPhase2}`);
 await page.keyboard.press('Shift+Tab');
 await page.waitForTimeout(700);
-check('Shift+Tab 切回第一个关系谱（月潮）', (await matrixRoot.getAttribute('data-matrix-name')) === '月潮', String(await matrixRoot.getAttribute('data-matrix-name')));
+check('Shift+Tab 切回月潮并恢复静态相位', (await matrixRoot.getAttribute('data-matrix-name')) === '月潮' && (await matrixRoot.getAttribute('data-phase-source')) === 'false', `${await matrixRoot.getAttribute('data-matrix-name')}/${await matrixRoot.getAttribute('data-phase-source')}`);
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 

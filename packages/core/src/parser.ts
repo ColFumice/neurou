@@ -771,8 +771,16 @@ class Parser {
             this.finishLine();
             break;
           }
+          case '相位源': {
+            const matrix = this.readName('源矩阵名');
+            const row = this.readName('源行标签');
+            const col = this.readName('源列标签');
+            decl.phaseSource = { matrix, row, col };
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期、速度、相位。');
+            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期、速度、相位、相位源。');
             this.skipToLineEnd();
         }
       }

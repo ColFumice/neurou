@@ -236,6 +236,7 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
   if (matrix.period !== undefined) w.line(1, `周期 ${numberText(matrix.period)}`);
   if ((matrix.speed ?? 1) !== 1) w.line(1, `速度 ${numberText(matrix.speed)}`);
   if ((matrix.phase ?? 0) !== 0) w.line(1, `相位 ${numberText(matrix.phase)}`);
+  if (matrix.phaseSource) w.line(1, `相位源 ${matrix.phaseSource.matrix} ${matrix.phaseSource.row} ${matrix.phaseSource.col}`);
   w.blank();
 }
 

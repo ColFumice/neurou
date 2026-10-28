@@ -207,6 +207,8 @@ export interface IRMatrix {
   speed: number;
   /** v2.6：时间轴相位 0..1，默认 0。 */
   phase: number;
+  /** v2.7：相位源（另一张关系谱的曲线）；存在时用它采样出的 0..1 值替代 phase。 */
+  phaseSource?: { matrix: string; row: string; col: string };
   span?: Span;
 }
 

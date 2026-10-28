@@ -37,6 +37,8 @@ export interface MatrixView {
   speed: number;
   /** v2.6 时间轴相位 0..1（默认 0）。 */
   phase: number;
+  /** v2.7 相位源：用另一张关系谱的曲线采样值替代静态 phase。 */
+  phaseSource?: { matrix: string; row: string; col: string };
 }
 
 export interface MatrixFieldProps {
@@ -137,6 +139,8 @@ interface MatrixDebugState {
   playSpeed: number;
   speed: number;
   phase: number;
+  effectivePhase: number;
+  phaseSource: boolean;
   tick: number;
   curveKeyEdits: number;
   curvePointAdds: number;
@@ -516,6 +520,7 @@ export function MatrixField({
   const [playingUi, setPlayingUi] = useState(false);
   const [playheadUi, setPlayheadUi] = useState(0);
   const [playSpeedUi, setPlaySpeedUi] = useState(0);
+  const [effectivePhaseUi, setEffectivePhaseUi] = useState(0);
   const [curveKeyEditsUi, setCurveKeyEditsUi] = useState(0);
   const [curvePointAddsUi, setCurvePointAddsUi] = useState(0);
   const [curvePointRemovesUi, setCurvePointRemovesUi] = useState(0);
@@ -559,12 +564,9 @@ export function MatrixField({
   const periodAttr = periodValue !== null ? String(periodValue) : '';
   const timeSpeedValue =
     current && typeof current.speed === 'number' && Number.isFinite(current.speed) ? current.speed : 1;
-  const timePhaseValue =
-    current && typeof current.phase === 'number' && Number.isFinite(current.phase)
-      ? ((current.phase % 1) + 1) % 1
-      : 0;
+  const phaseSourceAttr = current && current.phaseSource ? 'true' : 'false';
   const timeSpeedAttr = String(Math.round(timeSpeedValue * 10000) / 10000);
-  const timePhaseAttr = timePhaseValue.toFixed(4);
+  const timePhaseAttr = effectivePhaseUi.toFixed(4);
   useEffect(() => {
     const hostElement = hostRef.current;
     const canvasElement = canvasRef.current;
@@ -670,6 +672,7 @@ export function MatrixField({
     let playingUiNow = false;
     let playheadUiNow = 0;
     let playSpeedUiNow = 0;
+    let effectivePhaseUiNow = 0;
     /** 46 键 → 关系谱曲线段映射；多键各自一个 voice。 */
     const keys = layoutKeyboard();
     const curveKeyEdits = new Map<
@@ -750,6 +753,38 @@ export function MatrixField({
     function wrap01(value: number): number {
       if (!Number.isFinite(value)) return 0;
       return ((value % 1) + 1) % 1;
+    }
+
+    /** v2.7 有效相位：有 phaseSource 时递归采样源矩阵曲线，否则用静态 phase。 */
+    function effectivePhaseOf(
+      matrix: MatrixView | null,
+      tick: number,
+      depth = 0,
+      visited: Set<string> = new Set(),
+    ): number {
+      if (!matrix) return 0;
+      const source = matrix.phaseSource;
+      if (!source) return matrixTimePhase(matrix);
+      if (depth >= 8 || visited.has(matrix.id)) return matrixTimePhase(matrix);
+      visited.add(matrix.id);
+      const sourceMatrix = matricesRef.current.find(
+        (candidate) => candidate.id === source.matrix || candidate.name === source.matrix,
+      );
+      if (!sourceMatrix) return matrixTimePhase(matrix);
+      const sourcePeriod =
+        typeof sourceMatrix.period === 'number' &&
+        Number.isFinite(sourceMatrix.period) &&
+        sourceMatrix.period > 0
+          ? sourceMatrix.period
+          : null;
+      if (sourcePeriod === null) return matrixTimePhase(matrix);
+      const sourcePhase = effectivePhaseOf(sourceMatrix, tick, depth + 1, visited);
+      const position = wrap01((tick / sourcePeriod) * matrixTimeSpeed(sourceMatrix) + sourcePhase);
+      const curve = sourceMatrix.curves?.find(
+        (candidate) => candidate.row === source.row && candidate.col === source.col,
+      );
+      if (!curve || curve.bands.length < 2) return matrixTimePhase(matrix);
+      return clamp(sampleCurveBands(sourceMatrix, curve.bands, position), 0, 1);
     }
 
     function matrixRows(matrix: MatrixView): number {
@@ -1109,6 +1144,14 @@ export function MatrixField({
       if (force || Math.abs(roundedSpeed - playSpeedUiNow) >= 0.005) {
         playSpeedUiNow = roundedSpeed;
         setPlaySpeedUi(roundedSpeed);
+      }
+    }
+
+    function pushEffectivePhase(value: number, force = false): void {
+      const rounded = Math.round(wrap01(value) * 10000) / 10000;
+      if (force || Math.abs(rounded - effectivePhaseUiNow) >= 0.0005) {
+        effectivePhaseUiNow = rounded;
+        setEffectivePhaseUi(rounded);
       }
     }
 
@@ -1742,6 +1785,7 @@ export function MatrixField({
           scales = [];
           playhead = 0;
           playing = false;
+          pushEffectivePhase(0, true);
           pushPlayUi(true);
           pushUi(true);
         }
@@ -1775,10 +1819,12 @@ export function MatrixField({
             ? matrix.period
             : null;
         playSpeed = 0;
+        const effectiveAtEntry = effectivePhaseOf(matrix, tickRef.current);
         playhead =
           period !== null
-            ? wrap01((tickRef.current / period) * matrixTimeSpeed(matrix) + matrixTimePhase(matrix))
-            : matrixTimePhase(matrix);
+            ? wrap01((tickRef.current / period) * matrixTimeSpeed(matrix) + effectiveAtEntry)
+            : effectiveAtEntry;
+        pushEffectivePhase(effectiveAtEntry, true);
         playing = (matrix.curves?.length ?? 0) > 0;
         pushPlayUi(true);
         pushUi(true);
@@ -3131,10 +3177,12 @@ export function MatrixField({
         matrix && typeof matrix.period === 'number' && Number.isFinite(matrix.period) && matrix.period > 0
           ? matrix.period
           : null;
+      const effectivePhase = matrix ? effectivePhaseOf(matrix, tickRef.current) : 0;
+      pushEffectivePhase(effectivePhase);
       if (period !== null) {
-        // 同步模式：目标 = (tick/period * speed + phase) mod 1，约 0.35s 平滑追随。
+        // 同步模式：目标 = (tick/period * speed + 有效相位) mod 1，约 0.35s 平滑追随。
         syncedTargetPlayhead = wrap01(
-          (tickRef.current / period) * matrixTimeSpeed(matrix) + matrixTimePhase(matrix),
+          (tickRef.current / period) * matrixTimeSpeed(matrix) + effectivePhase,
         );
         playSpeed = 0;
         if (!playFrozen && playing) {
@@ -3312,6 +3360,8 @@ export function MatrixField({
         playSpeed: Math.round(clamp(playSpeed, 0, 1) * 1000) / 1000,
         speed: matrixTimeSpeed(matrix),
         phase: matrixTimePhase(matrix),
+        effectivePhase: matrix ? effectivePhaseOf(matrix, tickRef.current) : 0,
+        phaseSource: Boolean(matrix?.phaseSource),
         tick: tickRef.current,
         curveKeyEdits: curveKeyEditsNow,
         curvePointAdds: curvePointAddsNow,
@@ -3492,6 +3542,7 @@ export function MatrixField({
       data-period={periodAttr}
       data-time-speed={timeSpeedAttr}
       data-time-phase={timePhaseAttr}
+      data-phase-source={phaseSourceAttr}
       data-curve-key-edits={curveKeyEditsUi}
       data-curve-point-adds={curvePointAddsUi}
       data-curve-point-removes={curvePointRemovesUi}

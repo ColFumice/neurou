@@ -239,6 +239,8 @@ export interface MatrixDecl extends DeclBase {
   speed?: number;
   /** v2.6：时间轴相位（0..1），默认 0。 */
   phase?: number;
+  /** v2.7：用另一张关系谱的曲线采样作为相位源（多矩阵联动）。 */
+  phaseSource?: { matrix: string; row: string; col: string };
 }
 
 export type Decl =

@@ -583,6 +583,7 @@ export function App() {
     ...(m.period !== undefined ? { period: m.period } : {}),
     speed: m.speed ?? 1,
     phase: m.phase ?? 0,
+    ...(m.phaseSource ? { phaseSource: m.phaseSource } : {}),
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {

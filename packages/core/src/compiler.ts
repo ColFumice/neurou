@@ -218,7 +218,61 @@ class Compiler {
     // 弦和实体可能声明在谱之后；名字冲突必须等所有顶层名字都收集完再查。
     this.checkSpectrumNameConflicts();
     this.checkMatrixNameConflicts();
+    this.checkMatrixPhaseSources();
     this.checkTimbreReferences();
+  }
+
+  /** v2.7：多矩阵联动——相位源必须指向有曲线、有周期的矩阵格子，且不能成环。 */
+  private checkMatrixPhaseSources(): void {
+    for (const matrix of this.matrices) {
+      const source = matrix.phaseSource;
+      if (!source) continue;
+      const seen = new Set<string>([matrix.name]);
+      let current: IRMatrix | undefined = matrix;
+      while (current?.phaseSource) {
+        const link = current.phaseSource;
+        if (seen.has(link.matrix)) {
+          this.error('NRO2100', `关系谱「${matrix.name}」的相位源形成了环。`, matrix.span ?? zeroSpan(), {
+            hint: '相位源不能引用自己或形成循环依赖。',
+          });
+          delete matrix.phaseSource;
+          break;
+        }
+        const target = this.matrixByName.get(link.matrix);
+        if (!target) {
+          const hint = suggestName(link.matrix, [...this.matrixByName.keys()]);
+          this.error('NRO2101', `关系谱「${matrix.name}」的相位源引用了不存在的关系谱「${link.matrix}」。`, matrix.span ?? zeroSpan(), hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+          delete matrix.phaseSource;
+          break;
+        }
+        if (!target.rows.includes(link.row)) {
+          this.error('NRO2101', `关系谱「${target.name}」没有行标签「${link.row}」。`, matrix.span ?? zeroSpan());
+          delete matrix.phaseSource;
+          break;
+        }
+        if (!target.cols.includes(link.col)) {
+          this.error('NRO2101', `关系谱「${target.name}」没有列标签「${link.col}」。`, matrix.span ?? zeroSpan());
+          delete matrix.phaseSource;
+          break;
+        }
+        if (!target.curves.some((curve) => curve.row === link.row && curve.col === link.col)) {
+          this.error('NRO2100', `相位源「${target.name}」的「${link.row} × ${link.col}」没有曲线。`, matrix.span ?? zeroSpan(), {
+            hint: '给源格子加一条曲线，或换一个有曲线的格子。',
+          });
+          delete matrix.phaseSource;
+          break;
+        }
+        if (target.period === undefined) {
+          this.error('NRO2100', `相位源「${target.name}」没有「周期」，无法提供相位。`, matrix.span ?? zeroSpan(), {
+            hint: '源矩阵需要有周期，例如「周期 30」。',
+          });
+          delete matrix.phaseSource;
+          break;
+        }
+        seen.add(target.name);
+        current = target;
+      }
+    }
   }
 
   /** v2.0：弦的 `音色 谱名` 必须指向真实存在的谱。 */
@@ -486,6 +540,7 @@ class Compiler {
       ...(period !== undefined ? { period } : {}),
       speed,
       phase,
+      ...(d.phaseSource ? { phaseSource: { ...d.phaseSource } } : {}),
       span: d.span,
     };
     this.matrices.push(matrix);

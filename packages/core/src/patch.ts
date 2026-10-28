@@ -104,6 +104,7 @@ function structuralSignature(ir: WorldIR): string {
       period: m.period,
       speed: m.speed ?? 1,
       phase: m.phase ?? 0,
+      phaseSource: m.phaseSource,
     })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
     rules: ir.rules,
