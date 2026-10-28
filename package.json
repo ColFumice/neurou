@@ -7,6 +7,7 @@
   "scripts": {
     "check": "tsc -b --pretty false",
     "check:gui": "tsc -p packages/gui/tsconfig.json --noEmit --pretty false",
+    "check:docs": "node scripts/docs-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:gui": "node scripts/gui-test.mjs",

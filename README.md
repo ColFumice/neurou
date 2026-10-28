@@ -35,9 +35,11 @@ neurou 是一门用来写「世界如何运转」的语言，以及执行这些�
 ```bash
 pnpm install
 pnpm check          # 内核类型检查 / 构建
+pnpm check:gui      # GUI 类型检查
+pnpm check:docs     # 文档相对链接检查
 pnpm test           # 288 个单元测试（内核 / 运行时 / 弦物理 / 调律台 / 谱 / 音色 / 演奏 / 查谱 / 参考谱 / 关系谱）
 
-# 八弦调律台 v1.6
+# 调律台 GUI
 pnpm gui            # http://127.0.0.1:5188/
 pnpm test:gui       # 真实浏览器验收（需要本机 Edge）
 ```
