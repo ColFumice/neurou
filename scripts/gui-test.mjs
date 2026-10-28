@@ -1099,6 +1099,39 @@ await page.keyboard.press('Control+z');
 await page.waitForTimeout(700);
 const matrixUndo = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
 check('矩阵 Ctrl+Z 撤销', Number(matrixUndo[1]?.[1]) > 0.95, JSON.stringify(matrixUndo));
+// v2.4.3：行列增删 + 内联改名
+const countLabels = async (kind) => {
+  const labels = await page.evaluate(() => window.__neurouMatrix?.labelPositions() ?? []);
+  return labels.filter((label) => label.kind === kind).length;
+};
+await page.keyboard.press('Control+Enter');
+await page.waitForTimeout(700);
+check('Ctrl+Enter 插入一行', (await countLabels('row')) === 4 && Number(await appAttr('data-matrix-row-adds')) >= 1, String(await countLabels('row')));
+await page.keyboard.press('Control+Shift+Enter');
+await page.waitForTimeout(700);
+check('Ctrl+Shift+Enter 插入一列', (await countLabels('col')) === 4 && Number(await appAttr('data-matrix-col-adds')) >= 1, String(await countLabels('col')));
+await page.keyboard.press('Control+Backspace');
+await page.waitForTimeout(600);
+await page.keyboard.press('Control+Shift+Backspace');
+await page.waitForTimeout(600);
+check('Ctrl+Backspace 删除行列', (await countLabels('row')) === 3 && (await countLabels('col')) === 3, `${await countLabels('row')}/${await countLabels('col')}`);
+const labelRows = await page.evaluate(() => window.__neurouMatrix?.labelPositions() ?? []);
+const thirdRow = labelRows.filter((label) => label.kind === 'row')[2];
+if (thirdRow) {
+  await page.mouse.dblclick(thirdRow.x, thirdRow.y);
+  await page.waitForTimeout(250);
+  const input = page.locator('[data-testid="matrix-rename-input"]');
+  await input.fill('信赖');
+  await input.press('Enter');
+  let renamedText = '';
+  for (let i = 0; i < 8; i++) {
+    await page.waitForTimeout(400);
+    renamedText = readFileSync(WORLD_PATH, 'utf8');
+    if (/^\s*行 .* 信赖$/m.test(renamedText)) break;
+  }
+}
+const renamedFinal = readFileSync(WORLD_PATH, 'utf8');
+check('双击行标签可内联改名', Number(await appAttr('data-matrix-renames')) >= 1 && /^\s*行 .* 信赖$/m.test(renamedFinal), `${await appAttr('data-matrix-renames')}/${(/^\s*行 .*$/m.exec(renamedFinal) ?? [''])[0]}`);
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));

@@ -293,3 +293,91 @@ export function setSpectrumBands(ir: WorldIR, id: string, bands: readonly number
   const next = { ...spectrum, bands: bands.map((band) => round(band)) };
   return { ok: true, ir: { ...ir, spectra: ir.spectra.map((s) => (s.id === id ? next : s)) } };
 }
+
+// ---------- v2.4.3 关系谱行列增删/改名 ----------
+
+function matrixReplace(ir: WorldIR, id: string, next: WorldIR['matrices'][number]): EditResult {
+  return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? next : m)) } };
+}
+
+export function addMatrixRow(ir: WorldIR, id: string, label: string, index?: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!label.trim()) return fail('行标签不能为空');
+  if (matrix.rows.includes(label)) return fail(`关系谱「${id}」已经有行「${label}」`);
+  if (matrix.rows.length >= 64) return fail('关系谱最多 64 行');
+  const at = index === undefined ? matrix.rows.length : Math.max(0, Math.min(matrix.rows.length, Math.trunc(index)));
+  const values = matrix.values.map((row) => [...row]);
+  values.splice(at, 0, matrix.cols.map(() => 0));
+  return matrixReplace(ir, id, { ...matrix, rows: [...matrix.rows.slice(0, at), label, ...matrix.rows.slice(at)], values });
+}
+
+export function removeMatrixRow(ir: WorldIR, id: string, index: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (matrix.rows.length <= 1) return fail('关系谱至少保留一行');
+  if (!Number.isInteger(index) || index < 0 || index >= matrix.rows.length) return fail(`关系谱「${id}」没有第 ${index} 行`);
+  const label = matrix.rows[index]!;
+  return matrixReplace(ir, id, {
+    ...matrix,
+    rows: matrix.rows.filter((_, i) => i !== index),
+    values: matrix.values.filter((_, i) => i !== index),
+    curves: matrix.curves.filter((curve) => curve.row !== label),
+  });
+}
+
+export function addMatrixCol(ir: WorldIR, id: string, label: string, index?: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!label.trim()) return fail('列标签不能为空');
+  if (matrix.cols.includes(label)) return fail(`关系谱「${id}」已经有列「${label}」`);
+  if (matrix.cols.length >= 64) return fail('关系谱最多 64 列');
+  const at = index === undefined ? matrix.cols.length : Math.max(0, Math.min(matrix.cols.length, Math.trunc(index)));
+  return matrixReplace(ir, id, {
+    ...matrix,
+    cols: [...matrix.cols.slice(0, at), label, ...matrix.cols.slice(at)],
+    values: matrix.values.map((row) => [...row.slice(0, at), 0, ...row.slice(at)]),
+  });
+}
+
+export function removeMatrixCol(ir: WorldIR, id: string, index: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (matrix.cols.length <= 1) return fail('关系谱至少保留一列');
+  if (!Number.isInteger(index) || index < 0 || index >= matrix.cols.length) return fail(`关系谱「${id}」没有第 ${index} 列`);
+  const label = matrix.cols[index]!;
+  return matrixReplace(ir, id, {
+    ...matrix,
+    cols: matrix.cols.filter((_, i) => i !== index),
+    values: matrix.values.map((row) => row.filter((_, i) => i !== index)),
+    curves: matrix.curves.filter((curve) => curve.col !== label),
+  });
+}
+
+export function renameMatrixRow(ir: WorldIR, id: string, index: number, label: string): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!Number.isInteger(index) || index < 0 || index >= matrix.rows.length) return fail(`关系谱「${id}」没有第 ${index} 行`);
+  if (!label.trim()) return fail('行标签不能为空');
+  if (matrix.rows.includes(label)) return fail(`关系谱「${id}」已经有行「${label}」`);
+  const old = matrix.rows[index]!;
+  return matrixReplace(ir, id, {
+    ...matrix,
+    rows: matrix.rows.map((row, i) => (i === index ? label : row)),
+    curves: matrix.curves.map((curve) => (curve.row === old ? { ...curve, row: label } : curve)),
+  });
+}
+
+export function renameMatrixCol(ir: WorldIR, id: string, index: number, label: string): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!Number.isInteger(index) || index < 0 || index >= matrix.cols.length) return fail(`关系谱「${id}」没有第 ${index} 列`);
+  if (!label.trim()) return fail('列标签不能为空');
+  if (matrix.cols.includes(label)) return fail(`关系谱「${id}」已经有列「${label}」`);
+  const old = matrix.cols[index]!;
+  return matrixReplace(ir, id, {
+    ...matrix,
+    cols: matrix.cols.map((col, i) => (i === index ? label : col)),
+    curves: matrix.curves.map((curve) => (curve.col === old ? { ...curve, col: label } : curve)),
+  });
+}

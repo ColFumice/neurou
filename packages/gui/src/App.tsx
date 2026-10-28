@@ -15,6 +15,12 @@ import {
   setMatrixCell,
   setMatrixCurveBand,
   setMatrixCurveBands,
+  addMatrixRow,
+  removeMatrixRow,
+  addMatrixCol,
+  removeMatrixCol,
+  renameMatrixRow,
+  renameMatrixCol,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
@@ -188,6 +194,11 @@ export function App() {
   const [bandEdits, setBandEdits] = useState(0);
   const [matrixEdits, setMatrixEdits] = useState(0);
   const [matrixCurveEdits, setMatrixCurveEdits] = useState(0);
+  const [matrixRowAdds, setMatrixRowAdds] = useState(0);
+  const [matrixRowRemoves, setMatrixRowRemoves] = useState(0);
+  const [matrixColAdds, setMatrixColAdds] = useState(0);
+  const [matrixColRemoves, setMatrixColRemoves] = useState(0);
+  const [matrixRenames, setMatrixRenames] = useState(0);
   const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
@@ -505,6 +516,11 @@ export function App() {
       data-matrix-count={worldIR?.matrices.length ?? 0}
       data-matrix-cell-edits={matrixEdits}
       data-matrix-curve-edits={matrixCurveEdits}
+      data-matrix-row-adds={matrixRowAdds}
+      data-matrix-row-removes={matrixRowRemoves}
+      data-matrix-col-adds={matrixColAdds}
+      data-matrix-col-removes={matrixColRemoves}
+      data-matrix-renames={matrixRenames}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -769,6 +785,97 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  const uniqueMatrixLabel = (existing: string[], prefix: string): string => {
+    let i = 1;
+    while (existing.includes(`${prefix}${i}`)) i += 1;
+    return `${prefix}${i}`;
+  };
+
+  /** 矩阵结构编辑：行列增删/改名（结构变化走规范序列化）。 */
+  const onAddMatrixRow = (matrixId: string, index: number): void => {
+    const matrix = worldIR.matrices.find((m) => m.id === matrixId);
+    if (!matrix) return;
+    const label = uniqueMatrixLabel(matrix.rows, '新行');
+    const result = addMatrixRow(worldIR, matrixId, label, index);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixRowAdds((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onRemoveMatrixRow = (matrixId: string, index: number): void => {
+    const result = removeMatrixRow(worldIR, matrixId, index);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixRowRemoves((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onAddMatrixCol = (matrixId: string, index: number): void => {
+    const matrix = worldIR.matrices.find((m) => m.id === matrixId);
+    if (!matrix) return;
+    const label = uniqueMatrixLabel(matrix.cols, '新列');
+    const result = addMatrixCol(worldIR, matrixId, label, index);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixColAdds((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onRemoveMatrixCol = (matrixId: string, index: number): void => {
+    const result = removeMatrixCol(worldIR, matrixId, index);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixColRemoves((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onRenameMatrixRow = (matrixId: string, index: number, label: string): void => {
+    const result = renameMatrixRow(worldIR, matrixId, index, label);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixRenames((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onRenameMatrixCol = (matrixId: string, index: number, label: string): void => {
+    const result = renameMatrixCol(worldIR, matrixId, index, label);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixRenames((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
       <MatrixField
@@ -781,6 +888,12 @@ export function App() {
         onEditCell={onEditMatrixCell}
         onEditCurveBand={onEditMatrixCurveBand}
         onEditCurveBands={onEditMatrixCurveBands}
+        onAddRow={onAddMatrixRow}
+        onRemoveRow={onRemoveMatrixRow}
+        onAddCol={onAddMatrixCol}
+        onRemoveCol={onRemoveMatrixCol}
+        onRenameRow={onRenameMatrixRow}
+        onRenameCol={onRenameMatrixCol}
         onExit={() => setScreen('strings')}
       />
     ) : screen === 'spectrum' && spectra.length > 0 ? (

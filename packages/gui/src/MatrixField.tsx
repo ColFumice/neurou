@@ -58,6 +58,13 @@ export interface MatrixFieldProps {
     bands: number[],
     persist?: boolean,
   ) => void;
+  /** 关系谱行列结构编辑（v2.4.3，App 回传 core 修改后的世界）。 */
+  onAddRow?: (matrixId: string, index: number) => void;
+  onRemoveRow?: (matrixId: string, index: number) => void;
+  onAddCol?: (matrixId: string, index: number) => void;
+  onRemoveCol?: (matrixId: string, index: number) => void;
+  onRenameRow?: (matrixId: string, index: number, label: string) => void;
+  onRenameCol?: (matrixId: string, index: number, label: string) => void;
   onExit: () => void;
 }
 
@@ -77,6 +84,17 @@ interface CellPosition {
 interface CellRef {
   row: number;
   col: number;
+}
+
+/** 行/列标签内联改名输入框（画布上极简透明 input）。 */
+interface RenameEditor {
+  kind: 'row' | 'col';
+  index: number;
+  value: string;
+  anchorX: number;
+  anchorY: number;
+  width: number;
+  align: 'left' | 'center' | 'right';
 }
 
 interface MatrixDebugState {
@@ -113,6 +131,11 @@ interface MatrixDebugState {
   curveKeyEdits: number;
   curvePointAdds: number;
   curvePointRemoves: number;
+  matrixRowAdds: number;
+  matrixRowRemoves: number;
+  matrixColAdds: number;
+  matrixColRemoves: number;
+  matrixRenames: number;
   synced: boolean;
   period: number | null;
   targetPlayhead: number;
@@ -125,6 +148,7 @@ declare global {
       cellPositions: () => CellPosition[];
       curvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
       focusCurvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
+      labelPositions: () => Array<{ kind: 'row' | 'col'; index: number; x: number; y: number; width: number }>;
       playhead: () => number;
       setCell: (row: number, col: number, value: number) => void;
     };
@@ -408,6 +432,12 @@ export function MatrixField({
   onEditCell,
   onEditCurveBand,
   onEditCurveBands,
+  onAddRow,
+  onRemoveRow,
+  onAddCol,
+  onRemoveCol,
+  onRenameRow,
+  onRenameCol,
   onExit,
 }: MatrixFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -419,6 +449,12 @@ export function MatrixField({
   const editRef = useRef(onEditCell);
   const curveEditRef = useRef(onEditCurveBand);
   const curveBandsEditRef = useRef(onEditCurveBands);
+  const addRowRef = useRef(onAddRow);
+  const removeRowRef = useRef(onRemoveRow);
+  const addColRef = useRef(onAddCol);
+  const removeColRef = useRef(onRemoveCol);
+  const renameRowRef = useRef(onRenameRow);
+  const renameColRef = useRef(onRenameCol);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
@@ -427,6 +463,12 @@ export function MatrixField({
   editRef.current = onEditCell;
   curveEditRef.current = onEditCurveBand;
   curveBandsEditRef.current = onEditCurveBands;
+  addRowRef.current = onAddRow;
+  removeRowRef.current = onRemoveRow;
+  addColRef.current = onAddCol;
+  removeColRef.current = onRemoveCol;
+  renameRowRef.current = onRenameRow;
+  renameColRef.current = onRenameCol;
   exitRef.current = onExit;
 
   const matrixCount = matrices.length;
@@ -457,6 +499,23 @@ export function MatrixField({
   const [curveKeyEditsUi, setCurveKeyEditsUi] = useState(0);
   const [curvePointAddsUi, setCurvePointAddsUi] = useState(0);
   const [curvePointRemovesUi, setCurvePointRemovesUi] = useState(0);
+  const [matrixRowAddsUi, setMatrixRowAddsUi] = useState(0);
+  const [matrixRowRemovesUi, setMatrixRowRemovesUi] = useState(0);
+  const [matrixColAddsUi, setMatrixColAddsUi] = useState(0);
+  const [matrixColRemovesUi, setMatrixColRemovesUi] = useState(0);
+  const [matrixRenamesUi, setMatrixRenamesUi] = useState(0);
+  const [renameEditor, setRenameEditor] = useState<RenameEditor | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameCommitRef = useRef<(value: string) => void>(() => {});
+  const renameCancelRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    if (!renameEditor) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, [renameEditor]);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -604,6 +663,13 @@ export function MatrixField({
     /** 曲线段点增删计数。 */
     let curvePointAddsNow = 0;
     let curvePointRemovesNow = 0;
+    /** 关系谱结构编辑计数 + 当前改名目标。 */
+    let matrixRowAddsNow = 0;
+    let matrixRowRemovesNow = 0;
+    let matrixColAddsNow = 0;
+    let matrixColRemovesNow = 0;
+    let matrixRenamesNow = 0;
+    let renameTarget: { kind: 'row' | 'col'; index: number; matrixId: string; original: string } | null = null;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
     /** 节点拖尾：context:band → 最近 450ms 位置。 */
@@ -1630,7 +1696,8 @@ export function MatrixField({
       }
       const rows = matrixRows(matrix);
       const cols = matrixCols(matrix);
-      const key = `${matrix.id}::${rows}x${cols}`;
+      // 只用矩阵 id 作为身份键：行/列增删改由下面 structure 分支平滑同步。
+      const key = matrix.id;
       if (key !== matrixKey) {
         matrixKey = key;
         flushAllCurveKeyEdits(true);
@@ -1659,6 +1726,42 @@ export function MatrixField({
             : 0;
         playing = (matrix.curves?.length ?? 0) > 0;
         pushPlayUi(true);
+        pushUi(true);
+        return matrix;
+      }
+      // 关系谱行列增删（v2.4.3）：重排布局、保留选中并夹住，整体淡入过渡。
+      const structural =
+        matrix.values.length !== targets.length ||
+        (matrix.values[0]?.length ?? 0) !== (targets[0]?.length ?? 0);
+      if (structural) {
+        flushAllCurveKeyEdits(true);
+        stopCurveGestureVoices();
+        curveTrails.clear();
+        layout = layoutOf(rows, cols);
+        displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
+        targets = displayed.map((row) => row.slice());
+        if (selected) {
+          selected = {
+            row: Math.min(selected.row, Math.max(0, rows - 1)),
+            col: Math.min(selected.col, Math.max(0, cols - 1)),
+          };
+        } else if (rows > 0 && cols > 0) {
+          selected = { row: 0, col: 0 };
+        }
+        if (hover) {
+          hover = {
+            row: Math.min(hover.row, Math.max(0, rows - 1)),
+            col: Math.min(hover.col, Math.max(0, cols - 1)),
+          };
+        }
+        drag = null;
+        resetScales(rows, cols);
+        const center = selected
+          ? cellCenter(layout, selected.row, selected.col)
+          : { x: LOGICAL_W / 2, y: LOGICAL_H / 2 };
+        selectionX = new Spring(center.x);
+        selectionY = new Spring(center.y);
+        fadeStart = now;
         pushUi(true);
         return matrix;
       }
@@ -2009,6 +2112,13 @@ export function MatrixField({
         }
         return;
       }
+      // 行列标签双击 → 内联极简 input 改名。
+      const labelHit = labelAtPoint(matrix, point);
+      if (labelHit) {
+        event.preventDefault();
+        openRenameEditor(matrix, labelHit);
+        return;
+      }
       const selectedCurve = selectedCurveInfo(matrix);
       if (selectedCurve && curveEditorContains(point)) {
         event.preventDefault();
@@ -2077,7 +2187,176 @@ export function MatrixField({
       closing = { start: now, done: false };
     }
 
+    /* —— 关系谱行列结构编辑 / 内联改名 —— */
+    function bumpRowAdds(): void {
+      matrixRowAddsNow += 1;
+      setMatrixRowAddsUi(matrixRowAddsNow);
+    }
+    function bumpRowRemoves(): void {
+      matrixRowRemovesNow += 1;
+      setMatrixRowRemovesUi(matrixRowRemovesNow);
+    }
+    function bumpColAdds(): void {
+      matrixColAddsNow += 1;
+      setMatrixColAddsUi(matrixColAddsNow);
+    }
+    function bumpColRemoves(): void {
+      matrixColRemovesNow += 1;
+      setMatrixColRemovesUi(matrixColRemovesNow);
+    }
+    function bumpRenames(): void {
+      matrixRenamesNow += 1;
+      setMatrixRenamesUi(matrixRenamesNow);
+    }
+
+    function addRowStructure(): void {
+      const matrix = currentMatrix();
+      if (!matrix || matrix.rows.length >= 64 || !addRowRef.current) return;
+      const index = selected ? Math.min(matrix.rows.length, selected.row + 1) : matrix.rows.length;
+      addRowRef.current(matrix.id, index);
+      bumpRowAdds();
+    }
+
+    function removeRowStructure(): void {
+      const matrix = currentMatrix();
+      if (!matrix || !selected || matrix.rows.length <= 1 || !removeRowRef.current) return;
+      removeRowRef.current(matrix.id, selected.row);
+      bumpRowRemoves();
+    }
+
+    function addColStructure(): void {
+      const matrix = currentMatrix();
+      if (!matrix || matrix.cols.length >= 64 || !addColRef.current) return;
+      const index = selected ? Math.min(matrix.cols.length, selected.col + 1) : matrix.cols.length;
+      addColRef.current(matrix.id, index);
+      bumpColAdds();
+    }
+
+    function removeColStructure(): void {
+      const matrix = currentMatrix();
+      if (!matrix || !selected || matrix.cols.length <= 1 || !removeColRef.current) return;
+      removeColRef.current(matrix.id, selected.col);
+      bumpColRemoves();
+    }
+
+    function labelAtPoint(
+      matrix: MatrixView,
+      point: { x: number; y: number },
+    ): {
+      kind: 'row' | 'col';
+      index: number;
+      label: string;
+      anchorX: number;
+      anchorY: number;
+      width: number;
+      align: 'left' | 'center' | 'right';
+    } | null {
+      ctx.save();
+      // 行标签（右侧对齐在 layout.left - LABEL_GAP）
+      ctx.font = `${ROW_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
+      for (let r = 0; r < matrix.rows.length; r += 1) {
+        const label = matrix.rows[r] ?? '';
+        const center = cellCenter(layout, r, 0);
+        const x = layout.left - LABEL_GAP + parallaxX.value;
+        const y = center.y + parallaxY.value;
+        const width = ctx.measureText(label).width;
+        if (point.x >= x - width - 14 && point.x <= x + 14 && Math.abs(point.y - y) <= 16) {
+          ctx.restore();
+          return {
+            kind: 'row',
+            index: r,
+            label,
+            anchorX: x,
+            anchorY: y,
+            width: Math.max(120, width + 50),
+            align: 'right',
+          };
+        }
+      }
+      // 列标签（居中在格子上方）
+      ctx.font = `${COL_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
+      for (let c = 0; c < matrix.cols.length; c += 1) {
+        const label = matrix.cols[c] ?? '';
+        const center = cellCenter(layout, 0, c);
+        const x = center.x + parallaxX.value;
+        const y = layout.top - LABEL_GAP - COL_LABEL_FONT_PX / 2 + parallaxY.value;
+        const width = ctx.measureText(label).width;
+        if (Math.abs(point.x - x) <= width / 2 + 14 && Math.abs(point.y - y) <= 16) {
+          ctx.restore();
+          return {
+            kind: 'col',
+            index: c,
+            label,
+            anchorX: x,
+            anchorY: y,
+            width: Math.max(120, width + 50),
+            align: 'center',
+          };
+        }
+      }
+      ctx.restore();
+      return null;
+    }
+
+    function openRenameEditor(
+      matrix: MatrixView,
+      hit: NonNullable<ReturnType<typeof labelAtPoint>>,
+    ): void {
+      renameTarget = {
+        kind: hit.kind,
+        index: hit.index,
+        matrixId: matrix.id,
+        original: hit.label,
+      };
+      setRenameEditor({
+        kind: hit.kind,
+        index: hit.index,
+        value: hit.label,
+        anchorX: hit.anchorX,
+        anchorY: hit.anchorY,
+        width: hit.width,
+        align: hit.align,
+      });
+    }
+
+    renameCommitRef.current = (value: string): void => {
+      const target = renameTarget;
+      renameTarget = null;
+      setRenameEditor(null);
+      if (!target) return;
+      const next = value.trim();
+      if (!next || next === target.original) return;
+      if (target.kind === 'row') renameRowRef.current?.(target.matrixId, target.index, next);
+      else renameColRef.current?.(target.matrixId, target.index, next);
+      bumpRenames();
+    };
+    renameCancelRef.current = (): void => {
+      renameTarget = null;
+      setRenameEditor(null);
+    };
+
     function onKeyDown(event: KeyboardEvent): void {
+      const targetEl = event.target as HTMLElement | null;
+      if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.isContentEditable)) return;
+      // Ctrl+Enter / Ctrl+Shift+Enter：插行/列；Ctrl+Backspace / Ctrl+Shift+Backspace：删行/列。
+      if (event.ctrlKey && !event.metaKey && !event.altKey) {
+        if (focusIsOpen() || curveDrag !== null || curveKeyEdits.size > 0) return;
+        if (event.code === 'Enter') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.shiftKey) addColStructure();
+          else addRowStructure();
+          return;
+        }
+        if (event.code === 'Backspace') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.shiftKey) removeColStructure();
+          else removeRowStructure();
+          return;
+        }
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.code === 'Space') {
         event.preventDefault();
@@ -2844,6 +3123,11 @@ export function MatrixField({
         curveKeyEdits: curveKeyEditsNow,
         curvePointAdds: curvePointAddsNow,
         curvePointRemoves: curvePointRemovesNow,
+        matrixRowAdds: matrixRowAddsNow,
+        matrixRowRemoves: matrixRowRemovesNow,
+        matrixColAdds: matrixColAddsNow,
+        matrixColRemoves: matrixColRemovesNow,
+        matrixRenames: matrixRenamesNow,
         synced: period !== null,
         period,
         targetPlayhead: Math.round(clamp(syncedTargetPlayhead, 0, 1) * 10000) / 10000,
@@ -2889,6 +3173,36 @@ export function MatrixField({
         }));
       },
       focusCurvePositions: () => focusCurvePositionsData(),
+      labelPositions: () => {
+        const matrix = currentMatrix();
+        if (!matrix) return [];
+        const result: Array<{ kind: 'row' | 'col'; index: number; x: number; y: number; width: number }> = [];
+        ctx.save();
+        ctx.font = `${ROW_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
+        for (let r = 0; r < matrix.rows.length; r += 1) {
+          const center = cellCenter(layout, r, 0);
+          result.push({
+            kind: 'row',
+            index: r,
+            x: Math.round((layout.left - LABEL_GAP + parallaxX.value) * 100) / 100,
+            y: Math.round((center.y + parallaxY.value) * 100) / 100,
+            width: Math.round(ctx.measureText(matrix.rows[r] ?? '').width * 100) / 100,
+          });
+        }
+        ctx.font = `${COL_LABEL_FONT_PX}px ${DEFAULT_SERIF}`;
+        for (let c = 0; c < matrix.cols.length; c += 1) {
+          const center = cellCenter(layout, 0, c);
+          result.push({
+            kind: 'col',
+            index: c,
+            x: Math.round((center.x + parallaxX.value) * 100) / 100,
+            y: Math.round((layout.top - LABEL_GAP - COL_LABEL_FONT_PX / 2 + parallaxY.value) * 100) / 100,
+            width: Math.round(ctx.measureText(matrix.cols[c] ?? '').width * 100) / 100,
+          });
+        }
+        ctx.restore();
+        return result;
+      },
       playhead: () => Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
       setCell: (row: number, col: number, value: number) => {
         const matrix = currentMatrix();
@@ -2984,6 +3298,11 @@ export function MatrixField({
       data-curve-key-edits={curveKeyEditsUi}
       data-curve-point-adds={curvePointAddsUi}
       data-curve-point-removes={curvePointRemovesUi}
+      data-matrix-row-adds={matrixRowAddsUi}
+      data-matrix-row-removes={matrixRowRemovesUi}
+      data-matrix-col-adds={matrixColAddsUi}
+      data-matrix-col-removes={matrixColRemovesUi}
+      data-matrix-renames={matrixRenamesUi}
       style={{
         position: 'absolute',
         inset: 0,
@@ -2997,6 +3316,56 @@ export function MatrixField({
         ref={canvasRef}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', cursor: 'none' }}
       />
+      {renameEditor ? (
+        <input
+          ref={renameInputRef}
+          data-testid="matrix-rename-input"
+          value={renameEditor.value}
+          spellCheck={false}
+          onChange={(event) =>
+            setRenameEditor((previous) => (previous ? { ...previous, value: event.target.value } : previous))
+          }
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              renameCommitRef.current(renameEditor.value);
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              renameCancelRef.current();
+            }
+          }}
+          onBlur={() => renameCommitRef.current(renameEditor.value)}
+          style={{
+            position: 'absolute',
+            left: `${(renameEditor.anchorX / LOGICAL_W) * 100}%`,
+            top: `${(renameEditor.anchorY / LOGICAL_H) * 100}%`,
+            width: `${renameEditor.width}px`,
+            transform:
+              renameEditor.align === 'right'
+                ? 'translate(-100%, -50%)'
+                : renameEditor.align === 'center'
+                  ? 'translate(-50%, -50%)'
+                  : 'translateY(-50%)',
+            textAlign: renameEditor.align,
+            background: 'transparent',
+            border: 'none',
+            borderBottom: '1px solid rgba(245, 245, 245, 0.22)',
+            borderRadius: 0,
+            color: '#f5f5f5',
+            fontFamily: DEFAULT_SERIF,
+            fontSize: `${ROW_LABEL_FONT_PX}px`,
+            lineHeight: 1.2,
+            padding: '0 0 3px',
+            margin: 0,
+            outline: 'none',
+            caretColor: '#f5f5f5',
+            zIndex: 2,
+            cursor: 'text',
+            pointerEvents: 'auto',
+          }}
+        />
+      ) : null}
     </div>
   );
 }
