@@ -1217,6 +1217,14 @@ const moonTime = await page.evaluate(() => {
 });
 const moonTarget = moonTime && moonTime.tick !== undefined ? (((moonTime.tick / 30) * timeSpeed + timePhase) % 1 + 1) % 1 : -1;
 check('moon-tide 播放头跟随速度/相位后的时间轴', moonTime !== null && Math.abs(Number(moonTime.playhead) - moonTarget) < 0.2, JSON.stringify(moonTime) + '/' + moonTarget.toFixed(3));
+check('moon-tide 有两个关系谱', Number(await matrixRoot.getAttribute('data-matrix-count')) === 2, String(await matrixRoot.getAttribute('data-matrix-count')));
+await page.keyboard.press('Tab');
+await page.waitForTimeout(700);
+const secondMatrix = { name: await matrixRoot.getAttribute('data-matrix-name'), speed: await matrixRoot.getAttribute('data-time-speed'), phase: await matrixRoot.getAttribute('data-time-phase') };
+check('Tab 切换到第二个关系谱（灯影）', secondMatrix.name === '灯影' && Number(secondMatrix.speed) === 0.8 && Math.abs(Number(secondMatrix.phase) - 0.3) < 1e-6, JSON.stringify(secondMatrix));
+await page.keyboard.press('Shift+Tab');
+await page.waitForTimeout(700);
+check('Shift+Tab 切回第一个关系谱（月潮）', (await matrixRoot.getAttribute('data-matrix-name')) === '月潮', String(await matrixRoot.getAttribute('data-matrix-name')));
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 
