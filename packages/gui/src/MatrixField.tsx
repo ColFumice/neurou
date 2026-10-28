@@ -94,6 +94,8 @@ interface MatrixDebugState {
     bandIndex: number | null;
   };
   focusBandEdits: number;
+  playing: boolean;
+  playhead: number;
 }
 
 declare global {
@@ -103,6 +105,7 @@ declare global {
       cellPositions: () => CellPosition[];
       curvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
       focusCurvePositions: () => Array<{ index: number; x: number; y: number; value: number }>;
+      playhead: () => number;
       setCell: (row: number, col: number, value: number) => void;
     };
   }
@@ -204,6 +207,13 @@ const CURVE_POINT_RADIUS = 4.6;
 const CURVE_POINT_SELECTED_RADIUS = 6.4;
 const CURVE_HIT_RADIUS = 16;
 const CURVE_VALUE_EASE_TAU_S = 0.12;
+
+/** 曲线播放头：矩阵有曲线时自动播放归一化 t（8s 循环）。 */
+const PLAY_DURATION_MS = 8000;
+const PLAYHEAD_LINE_ALPHA = 0.14;
+const PLAYHEAD_DOT_ALPHA = 0.85;
+const PLAYHEAD_DOT_RADIUS = 2.8;
+const SPARK_PLAYHEAD_RADIUS = 1.6;
 
 /** 聚焦编辑：双击曲线格（或选中后 Enter）用 iOS spring 放大成中央大圆角矩形。 */
 const FOCUS_PANEL_WIDTH = 960;
@@ -403,6 +413,8 @@ export function MatrixField({
   const [focusCellUi, setFocusCellUi] = useState('');
   const [focusCurveUi, setFocusCurveUi] = useState('');
   const [focusBandEditsUi, setFocusBandEditsUi] = useState(0);
+  const [playingUi, setPlayingUi] = useState(false);
+  const [playheadUi, setPlayheadUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -505,6 +517,11 @@ export function MatrixField({
     let focusUiNow = false;
     let focusCellUiNow = '';
     let focusCurveUiNow = '';
+    /** 曲线播放头：playing + 归一化 t（0..1，8s 循环）。 */
+    let playing = true;
+    let playhead = 0;
+    let playingUiNow = false;
+    let playheadUiNow = 0;
     /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
     let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
@@ -869,6 +886,21 @@ export function MatrixField({
       return focusTargetActive || focusSpring.value > 0.01;
     }
 
+    /** 曲线播放头：每帧只在数值/播放状态变化时同步 React 数据属性。 */
+    function pushPlayUi(force = false): void {
+      const hasCurves = (currentMatrix()?.curves?.length ?? 0) > 0;
+      const nextPlaying = hasCurves ? playing : false;
+      if (playingUiNow !== nextPlaying) {
+        playingUiNow = nextPlaying;
+        setPlayingUi(nextPlaying);
+      }
+      const rounded = Math.round(clamp(playhead, 0, 1) * 1000) / 1000;
+      if (force || Math.abs(rounded - playheadUiNow) >= 0.005) {
+        playheadUiNow = rounded;
+        setPlayheadUi(rounded);
+      }
+    }
+
     function finalizeFocusArrow(persist = true): void {
       const arrow = focusArrow;
       if (!arrow) return;
@@ -1017,6 +1049,9 @@ export function MatrixField({
           hover = null;
           drag = null;
           scales = [];
+          playhead = 0;
+          playing = false;
+          pushPlayUi(true);
           pushUi(true);
         }
         return null;
@@ -1037,6 +1072,10 @@ export function MatrixField({
         selectionX = new Spring(center.x);
         selectionY = new Spring(center.y);
         fadeStart = now;
+        // 有曲线的矩阵自动播放播放头；无曲线则隐藏（t=0、playing=false）。
+        playhead = 0;
+        playing = (matrix.curves?.length ?? 0) > 0;
+        pushPlayUi(true);
         pushUi(true);
         return matrix;
       }
@@ -1423,6 +1462,16 @@ export function MatrixField({
 
     function onKeyDown(event: KeyboardEvent): void {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const matrix = currentMatrix();
+        if (matrix && (matrix.curves?.length ?? 0) > 0) {
+          playing = !playing;
+          pushPlayUi(true);
+        }
+        return;
+      }
       if (event.code === 'Tab') {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1584,6 +1633,14 @@ export function MatrixField({
           else ctx.lineTo(x, y);
         }
         ctx.stroke();
+        // 播放头：沿 sparkline 移动的小亮点。
+        const playSample = sampleCurveBands(matrix, curve.bands, playhead);
+        const playX = lerp(x0, x1, playhead);
+        const playY = lerp(y0, y1, playSample);
+        ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
+        ctx.beginPath();
+        ctx.arc(playX, playY, SPARK_PLAYHEAD_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
       }
       if (selectedCell) {
         ctx.strokeStyle = rgba(LABEL_RGB, 0.55);
@@ -1683,6 +1740,15 @@ export function MatrixField({
       }
       ctx.stroke();
 
+      // 播放头：极淡竖线 + 亮点（暂停时停在当前位置）。
+      const playX = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, playhead);
+      ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(playX, CURVE_EDITOR_TOP);
+      ctx.lineTo(playX, CURVE_EDITOR_BOTTOM);
+      ctx.stroke();
+
       // 段点（选中点更大，spring 缩放）
       const count = curveBands.length;
       for (let i = 0; i < count; i += 1) {
@@ -1696,6 +1762,12 @@ export function MatrixField({
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
       }
+      // 播放头亮点画在段点之上，保证可见。
+      const playSample = sampleCurveBands(matrix, curveBands, playhead);
+      ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
+      ctx.beginPath();
+      ctx.arc(playX, curveValueToY(playSample), PLAYHEAD_DOT_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
@@ -1735,6 +1807,13 @@ export function MatrixField({
           else ctx.lineTo(x, y);
         }
         ctx.stroke();
+        const playX = lerp(graph.left, graph.right, playhead);
+        ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(playX, graph.top);
+        ctx.lineTo(playX, graph.bottom);
+        ctx.stroke();
         const count = focusCurveBands.length;
         for (let i = 0; i < count; i += 1) {
           const x = focusCurvePointX(matrix, i, count);
@@ -1748,6 +1827,12 @@ export function MatrixField({
           ctx.arc(x, y, radius, 0, Math.PI * 2);
           ctx.fill();
         }
+        // 聚焦播放头亮点（大曲线继续播放）。
+        const focusPlaySample = sampleCurveBands(matrix, focusCurveBands, playhead);
+        ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
+        ctx.beginPath();
+        ctx.arc(playX, lerp(graph.bottom, graph.top, focusPlaySample), PLAYHEAD_DOT_RADIUS + 0.6, 0, Math.PI * 2);
+        ctx.fill();
       }
       // 底部极淡「行 × 列」
       if (progress > 0.6) {
@@ -1915,6 +2000,15 @@ export function MatrixField({
       stepCurveEditor(now, dt);
       stepFocus(now, dt);
 
+      // 播放头：有曲线的矩阵自动 8s 循环；拖动/滚轮时冻结，松手恢复。
+      const hasCurves = matrix !== null && (matrix.curves?.length ?? 0) > 0;
+      const playFrozen = drag !== null || curveDrag !== null || focusDrag !== null || now < wheelFreezeUntil;
+      if (hasCurves && playing && !playFrozen) {
+        playhead = (playhead + dt / (PLAY_DURATION_MS / 1000)) % 1;
+      }
+      if (!hasCurves) playhead = 0;
+      pushPlayUi();
+
       // 数值缓动（约 180ms）
       if (rows > 0) {
         const factor = 1 - Math.exp(-dt / VALUE_EASE_TAU_S);
@@ -2051,6 +2145,8 @@ export function MatrixField({
           bandIndex: focusSelectedIndex,
         },
         focusBandEdits: focusBandEditsNow,
+        playing: (matrix?.curves?.length ?? 0) > 0 ? playing : false,
+        playhead: Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
       };
     }
 
@@ -2093,6 +2189,7 @@ export function MatrixField({
         }));
       },
       focusCurvePositions: () => focusCurvePositionsData(),
+      playhead: () => Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
       setCell: (row: number, col: number, value: number) => {
         const matrix = currentMatrix();
         if (!matrix) return;
@@ -2175,6 +2272,8 @@ export function MatrixField({
       data-focus-cell={focusCellUi}
       data-focus-curve={focusCurveUi}
       data-focus-band-edits={focusBandEditsUi}
+      data-playing={playingUi ? 'true' : 'false'}
+      data-playhead={playheadUi.toFixed(4)}
       style={{
         position: 'absolute',
         inset: 0,

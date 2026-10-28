@@ -702,6 +702,10 @@ class Compiler {
         return { expr: { k: 'const', v: e.items }, type: 'set' };
       case 'path': {
         const joined = e.parts.join('.');
+        // v2.3：此刻 = 当前拍数（无参内建值，可省略括号）。
+        if (joined === '此刻') {
+          return { expr: { k: 'call', fn: '此刻', args: [] }, type: 'number' };
+        }
         // 实体名可以直接当作引用值使用（例如集合里的「管道」）。
         if (e.parts.length === 1 && !this.strings.has(joined) && this.entities.has(joined)) {
           return { expr: { k: 'const', v: joined }, type: 'ref' };
@@ -777,6 +781,9 @@ class Compiler {
           case '存在':
             if (argTypes[0] !== 'ref' && argTypes[0] !== 'any') return fail('一个引用');
             return { expr: { k: 'call', fn: '存在', args: l }, type: 'boolean' };
+          case '此刻':
+            if (e.args.length !== 0) return fail('没有参数（此刻表示当前拍数）');
+            return { expr: { k: 'call', fn: '此刻', args: [] }, type: 'number' };
           case '查谱': {
             if (e.args.length !== 2) {
               this.error('NRO2003', `函数「查谱」需要两个参数：谱名（字符串）和位置（数字），现在给了 ${e.args.length} 个。`, e.span, {
@@ -895,7 +902,7 @@ class Compiler {
             };
           }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '查谱', '查关系谱']);
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱']);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }

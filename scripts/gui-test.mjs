@@ -940,6 +940,21 @@ const matrixRoot = page.locator('[data-testid="matrix-field"]');
 check('F3 进入关系谱矩阵', (await appAttr('data-screen')) === 'matrix' && (await matrixRoot.getAttribute('data-matrix-name')) === '信任网', `${await appAttr('data-screen')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
 const matrixBefore = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
 check('关系谱 3×3 初始值正确', matrixBefore.length === 3 && matrixBefore[0]?.length === 3 && Number(matrixBefore[1]?.[1]) === 1, JSON.stringify(matrixBefore));
+// v2.3.2：曲线播放头 / Space 暂停
+const playheadStart = Number(await matrixRoot.getAttribute('data-playhead'));
+await page.waitForTimeout(520);
+const playheadMoving = Number(await matrixRoot.getAttribute('data-playhead'));
+check('曲线自动播放（播放头前进）', (await matrixRoot.getAttribute('data-playing')) === 'true' && Math.abs(playheadMoving - playheadStart) > 0.02, `${playheadStart}→${playheadMoving}`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(160);
+const playheadPaused = Number(await matrixRoot.getAttribute('data-playhead'));
+await page.waitForTimeout(420);
+const playheadPaused2 = Number(await matrixRoot.getAttribute('data-playhead'));
+check('Space 暂停播放头', (await matrixRoot.getAttribute('data-playing')) === 'false' && Math.abs(playheadPaused2 - playheadPaused) < 1e-6, `${playheadPaused}→${playheadPaused2}`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(320);
+const playheadResumed = Number(await matrixRoot.getAttribute('data-playhead'));
+check('Space 恢复播放', (await matrixRoot.getAttribute('data-playing')) === 'true' && Math.abs(playheadResumed - playheadPaused2) > 0.01, `${playheadPaused2}→${playheadResumed}`);
 // v2.3：选中带曲线的格子，底部出现曲线编辑器
 await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(520);
