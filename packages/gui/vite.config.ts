@@ -79,6 +79,20 @@ function tunerSavePlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), tunerSavePlugin()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/') || id.includes('/node_modules/scheduler/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('/packages/core/')) return 'neurou-core';
+          if (id.includes('/packages/runtime/')) return 'neurou-runtime';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5188,
