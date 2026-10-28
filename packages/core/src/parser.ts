@@ -28,6 +28,7 @@ import type {
 import { DECL_KEYWORDS, STRING_KEYWORDS, isStringKeyword } from './ast.js';
 import { type DiagnosticBag } from './diagnostics.js';
 import { tokenize, type Token } from './lexer.js';
+import { suggestName } from './suggest.js';
 import { type SourceFile, type Span } from './source.js';
 
 class ParseError extends Error {}
@@ -540,7 +541,7 @@ class Parser {
             const valueStart = this.peek();
             const value = this.readName('插值方式');
             if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
-              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑。');
+              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑、阶跃。');
             } else {
               decl.interpolation = value as SpectrumDecl['interpolation'];
             }
@@ -743,7 +744,7 @@ class Parser {
                 this.fail(
                   `「曲线」的音段值只能是数字，但读到了「${t.text}」。`,
                   t.span,
-                  '先写行标签、列标签，再写空格分隔的数字，例如「曲线 信任 色温 0.1 0.5 0.9」。',
+                  '曲线修饰只能写「插值 线性|平滑|阶跃」「循环 是|否」「速度 数字」「相位 数字」；之后才是空格分隔的段值，例如「曲线 信任 色温 插值 阶跃 0.1 0.5 0.9」。',
                 );
                 bad = true;
                 break;
@@ -770,7 +771,7 @@ class Parser {
             const valueStart = this.peek();
             const value = this.readName('插值方式');
             if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
-              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑。');
+              this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑、阶跃。');
             } else {
               decl.interpolation = value as MatrixDecl['interpolation'];
             }
@@ -816,9 +817,16 @@ class Parser {
             this.finishLine();
             break;
           }
-          default:
-            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期、速度、相位、相位源。');
+          default: {
+            const fields = ['行', '列', '段', '曲线', '插值', '循环', '周期', '速度', '相位', '相位源'];
+            const hint = suggestName(key, fields);
+            this.fail(
+              `关系谱里不认识「${key}」这个字段。`,
+              fieldStart.span,
+              hint ? `你是不是想写「${hint}」？可用字段：${fields.join('、')}。` : `可用字段：${fields.join('、')}。`,
+            );
             this.skipToLineEnd();
+          }
         }
       }
       this.exitBlock();

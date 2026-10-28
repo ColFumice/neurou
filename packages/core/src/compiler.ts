@@ -41,6 +41,8 @@ import type {
   WorldIR,
 } from './ir.js';
 import { SourceFile, type Span } from './source.js';
+import { suggestName } from './suggest.js';
+export { suggestName } from './suggest.js';
 import { parse } from './parser.js';
 
 export interface CompileResult {
@@ -1981,35 +1983,6 @@ function validateCycle(edges: IRCoupling[]): string | undefined {
   }
   if (cur !== start) return `走完一圈停在「${cur}」，没有回到起点「${start}」`;
   return undefined;
-}
-
-export function suggestName(word: string, candidates: readonly string[]): string | undefined {
-  let best: string | undefined;
-  let bestDist = Infinity;
-  for (const c of candidates) {
-    const d = levenshtein(word, c);
-    if (d < bestDist) {
-      bestDist = d;
-      best = c;
-    }
-  }
-  return best && bestDist <= Math.max(1, Math.floor(word.length / 2)) ? best : undefined;
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    let prev = dp[0]!;
-    dp[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const tmp = dp[j]!;
-      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prev = tmp;
-    }
-  }
-  return dp[n]!;
 }
 
 function formatValue(v: Value): string {
