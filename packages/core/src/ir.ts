@@ -78,6 +78,8 @@ export interface IRCoupling {
   strengthExpr?: LExpr;
   /** 延迟的拍数 */
   delay: number;
+  /** v2.11：运行期求值的延迟表达式（拍数，非负；四舍五入）。 */
+  delayExpr?: LExpr;
   curve: ResponseCurve;
   guard?: LExpr;
   /** 属于哪条回路（若有） */

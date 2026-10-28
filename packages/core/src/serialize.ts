@@ -245,7 +245,8 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
 function couplingLine(c: IRCoupling): string {
   const parts = [`耦合 ${c.from} → ${c.to}`, c.polarity === -1 ? '反向' : '同向'];
   parts.push(`强度 ${c.strengthExpr ? exprText(c.strengthExpr) : numberText(c.strength)}`);
-  if (c.delay !== 0) parts.push(`延迟 ${numberText(c.delay)}`);
+  if (c.delayExpr) parts.push(`延迟 ${exprText(c.delayExpr)}`);
+  else if (c.delay !== 0) parts.push(`延迟 ${numberText(c.delay)}`);
   if (c.curve !== '线性') parts.push(`曲线 ${c.curve}`);
   if (c.guard) parts.push(`当 ${exprText(c.guard)}`);
   return parts.join(' ');

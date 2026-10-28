@@ -27,4 +27,17 @@ describe('耦合：运行期强度表达式（v2.5）', () => {
     expect(run('耦合 甲 → 乙 同向 0.5\n')).toBeCloseTo(60);
     expect(run('耦合 甲 → 乙 同向 0.5 + 此刻 * 0\n')).toBeCloseTo(60);
   });
+
+  it('表达式延迟与同值静态延迟一致（v2.11）', () => {
+    const dynamic = compileText(BASE + '耦合 甲 → 乙 同向 1.0 延迟 2 + 此刻 * 0\n', 'dynamic-delay-runtime.nro');
+    if (!dynamic.ok) throw new Error('compile failed');
+    const u = new Universe(dynamic.ir, { seed: 1 });
+    u.inject('甲', 70);
+    u.tick();
+    expect(u.number('乙')).toBe(50);
+    u.tick();
+    expect(u.number('乙')).toBe(50);
+    u.tick();
+    expect(u.number('乙')).toBeCloseTo(70);
+  });
 });

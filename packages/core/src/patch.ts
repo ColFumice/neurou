@@ -238,6 +238,7 @@ function couplingStructure(coupling: IRCoupling): string {
   return JSON.stringify({
     polarity: coupling.polarity,
     delay: coupling.delay,
+    delayExpr: coupling.delayExpr,
     curve: coupling.curve,
     guard: coupling.guard,
     strengthExpr: coupling.strengthExpr,

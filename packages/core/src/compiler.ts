@@ -1053,8 +1053,19 @@ class Compiler {
           else strengthExpr = lowered.expr;
         }
       }
-      const delay = d.delay ? this.constNumber(d.delay, '耦合延迟', d.span) : 0;
-      if (delay !== undefined && delay < 0) this.error('NRO2107', '耦合延迟不能是负数。', d.span);
+      let delay = 0;
+      let delayExpr: LExpr | undefined;
+      if (d.delay) {
+        const lowered = this.lower(d.delay, {});
+        if (lowered.type !== 'number' && lowered.type !== 'any') {
+          this.error('NRO2003', '耦合延迟必须是数字表达式。', d.delay.span);
+        } else {
+          const constant = evalConst(lowered.expr);
+          if (typeof constant === 'number') delay = constant;
+          else delayExpr = lowered.expr;
+        }
+      }
+      if (delay < 0) this.error('NRO2107', '耦合延迟不能是负数。', d.span);
       const guard = this.lowerGuard(d.guard, {}, '耦合');
       const c: IRCoupling = {
         id: `c:${from}->${to}:${this.couplingSeq++}`,
@@ -1062,11 +1073,12 @@ class Compiler {
         to,
         polarity: d.polarity,
         strength: staticStrength,
-        delay: Math.max(0, delay ?? 0),
+        delay: Math.max(0, delay),
         curve: d.curve ?? '线性',
         span: d.span,
       };
       if (strengthExpr) c.strengthExpr = strengthExpr;
+      if (delayExpr) c.delayExpr = delayExpr;
       if (guard) c.guard = guard;
       this.couplings.push(c);
       this.markWritten(to, `耦合 ${from}→${to}`);

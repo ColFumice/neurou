@@ -33,4 +33,17 @@ describe('耦合：动态强度（v2.5）', () => {
     expect(r.ir.couplings[0]?.strength).toBe(0.5);
     expect(r.ir.couplings[0]?.strengthExpr).toBeUndefined();
   });
+
+  it('延迟也可以是运行期表达式（v2.11）', () => {
+    const source = WORLD.replace('0.5 + 此刻 * 0', '0.5 延迟 2 + 此刻 * 0');
+    const r = compileText(source, 'dynamic-delay.nro');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ir.couplings[0]?.delayExpr).toBeDefined();
+    const text = serialize(r.ir);
+    expect(text).toContain('延迟 2 + 此刻() * 0');
+    const staticDelay = compileText(WORLD.replace('0.5 + 此刻 * 0', '0.5 延迟 2'), 'static-delay.nro');
+    expect(staticDelay.ok).toBe(true);
+    if (staticDelay.ok) expect(staticDelay.ir.couplings[0]?.delay).toBe(2);
+  });
 });

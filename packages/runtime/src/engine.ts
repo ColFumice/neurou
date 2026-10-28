@@ -426,9 +426,12 @@ export class Universe {
       const normalized = delta / fromRange;
       const factor = curveFactor(c.curve, Math.abs(normalized));
       const strength = c.strengthExpr ? asNumber(evalExpr(c.strengthExpr, this.state)) : c.strength;
+      const delay = c.delayExpr
+        ? Math.max(0, Math.round(asNumber(evalExpr(c.delayExpr, this.state))))
+        : c.delay;
       const applied = normalized * strength * c.polarity * factor * targetRange;
       // 下一拍抵达：state.tick 已经指向下一拍。
-      this.state.pending.push({ due: this.state.tick + c.delay, id: c.to, delta: applied });
+      this.state.pending.push({ due: this.state.tick + delay, id: c.to, delta: applied });
       this.stats.couplingFired.add(c.id);
       this.log({ tick: this.state.tick, kind: 'coupling', id: `${c.from}→${c.to}`, detail: `${detail} ${applied}` });
     }
@@ -833,8 +836,11 @@ export class Universe {
         const normalized = delta / fromRange;
         const factor = curveFactor(c.curve, Math.abs(normalized));
         const strength = c.strengthExpr ? asNumber(evalExpr(c.strengthExpr, this.state)) : c.strength;
+        const delay = c.delayExpr
+          ? Math.max(0, Math.round(asNumber(evalExpr(c.delayExpr, this.state))))
+          : c.delay;
         const applied = normalized * strength * c.polarity * factor * targetRange;
-        this.state.pending.push({ due: t + 1 + c.delay, id: c.to, delta: applied });
+        this.state.pending.push({ due: t + 1 + delay, id: c.to, delta: applied });
         this.stats.couplingFired.add(c.id);
         this.log({ tick: t, kind: 'coupling', id: `${c.from}→${c.to}`, detail: String(applied) });
       }
