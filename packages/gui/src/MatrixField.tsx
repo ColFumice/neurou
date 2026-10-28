@@ -275,7 +275,7 @@ const CURVE_TRAIL_SAMPLE_MS = 18;
 /** 持续 voice 波形/音高更新间隔；按键标记松开后淡出时长。 */
 const SUSTAINED_UPDATE_MS = 60;
 const FEEDBACK_FADE_MS = 300;
-/** Space 长按阈值：>=280ms 松开只关闭聚焦、保留曲线；短按才切换/删除。 */
+/** Space 长按阈值：开门手势按住 >=280ms 松手时自动关窗（曲线保留，不删除）。 */
 const SPACE_LONG_PRESS_MS = 280;
 
 /** 聚焦编辑：双击曲线格（或选中后 Enter）用 iOS spring 放大成中央大圆角矩形。 */
@@ -690,15 +690,8 @@ export function MatrixField({
     const curveCellAlphas = new Map<string, number>();
     let pendingFocusAfterAdd = false;
     let pendingFocusAt = 0;
-    /** Space 手势：长按只聚焦/添加，短按有曲线才删除。 */
-    let spaceGesture: {
-      started: number;
-      matrixId: string;
-      row: string;
-      col: string;
-      hadCurve: boolean;
-      added: boolean;
-    } | null = null;
+    /** Space 开门手势起点：长按松手时关窗（只关窗，曲线保留）。 */
+    let spaceOpenStarted = 0;
     let renameTarget: { kind: 'row' | 'col'; index: number; matrixId: string; original: string } | null = null;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
@@ -2253,63 +2246,51 @@ export function MatrixField({
       setMatrixCurveRemovesUi(matrixCurveRemovesNow);
     }
 
-    /** Space 按下：无曲线→添加并（180ms 后）自动聚焦；有曲线→只聚焦，不删除。 */
-    function beginSpaceGesture(): void {
-      if (spaceGesture) return;
+    /** Space：未聚焦时无曲线→添加并自动聚焦、有曲线→打开聚焦；已聚焦→只关闭聚焦，绝不删除曲线。 */
+    function toggleFocusForSpace(): void {
       const matrix = currentMatrix();
       if (!matrix) return;
-      let matrixId = matrix.id;
-      let row = '';
-      let col = '';
-      let hadCurve = false;
-      if (focusTargetActive) {
-        matrixId = focusMatrixId;
-        row = focusRow;
-        col = focusCol;
-        hadCurve = true;
-      } else if (selected) {
-        row = matrix.rows[selected.row] ?? '';
-        col = matrix.cols[selected.col] ?? '';
-        hadCurve = matrix.curves?.some((curve) => curve.row === row && curve.col === col) ?? false;
-      } else {
+      if (focusTargetActive || focusIsOpen()) {
+        spaceOpenStarted = 0;
+        closeFocus();
         return;
       }
-      if (focusIsOpen() && !focusTargetActive) return;
+      if (!selected) return;
       if (curveDrag !== null || curveKeyEdits.size > 0) return;
-      spaceGesture = { started: performance.now(), matrixId, row, col, hadCurve, added: false };
-      if (!hadCurve) {
-        if (!addCurveRef.current) {
-          spaceGesture = null;
-          return;
-        }
-        addCurveRef.current(matrixId, row, col);
+      spaceOpenStarted = performance.now();
+      const row = matrix.rows[selected.row] ?? '';
+      const col = matrix.cols[selected.col] ?? '';
+      const existing = matrix.curves?.some((curve) => curve.row === row && curve.col === col) ?? false;
+      if (existing) {
+        beginFocus(matrix, performance.now());
+      } else if (addCurveRef.current) {
+        addCurveRef.current(matrix.id, row, col);
         bumpMatrixCurveAdds();
-        spaceGesture.added = true;
         pendingFocusAfterAdd = true;
         pendingFocusAt = performance.now() + 180;
-      } else if (!focusTargetActive) {
-        beginFocus(matrix, performance.now());
       }
     }
 
-    /** Space 松开：长按只关闭聚焦并保留曲线；短按有曲线才移除。 */
-    function finalizeSpaceGesture(): void {
-      const gesture = spaceGesture;
-      if (!gesture) return;
-      spaceGesture = null;
-      const duration = performance.now() - gesture.started;
-      if (duration >= SPACE_LONG_PRESS_MS) {
+    /** Shift+Space：显式移除选中格（或当前聚焦格）曲线；移除后退出聚焦。 */
+    function removeSelectedCellCurve(): void {
+      const matrix = currentMatrix();
+      if (!matrix) return;
+      if (!removeCurveRef.current) return;
+      if (focusTargetActive) {
+        removeCurveRef.current(focusMatrixId, focusRow, focusCol);
+        bumpMatrixCurveRemoves();
         pendingFocusAfterAdd = false;
-        if (focusIsOpen()) closeFocus();
+        closeFocus();
         return;
       }
-      if (!gesture.hadCurve) return; // 短按无曲线：添加并保持聚焦
-      if (removeCurveRef.current) {
-        removeCurveRef.current(gesture.matrixId, gesture.row, gesture.col);
-        bumpMatrixCurveRemoves();
-      }
+      if (focusIsOpen() || !selected) return;
+      const row = matrix.rows[selected.row] ?? '';
+      const col = matrix.cols[selected.col] ?? '';
+      const existing = matrix.curves?.some((curve) => curve.row === row && curve.col === col) ?? false;
+      if (!existing) return;
+      removeCurveRef.current(matrix.id, row, col);
+      bumpMatrixCurveRemoves();
       pendingFocusAfterAdd = false;
-      if (focusIsOpen()) closeFocus();
     }
 
     function addRowStructure(): void {
@@ -2461,12 +2442,13 @@ export function MatrixField({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
-      // Space：增删选中格曲线（忽略 repeat；长按只聚焦/添加，短按有曲线才移除）。
+      // Space：只打开/关闭聚焦（无曲线时添加一次）；Shift+Space：显式移除曲线。
       if (event.code === 'Space') {
         event.preventDefault();
         event.stopImmediatePropagation();
         if (event.repeat) return;
-        beginSpaceGesture();
+        if (event.shiftKey) removeSelectedCellCurve();
+        else toggleFocusForSpace();
         return;
       }
       // P：播放/暂停（保留 playSpeed 惯性；与 Space 解耦）。
@@ -2626,7 +2608,15 @@ export function MatrixField({
 
     function onKeyUp(event: KeyboardEvent): void {
       if (event.code === 'Space') {
-        finalizeSpaceGesture();
+        // 长按开门后松手：只关窗，曲线保持不变；短按保持当前的开关结果。
+        if (spaceOpenStarted > 0) {
+          const duration = performance.now() - spaceOpenStarted;
+          spaceOpenStarted = 0;
+          if (duration >= SPACE_LONG_PRESS_MS) {
+            pendingFocusAfterAdd = false;
+            if (focusIsOpen()) closeFocus();
+          }
+        }
         return;
       }
       if (curveKeyEdits.has(event.code)) {
