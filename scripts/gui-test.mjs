@@ -1151,15 +1151,22 @@ if (emptyCell) {
   await page.mouse.click(emptyCell.x, emptyCell.y);
   await page.waitForTimeout(250);
 }
-await page.keyboard.press('Space');
-await page.waitForTimeout(1000);
+await page.keyboard.down('Space');
+await page.waitForTimeout(650);
 const addedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
 const addedCurve = addedCurveRaw ? JSON.parse(addedCurveRaw) : [];
-check('Space 给格子添加钟形曲线并自动聚焦', Number(await appAttr('data-matrix-curve-adds')) >= 1 && addedCurve.length === 5 && (await matrixRoot.getAttribute('data-focus')) === 'true', `${await appAttr('data-matrix-curve-adds')}/${addedCurve.length}/${await matrixRoot.getAttribute('data-focus')}`);
+const addsHeld = Number(await appAttr('data-matrix-curve-adds'));
+check('Space 给格子添加钟形曲线并自动聚焦', addsHeld >= 1 && addedCurve.length === 5 && (await matrixRoot.getAttribute('data-focus')) === 'true', `${addsHeld}/${addedCurve.length}/${await matrixRoot.getAttribute('data-focus')}`);
+await page.waitForTimeout(320);
+check('Space 长按忽略 repeat（不闪烁）', Number(await appAttr('data-matrix-curve-adds')) === addsHeld && (await matrixRoot.getAttribute('data-focus')) === 'true', `${await appAttr('data-matrix-curve-adds')}/${await matrixRoot.getAttribute('data-focus')}`);
+await page.keyboard.up('Space');
+await page.waitForTimeout(600);
+const keptCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+check('长按松开关闭聚焦但保留曲线', (await matrixRoot.getAttribute('data-focus')) === 'false' && keptCurveRaw !== '', `${await matrixRoot.getAttribute('data-focus')}/${keptCurveRaw}`);
 await page.keyboard.press('Space');
 await page.waitForTimeout(900);
 const removedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
-check('Space 移除格子曲线并退出聚焦', Number(await appAttr('data-matrix-curve-removes')) >= 1 && removedCurveRaw === '' && (await matrixRoot.getAttribute('data-focus')) === 'false', `${await appAttr('data-matrix-curve-removes')}/${removedCurveRaw}/${await matrixRoot.getAttribute('data-focus')}`);
+check('短按 Space 移除格子曲线并退出聚焦', Number(await appAttr('data-matrix-curve-removes')) >= 1 && removedCurveRaw === '' && (await matrixRoot.getAttribute('data-focus')) === 'false', `${await appAttr('data-matrix-curve-removes')}/${removedCurveRaw}/${await matrixRoot.getAttribute('data-focus')}`);
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
