@@ -893,6 +893,21 @@ check('默认 tuner 的 F2 也能进入谱模式', (await appAttr('data-screen')
 check('默认 tuner 的谱名为「情绪音色」', (await page.locator('[data-testid="spectrum-field"]').getAttribute('data-spectrum-name')) === '情绪音色', String(await page.locator('[data-testid="spectrum-field"]').getAttribute('data-spectrum-name')));
 const spectrumRoot = page.locator('[data-testid="spectrum-field"]');
 const bandsOf = async () => JSON.parse(String((await spectrumRoot.getAttribute('data-band-values')) ?? '[]'));
+// v2.4.2：F2 谱双击空白增点 / Delete 删点
+const bandsBeforeNodes = await bandsOf();
+const spectrumPoints = await page.evaluate(() => window.__neurouSpectrum?.bandPositions() ?? []);
+const sp0 = spectrumPoints.find((p) => p.index === 0);
+const sp1 = spectrumPoints.find((p) => p.index === 1);
+if (sp0 && sp1) {
+  await page.mouse.dblclick((sp0.x + sp1.x) / 2, 250);
+  await page.waitForTimeout(700);
+}
+const bandsAfterAdd = await bandsOf();
+check('F2 谱双击空白新增段点', Number(await spectrumRoot.getAttribute('data-spectrum-band-adds')) >= 1 && bandsAfterAdd.length === bandsBeforeNodes.length + 1, `${bandsBeforeNodes.length}→${bandsAfterAdd.length}`);
+await page.keyboard.press('Delete');
+await page.waitForTimeout(700);
+const bandsAfterRemove = await bandsOf();
+check('F2 谱 Delete 删除段点', Number(await spectrumRoot.getAttribute('data-spectrum-band-removes')) >= 1 && bandsAfterRemove.length === bandsBeforeNodes.length, `${bandsAfterAdd.length}→${bandsAfterRemove.length}`);
 const bandsBeforeKey = await bandsOf();
 await page.keyboard.press('a');
 await page.waitForTimeout(260);

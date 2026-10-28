@@ -35,6 +35,8 @@ export interface SpectrumFieldProps {
   index: number;
   onCycleSpectrum: (dir: 1 | -1) => void;
   onEditBand: (spectrumId: string, bandIndex: number, value: number, persist?: boolean) => void;
+  /** 整条谱写回（增删段点后调用；core 支持 1..256 段）。 */
+  onEditBands: (spectrumId: string, bands: number[], persist?: boolean) => void;
   onExit: () => void;
 }
 
@@ -52,6 +54,8 @@ interface SpectrumDebugState {
   loop: boolean;
   mode: '固定' | '受迫';
   articulation: '拨弦' | '持续';
+  bandAdds: number;
+  bandRemoves: number;
 }
 
 interface BandPosition {
@@ -141,6 +145,8 @@ const EASE_PER_FRAME = 0.18;
 const EASE_EPSILON = 0.0005;
 /** 段点命中半径（按 x 距离，宽松些）。 */
 const HIT_RADIUS_PX = 40;
+/** 双击/插入时判断「双击已有段点」的二维半径。 */
+const BAND_POINT_HIT_RADIUS = 14;
 /** 拖动判定阈值：超过这么多像素才算改值（纯点击只选段）。 */
 const DRAG_THRESHOLD_PX = 2;
 
@@ -221,18 +227,20 @@ function formatBandList(values: readonly number[]): string {
  * 组件
  * ------------------------------------------------------------------ */
 
-export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onExit }: SpectrumFieldProps): JSX.Element {
+export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onEditBands, onExit }: SpectrumFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const spectraRef = useRef<SpectrumView[]>(spectra);
   const indexRef = useRef<number>(index);
   const cycleRef = useRef(onCycleSpectrum);
   const editRef = useRef(onEditBand);
+  const editBandsRef = useRef(onEditBands);
   const exitRef = useRef(onExit);
   spectraRef.current = spectra;
   indexRef.current = index;
   cycleRef.current = onCycleSpectrum;
   editRef.current = onEditBand;
+  editBandsRef.current = onEditBands;
   exitRef.current = onExit;
 
   const spectrumCount = spectra.length;
@@ -246,6 +254,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
   const [lastKeyUi, setLastKeyUi] = useState('');
   const [sustainedCountUi, setSustainedCountUi] = useState(0);
   const [lastBandUi, setLastBandUi] = useState<number | null>(null);
+  const [bandAddsUi, setBandAddsUi] = useState(0);
+  const [bandRemovesUi, setBandRemovesUi] = useState(0);
 
   const bandsJson = formatBandList(valuesUi);
   const targetsJson = formatBandList(targetsUi);
@@ -281,6 +291,10 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     /** 上下键惯性状态（同一时间一段）。 */
     let arrowTune: ArrowTuneState | null = null;
     let lastVoiceUpdate = 0;
+    /** 增删段点计数 + 新点淡入 scale（0→1）。 */
+    let bandAddsNow = 0;
+    let bandRemovesNow = 0;
+    let pointScales: number[] = [];
     /** 按键反馈：keyCode → 位置/字符/按下与松开时间（松开后 300ms 淡出）。 */
     const auditionMarks = new Map<
       string,
@@ -579,6 +593,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
           spectrumKey = '';
           displayed = [];
           targets = [];
+          pointScales = [];
           selected = null;
           hover = null;
           stopDragVoice();
@@ -592,11 +607,13 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         return null;
       }
       const safeIndex = clamp(indexRef.current, 0, list.length - 1);
-      const key = `${safeIndex}::${spectrum.id}::${spectrum.bands.length}`;
+      // 段数变化由增删点/撤销处理，不重建曲线（避免丢失当前选中点）。
+      const key = `${safeIndex}::${spectrum.id}`;
       if (key !== spectrumKey) {
         spectrumKey = key;
         targets = spectrum.bands.map((value) => clamp(value, spectrum.min, spectrum.max));
         displayed = targets.slice();
+        pointScales = targets.map(() => 1);
         selected = null;
         hover = null;
         stopDragVoice();
@@ -605,6 +622,20 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         flushAllKeyEdits(true);
         finalizeArrowTune(true);
         auditionMarks.clear();
+        pushUi(true);
+        return spectrum;
+      }
+      // App 回传的段数变化（增删点 / 撤销重做）：整条快照，选中索引夹住。
+      if (
+        spectrum.bands.length !== targets.length &&
+        !drag &&
+        keyEdits.size === 0 &&
+        arrowTune === null
+      ) {
+        targets = spectrum.bands.map((value) => clamp(value, spectrum.min, spectrum.max));
+        displayed = targets.slice();
+        pointScales = targets.map(() => 1);
+        if (selected !== null) selected = Math.min(selected, targets.length - 1);
         pushUi(true);
         return spectrum;
       }
@@ -671,6 +702,75 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       return best >= 0 ? best : null;
     }
 
+    function bandPointHit(spectrum: SpectrumView, x: number, y: number): boolean {
+      const count = displayed.length;
+      for (let i = 0; i < count; i += 1) {
+        const px = bandX(spectrum, i, count);
+        const py = valueToY(spectrum, displayed[i] ?? spectrum.min);
+        if (Math.hypot(x - px, y - py) <= BAND_POINT_HIT_RADIUS) return true;
+      }
+      return false;
+    }
+
+    function bumpBandAdds(): void {
+      bandAddsNow += 1;
+      setBandAddsUi(bandAddsNow);
+    }
+
+    function bumpBandRemoves(): void {
+      bandRemovesNow += 1;
+      setBandRemovesUi(bandRemovesNow);
+    }
+
+    /** 双击空白：按 x 找插入间隔，y 映射 min..max 值；一次整条写回。 */
+    function addSpectrumBand(spectrum: SpectrumView, point: { x: number; y: number }): boolean {
+      if (targets.length < 2 || targets.length >= 256) return false;
+      if (bandPointHit(spectrum, point.x, point.y)) return false;
+      const count = targets.length;
+      const t = clamp((point.x - PLOT_LEFT) / (PLOT_RIGHT - PLOT_LEFT), 0, 1);
+      const index = spectrum.loop
+        ? clamp(Math.round(t * count), 0, count)
+        : clamp(Math.round(t * (count - 1)), 0, count);
+      const value = yToValue(spectrum, point.y);
+      const next = targets.slice();
+      next.splice(index, 0, value);
+      targets = next;
+      displayed = next.slice();
+      pointScales.splice(index, 0, 0);
+      selected = index;
+      setLastBand(index);
+      editBandsRef.current?.(
+        spectrum.id,
+        next.map((band) => round4(band)),
+        true,
+      );
+      bumpBandAdds();
+      pushUi(true);
+      return true;
+    }
+
+    /** Delete/Backspace：删除选中段点（至少保留 2 段），一次整条写回。 */
+    function removeSelectedBand(): boolean {
+      const spectrum = currentSpectrum();
+      if (!spectrum || selected === null || targets.length <= 2) return false;
+      const index = selected;
+      const next = targets.slice();
+      next.splice(index, 1);
+      targets = next;
+      displayed = next.slice();
+      if (pointScales.length > index) pointScales.splice(index, 1);
+      selected = Math.min(index, next.length - 1);
+      setLastBand(selected);
+      editBandsRef.current?.(
+        spectrum.id,
+        next.map((band) => round4(band)),
+        true,
+      );
+      bumpBandRemoves();
+      pushUi(true);
+      return true;
+    }
+
     /* —— 绘制 —— */
     function draw(spectrum: SpectrumView | null, now: number): void {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -712,14 +812,17 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       // 最近约 450ms 的节点拖尾（线/点，从亮到透明淡出）。
       drawTrails(now);
 
-      // 段点
+      // 段点（新增点 scale 0→1 淡入）
       const count = displayed.length;
       for (let i = 0; i < count; i += 1) {
+        const pointScale = pointScales[i] ?? 1;
+        if (pointScale <= 0.02) continue;
         const x = bandX(spectrum, i, count);
         const y = valueToY(spectrum, displayed[i] ?? spectrum.min);
         const isSelected = selected === i;
         const isHover = hover === i;
-        const radius = isSelected ? BAND_SELECTED_RADIUS : isHover ? BAND_HOVER_RADIUS : BAND_RADIUS;
+        const radius =
+          (isSelected ? BAND_SELECTED_RADIUS : isHover ? BAND_HOVER_RADIUS : BAND_RADIUS) * pointScale;
         const alpha = isSelected ? BAND_SELECTED_ALPHA : isHover ? BAND_HOVER_ALPHA : BAND_ALPHA;
         ctx.fillStyle = rgba(ink, alpha);
         ctx.beginPath();
@@ -861,6 +964,23 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       }
     }
 
+    /** 双击曲线区域空白：插入段点（已有段点不新增）。 */
+    function onDoubleClick(event: MouseEvent): void {
+      const spectrum = currentSpectrum();
+      if (!spectrum) return;
+      const point = pointToLogical(event.clientX, event.clientY);
+      if (
+        point.x < PLOT_LEFT ||
+        point.x > PLOT_RIGHT ||
+        point.y < PLOT_TOP ||
+        point.y > PLOT_BOTTOM
+      ) {
+        return;
+      }
+      event.preventDefault();
+      addSpectrumBand(spectrum, point);
+    }
+
     function onKeyDown(event: KeyboardEvent): void {
       if (event.repeat) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -881,6 +1001,14 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         auditionMarks.clear();
         exitRef.current();
         return;
+      }
+      // Delete/Backspace：删除当前选中段点（至少保留 2 段）。
+      if (event.code === 'Delete' || event.code === 'Backspace') {
+        if (removeSelectedBand()) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
       }
       // 物理键映射：改曲线（最近段 + 按键 y 的目标值）+ 立即发声，keyup 时持久化一次。
       const auditionKey = keyByCode(keys, event.code);
@@ -1007,6 +1135,14 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         }
         if (changed) pushUi();
       }
+      // 新增段点淡入（scale 0→1）。
+      if (pointScales.length > 0) {
+        const scaleFactor = 1 - Math.pow(1 - EASE_PER_FRAME, dt * 60);
+        for (let i = 0; i < pointScales.length; i += 1) {
+          const scale = pointScales[i] ?? 1;
+          if (scale < 1) pointScales[i] = Math.min(1, scale + (1 - scale) * scaleFactor);
+        }
+      }
       // 上下键惯性：速度线性加速/减速，位置逐帧连续；到 min/max 停下。
       if (arrowTune && spectrum) {
         const tune = arrowTune;
@@ -1061,6 +1197,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         loop: spectrum?.loop ?? false,
         mode: spectrum?.mode ?? '固定',
         articulation: spectrum?.articulation ?? '拨弦',
+        bandAdds: bandAddsNow,
+        bandRemoves: bandRemovesNow,
       };
     }
 
@@ -1104,6 +1242,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
     pushUi(true);
 
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('dblclick', onDoubleClick);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
@@ -1123,6 +1262,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       observer.disconnect();
       window.removeEventListener('resize', resize);
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('dblclick', onDoubleClick);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
@@ -1155,6 +1295,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       data-articulation={current?.articulation ?? '拨弦'}
       data-sustained-count={sustainedCountUi}
       data-last-band={lastBandUi === null ? '' : String(lastBandUi)}
+      data-spectrum-band-adds={bandAddsUi}
+      data-spectrum-band-removes={bandRemovesUi}
       style={{
         position: 'absolute',
         inset: 0,

@@ -278,3 +278,18 @@ export function setSpectrumBand(ir: WorldIR, id: string, index: number, value: n
   };
   return { ok: true, ir: { ...ir, spectra: ir.spectra.map((s) => (s.id === id ? next : s)) } };
 }
+
+/** v2.4.2：整条替换谱的采样值（增删节点用）；保持 1..256 段且落在范围内。 */
+export function setSpectrumBands(ir: WorldIR, id: string, bands: readonly number[]): EditResult {
+  const spectrum = ir.spectra.find((s) => s.id === id);
+  if (!spectrum) return fail(`没有谱「${id}」`);
+  if (bands.length === 0 || bands.length > 256) return fail('谱需要 1..256 个段值');
+  for (const band of bands) {
+    if (!Number.isFinite(band)) return fail('段值必须是有限数字');
+    if (band < spectrum.min || band > spectrum.max) {
+      return fail(`段值 ${band} 超出范围 ${spectrum.min}..${spectrum.max}`);
+    }
+  }
+  const next = { ...spectrum, bands: bands.map((band) => round(band)) };
+  return { ok: true, ir: { ...ir, spectra: ir.spectra.map((s) => (s.id === id ? next : s)) } };
+}

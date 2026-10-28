@@ -87,7 +87,6 @@ function structuralSignature(ir: WorldIR): string {
       loop: s.loop,
       mode: s.mode,
       articulation: s.articulation,
-      bandCount: s.bands.length,
     })),
     // 关系谱的格子值可做行级 patch；行/列结构、曲线或采样元数据变化
     // 都会因签名不同而回退到规范序列化（v2.3a 还没有曲线编辑手势）。
@@ -252,17 +251,10 @@ function spectrumBandsEdit(text: string, base: IRSpectrum, edited: IRSpectrum): 
   const prefix = /^(\s*段\s+)/.exec(content)?.[1];
   if (!prefix) return { error: `谱「${base.id}」的「段」行格式无法识别` };
   const bodyStart = prefix.length;
-  const body = content.slice(bodyStart);
-  const matches = [...body.matchAll(/-?\d+(?:\.\d+)?/g)];
-  if (matches.length !== base.bands.length || matches.length !== edited.bands.length) {
-    return { error: `谱「${base.id}」的段数与源文本不一致，无法写回` };
-  }
-  let nextBody = body;
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const match = matches[i]!;
-    const at = match.index ?? 0;
-    nextBody = nextBody.slice(0, at) + formatNumber(edited.bands[i]!) + nextBody.slice(at + match[0].length);
-  }
+  // 数字段整体重写，允许增删节点；保留行尾注释。
+  const tail = content.slice(bodyStart);
+  const comment = /\s*(#.*)$/.exec(tail)?.[1] ?? '';
+  const nextBody = edited.bands.map((band) => formatNumber(band)).join(' ') + (comment ? ` ${comment}` : '');
   return {
     start: line.contentStart + bodyStart,
     end: line.contentEnd,
@@ -447,10 +439,7 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   for (const edited of editedIR.spectra) {
     const base = baseIR.spectra.find((s) => s.id === edited.id);
     if (!base) return { ok: false, reason: `谱「${edited.id}」是新增的，需要回退规范序列化` };
-    if (base.bands.length !== edited.bands.length) {
-      return { ok: false, reason: `谱「${edited.id}」的段数发生变化，需要回退规范序列化` };
-    }
-    let differs = false;
+    let differs = base.bands.length !== edited.bands.length;
     for (let i = 0; i < edited.bands.length; i++) {
       if (Math.abs((base.bands[i] ?? 0) - (edited.bands[i] ?? 0)) > 1e-9) {
         differs = true;

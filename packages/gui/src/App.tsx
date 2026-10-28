@@ -11,6 +11,7 @@ import {
   setCouplingStrengthBetween,
   setStringThreshold,
   setSpectrumBand,
+  setSpectrumBands,
   setMatrixCell,
   setMatrixCurveBand,
   setMatrixCurveBands,
@@ -693,6 +694,21 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  /** 谱模式：插入/删除段点后整条写回。 */
+  const onEditSpectrumBands = (spectrumId: string, bands: number[], persist = false): void => {
+    if (transitionRef.current) return;
+    const result = setSpectrumBands(worldIR, spectrumId, bands);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setBandEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
   const exitSpectrum = (): void => setScreen('strings');
 
   /** 矩阵模式：改一个格（persist 时 debounce 写回，patch 只改对应 `段` 行的数字）。 */
@@ -775,6 +791,7 @@ export function App() {
           setSpectrumIndex((current) => ((current + dir) % spectra.length + spectra.length) % spectra.length)
         }
         onEditBand={onEditBand}
+        onEditBands={onEditSpectrumBands}
         onExit={exitSpectrum}
       />
     ) : (

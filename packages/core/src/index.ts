@@ -33,6 +33,7 @@ export {
   addString,
   removeString,
   setSpectrumBand,
+  setSpectrumBands,
   setMatrixCell,
   setMatrixCurveBand,
   setMatrixCurveBands,
