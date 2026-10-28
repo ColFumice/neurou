@@ -70,7 +70,38 @@ function simMetrics() {
 
 const gui = await guiMetrics();
 const sim = simMetrics();
-const result = { when: new Date().toISOString(), url: URL, gui, sim };
+
+// v2.18.3：性能门禁阈值（保守值；本地基线见 docs/35）。
+const thresholds = {
+  domContentLoadedMs: 800,
+  firstPaintMs: 1200,
+  minFps: 45,
+  maxHeapMB: 100,
+  minRunsPerSec: 200,
+};
+
+const checks = [
+  { name: 'DOMContentLoaded', value: gui.domContentLoaded, limit: thresholds.domContentLoadedMs, ok: gui.domContentLoaded !== null && gui.domContentLoaded <= thresholds.domContentLoadedMs },
+  { name: 'First Paint', value: gui.firstPaint, limit: thresholds.firstPaintMs, ok: gui.firstPaint !== null && gui.firstPaint <= thresholds.firstPaintMs },
+  { name: '空闲 FPS', value: gui.idleFps, limit: thresholds.minFps, ok: gui.idleFps >= thresholds.minFps },
+  { name: '矩阵 FPS', value: gui.matrixFps, limit: thresholds.minFps, ok: gui.matrixFps >= thresholds.minFps },
+  { name: 'JS 堆 (MB)', value: gui.heapMB, limit: thresholds.maxHeapMB, ok: gui.heapMB === null || gui.heapMB <= thresholds.maxHeapMB },
+  ...sim.map((item) => ({
+    name: `${item.world} 吞吐`,
+    value: item.runsPerSec,
+    limit: thresholds.minRunsPerSec,
+    ok: item.runsPerSec >= thresholds.minRunsPerSec,
+  })),
+];
+const pass = checks.every((check) => check.ok);
+const result = { when: new Date().toISOString(), url: URL, gui, sim, thresholds, checks, pass };
 mkdirSync('artifacts', { recursive: true });
 writeFileSync(join('artifacts', 'perf.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
+for (const check of checks) {
+  console.log(`${check.ok ? 'PASS' : 'FAIL'}  ${check.name}: ${String(check.value)}（阈值 ${String(check.limit)}）`);
+}
+if (!pass) {
+  console.error('性能门禁失败；如确认是机器波动，可先看 docs/35 的基线说明再调整阈值。');
+  process.exitCode = 1;
+}
