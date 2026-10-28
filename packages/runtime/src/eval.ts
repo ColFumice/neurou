@@ -88,6 +88,21 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           if (typeof name !== 'string') return 0;
           return matrixTimePosition(name, state);
         }
+        case '当前谱值': {
+          const [name, row, col] = args;
+          if (typeof name !== 'string' || typeof row !== 'string' || typeof col !== 'string') return 0;
+          const matrix = state.matrices?.[name];
+          if (!matrix || matrix.period === undefined) return 0;
+          const curve = matrix.curves.find((candidate) => candidate.row === row && candidate.col === col);
+          if (!curve) return matrixScalar(matrix, row, col);
+          const sampled = sampleMatrixCurve(
+            curve,
+            matrixTimePosition(name, state),
+            curve.interpolation ?? matrix.interpolation,
+            matrix.loop,
+          );
+          return sampled === undefined ? matrixScalar(matrix, row, col) : sampled;
+        }
         case '查关系谱': {
           // 三参数读取「段」的标量值；四参数在有曲线时按位置采样。
           // 编译期已经校验矩阵/标签并把无曲线格子折叠成常量；这里保留

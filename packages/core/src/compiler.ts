@@ -1012,8 +1012,53 @@ class Compiler {
             }
             return { expr: { k: 'call', fn: '谱位', args: [{ k: 'const', v: matrix.name }] }, type: 'number' };
           }
+          case '当前谱值': {
+            if (e.args.length !== 3) {
+              this.error('NRO2003', `「当前谱值」需要三个参数：矩阵名、行、列（都是字符串），现在给了 ${e.args.length} 个。`, e.span, {
+                hint: '例如：当前谱值("潮汐", "月相", "潮位")。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const [nameArg, rowArg, colArg] = e.args as [Expr, Expr, Expr];
+            if (nameArg.k !== 'str' || rowArg.k !== 'str' || colArg.k !== 'str') {
+              this.error('NRO2003', '「当前谱值」的三个参数都必须是直接写出的字符串。', e.span);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const matrix = this.matrixByName.get(nameArg.v);
+            if (!matrix) {
+              const hint = suggestName(nameArg.v, [...this.matrixByName.keys()]);
+              this.error('NRO2101', `「当前谱值」引用了不存在的关系谱「${nameArg.v}」。`, nameArg.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (!matrix.rows.includes(rowArg.v)) {
+              const hint = suggestName(rowArg.v, matrix.rows);
+              this.error('NRO2101', `关系谱「${matrix.name}」没有行标签「${rowArg.v}」。`, rowArg.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (!matrix.cols.includes(colArg.v)) {
+              const hint = suggestName(colArg.v, matrix.cols);
+              this.error('NRO2101', `关系谱「${matrix.name}」没有列标签「${colArg.v}」。`, colArg.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (!matrix.curves.some((curve) => curve.row === rowArg.v && curve.col === colArg.v)) {
+              this.error('NRO2100', `关系谱「${matrix.name}」的「${rowArg.v} × ${colArg.v}」没有曲线，不能用当前谱值。`, e.span, {
+                hint: '给这个格子加一条曲线，或改用三参数「查关系谱」读标量。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (matrix.period === undefined) {
+              this.error('NRO2100', `关系谱「${matrix.name}」没有「周期」，无法计算当前谱值。`, nameArg.span, {
+                hint: '先给它加一句「周期 40」。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            return {
+              expr: { k: 'call', fn: '当前谱值', args: [{ k: 'const', v: matrix.name }, { k: 'const', v: rowArg.v }, { k: 'const', v: colArg.v }] },
+              type: 'number',
+            };
+          }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱', '谱位']);
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱', '谱位', '当前谱值']);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
