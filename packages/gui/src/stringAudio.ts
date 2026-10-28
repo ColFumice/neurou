@@ -144,14 +144,27 @@ export class StringAudioEngine {
     };
 
     const master = ctx.createGain();
-    master.gain.value = 0.5;
+    master.gain.value = 0.4;
     const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -18;
-    compressor.ratio.value = 3;
+    compressor.threshold.value = -20;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.002;
+    compressor.release.value = 0.16;
+    // 软削波：给多振荡器叠加/快速换波再兜一层，削掉偶发尖峰。
+    const shaper = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * 1.15) / Math.tanh(1.15);
+    }
+    shaper.curve = curve;
+    shaper.oversample = '4x';
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     master.connect(compressor);
-    compressor.connect(analyser);
+    compressor.connect(shaper);
+    shaper.connect(analyser);
     analyser.connect(ctx.destination);
     this.master = master;
     this.analyser = analyser;
@@ -346,9 +359,9 @@ export class StringAudioEngine {
     osc.setPeriodicWave(wave);
     osc.frequency.value = freq;
     const gain = ctx.createGain();
-    const target = clamp(profile.gain * (0.4 + amplitudeNorm * 0.5), 0.02, 0.3);
+    const target = clamp(profile.gain * (0.4 + amplitudeNorm * 0.5), 0.02, 0.22);
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(target, ctx.currentTime + 0.035);
+    gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.055);
     const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
     if (pan) {
       pan.pan.value = (x * 2 - 1) * 0.4;
@@ -378,7 +391,7 @@ export class StringAudioEngine {
     const now = ctx.currentTime;
     try {
       voice.osc.frequency.setTargetAtTime(freq, now, 0.035);
-      voice.gain.gain.setTargetAtTime(clamp(voice.baseGain * (0.22 + y * 0.78), 0.0005, 0.35), now, 0.05);
+      voice.gain.gain.setTargetAtTime(clamp(voice.baseGain * (0.22 + y * 0.78), 0.0005, 0.22), now, 0.06);
       voice.pan?.pan.setTargetAtTime((x * 2 - 1) * 0.4, now, 0.05);
     } catch {
       /* ignore */
@@ -407,7 +420,7 @@ export class StringAudioEngine {
         osc.frequency.value = 220;
       }
       const gain = ctx.createGain();
-      const target = clamp(voice.baseGain * (0.22 + voice.yNorm * 0.78), 0.0005, 0.35);
+      const target = clamp(voice.baseGain * (0.22 + voice.yNorm * 0.78), 0.0005, 0.22);
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.linearRampToValueAtTime(target, now + 0.05);
       if (voice.pan) gain.connect(voice.pan);
@@ -454,7 +467,7 @@ export class StringAudioEngine {
     const voice = this.voices.get(id);
     if (!voice) return;
     this.voices.delete(id);
-    const end = (ctx?.currentTime ?? 0) + 0.12;
+    const end = (ctx?.currentTime ?? 0) + 0.18;
     try {
       voice.gain.gain.cancelScheduledValues(ctx?.currentTime ?? 0);
       voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), ctx?.currentTime ?? 0);

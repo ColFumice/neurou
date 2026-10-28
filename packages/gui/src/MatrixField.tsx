@@ -503,6 +503,7 @@ export function MatrixField({
       startY: number;
       startValue: number;
       moved: boolean;
+      voiceId: number;
     } | null = null;
     let curveSelectedIndex: number | null = null;
     let curvePointScales: Spring[] = [];
@@ -526,8 +527,15 @@ export function MatrixField({
       startY: number;
       startValue: number;
       moved: boolean;
+      voiceId: number;
     } | null = null;
-    let focusArrow: { dir: 1 | -1; velocity: number; held: boolean; startValue: number } | null = null;
+    let focusArrow: {
+      dir: 1 | -1;
+      velocity: number;
+      held: boolean;
+      startValue: number;
+      voiceId: number;
+    } | null = null;
     let focusBandEditsNow = 0;
     let focusUiNow = false;
     let focusCellUiNow = '';
@@ -558,6 +566,7 @@ export function MatrixField({
     >();
     let curveKeyEditsNow = 0;
     let lastCurveVoiceUpdate = 0;
+    let lastCurveNodeVoiceUpdate = 0;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
     /** 节点拖尾：context:band → 最近 450ms 位置。 */
@@ -1125,9 +1134,10 @@ export function MatrixField({
 
     /** 46 键按下：最近段 + key.cy 目标值；持续发声，keyup 持久化一次。 */
     function beginCurveKeyEdit(code: string, key: ReturnType<typeof layoutKeyboard>[number]): boolean {
+      // 同一键的 repeat / 二次按下不重启 voice。
+      if (curveKeyEdits.has(code)) return false;
       const context = curveKeyboardContext();
       if (!context) return false;
-      if (curveKeyEdits.has(code)) flushCurveKeyEdit(code, true);
       const count = context.targets.length;
       if (count === 0) return false;
       let index = 0;
@@ -1229,9 +1239,78 @@ export function MatrixField({
       ctx.restore();
     }
 
+    /** 曲线节点持续音：鼠标拖动 / 聚焦 ↑↓ 调值共用（同一手势只 start/stop 一次）。 */
+    function curveVoiceXNorm(index: number, count: number): number {
+      return count <= 1 ? 0.5 : clamp(index / (count - 1), 0, 1);
+    }
+
+    function startCurveNodeVoice(context: 'curve' | 'focus', index: number, value: number): number {
+      const matrix = currentMatrix();
+      const bands = context === 'focus' ? focusCurveBands : curveBands;
+      if (!matrix || bands.length < 2) return 0;
+      void audio.ensureStarted();
+      return audio.startSustainedSpectrum(
+        bands,
+        curveVoiceXNorm(index, bands.length),
+        clampValue(value),
+        matrix.interpolation === '平滑',
+        matrix.loop,
+      );
+    }
+
+    function updateCurveNodeVoice(id: number, context: 'curve' | 'focus', index: number, value: number): void {
+      if (id <= 0) return;
+      const matrix = currentMatrix();
+      const bands = context === 'focus' ? focusCurveBands : curveBands;
+      if (!matrix || bands.length < 2) return;
+      audio.updateSustainedSpectrum(id, bands, matrix.interpolation === '平滑', matrix.loop);
+      audio.updateSustainedTone(id, curveVoiceXNorm(index, bands.length), clampValue(value));
+    }
+
+    function stopCurveNodeVoice(id: number): void {
+      if (id > 0) audio.stopSustainedSpectrum(id);
+    }
+
+    function stopCurveGestureVoices(): void {
+      if (curveDrag && curveDrag.voiceId > 0) {
+        stopCurveNodeVoice(curveDrag.voiceId);
+        curveDrag.voiceId = 0;
+      }
+      if (focusDrag && focusDrag.voiceId > 0) {
+        stopCurveNodeVoice(focusDrag.voiceId);
+        focusDrag.voiceId = 0;
+      }
+      if (focusArrow && focusArrow.voiceId > 0) {
+        stopCurveNodeVoice(focusArrow.voiceId);
+        focusArrow.voiceId = 0;
+      }
+    }
+
+    /** 拖动中每 ~60ms 更新一次曲线波形与音高/音量。 */
+    function updateCurveDragVoices(now: number, force = false): void {
+      if (!curveDrag && !focusDrag && !focusArrow) return;
+      if (!force && now - lastCurveNodeVoiceUpdate < SUSTAINED_UPDATE_MS) return;
+      lastCurveNodeVoiceUpdate = now;
+      if (curveDrag && curveDrag.voiceId > 0) {
+        updateCurveNodeVoice(curveDrag.voiceId, 'curve', curveDrag.index, curveTargets[curveDrag.index] ?? 0);
+      }
+      if (focusDrag && focusDrag.voiceId > 0) {
+        updateCurveNodeVoice(focusDrag.voiceId, 'focus', focusDrag.index, focusCurveTargets[focusDrag.index] ?? 0);
+      }
+      if (focusArrow && focusArrow.voiceId > 0 && focusSelectedIndex !== null) {
+        updateCurveNodeVoice(
+          focusArrow.voiceId,
+          'focus',
+          focusSelectedIndex,
+          focusCurveTargets[focusSelectedIndex] ?? 0,
+        );
+      }
+    }
+
     function finalizeFocusArrow(persist = true): void {
       const arrow = focusArrow;
       if (!arrow) return;
+      stopCurveNodeVoice(arrow.voiceId);
       focusArrow = null;
       const index = focusSelectedIndex;
       if (!persist || index === null || !focusTargetActive) return;
@@ -1273,6 +1352,7 @@ export function MatrixField({
     function closeFocus(): void {
       if (!focusTargetActive && focusSpring.value < 0.01) return;
       flushAllCurveKeyEdits(true);
+      stopCurveGestureVoices();
       finalizeFocusArrow(true);
       focusTargetActive = false;
       focusSpring.target = 0;
@@ -1285,6 +1365,7 @@ export function MatrixField({
       if (!focusTargetActive && focusSpring.value < 0.01 && focusCell !== null) {
         focusSpring.value = 0;
         focusSpring.velocity = 0;
+        stopCurveGestureVoices();
         focusCell = null;
         focusCurveBands = [];
         focusCurveTargets = [];
@@ -1391,6 +1472,7 @@ export function MatrixField({
       if (key !== matrixKey) {
         matrixKey = key;
         flushAllCurveKeyEdits(true);
+        stopCurveGestureVoices();
         curveTrails.clear();
         layout = layoutOf(rows, cols);
         displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
@@ -1509,6 +1591,8 @@ export function MatrixField({
       cursorFade = 1;
       expandCursor();
       updateCursorUi(point);
+      // 新手势开始前，先停掉上一条手势的持续音（保证同一手势只 start/stop 一次）。
+      stopCurveGestureVoices();
       // 聚焦模式：只接受大曲线段点拖动，矩阵手势全部隐藏。
       if (focusIsOpen()) {
         event.preventDefault();
@@ -1542,6 +1626,7 @@ export function MatrixField({
               startY: point.y,
               startValue: focusCurveTargets[best] ?? 0,
               moved: false,
+              voiceId: startCurveNodeVoice('focus', best, focusCurveTargets[best] ?? 0),
             };
             pushFocusUi(true);
           }
@@ -1580,6 +1665,7 @@ export function MatrixField({
           startY: point.y,
           startValue: curveTargets[best] ?? 0,
           moved: false,
+          voiceId: startCurveNodeVoice('curve', best, curveTargets[best] ?? 0),
         };
         pushCurveUi(true);
         return;
@@ -1625,6 +1711,7 @@ export function MatrixField({
           const graph = focusGraphRect(focusSpring.value);
           const value = clampValue((graph.bottom - point.y) / (graph.bottom - graph.top));
           focusCurveTargets[focusDrag.index] = value;
+          if (focusDrag.voiceId > 0) updateCurveNodeVoice(focusDrag.voiceId, 'focus', focusDrag.index, value);
           pushFocusUi(true);
         }
         return;
@@ -1634,6 +1721,7 @@ export function MatrixField({
         if (Math.abs(point.y - curveDrag.startY) > 2) curveDrag.moved = true;
         const value = clampValue((CURVE_EDITOR_BOTTOM - point.y) / (CURVE_EDITOR_BOTTOM - CURVE_EDITOR_TOP));
         curveTargets[curveDrag.index] = value;
+        if (curveDrag.voiceId > 0) updateCurveNodeVoice(curveDrag.voiceId, 'curve', curveDrag.index, value);
         pushCurveUi(true);
         return;
       }
@@ -1675,6 +1763,7 @@ export function MatrixField({
       if (focusDrag && event.pointerId === focusDrag.pointerId) {
         const session = focusDrag;
         focusDrag = null;
+        stopCurveNodeVoice(session.voiceId);
         try {
           if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         } catch {
@@ -1690,6 +1779,7 @@ export function MatrixField({
       if (curveDrag && event.pointerId === curveDrag.pointerId) {
         const session = curveDrag;
         curveDrag = null;
+        stopCurveNodeVoice(session.voiceId);
         try {
           if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
         } catch {
@@ -1719,8 +1809,14 @@ export function MatrixField({
 
     function onPointerCancel(event: PointerEvent): void {
       if (drag && event.pointerId === drag.pointerId) drag = null;
-      if (curveDrag && event.pointerId === curveDrag.pointerId) curveDrag = null;
-      if (focusDrag && event.pointerId === focusDrag.pointerId) focusDrag = null;
+      if (curveDrag && event.pointerId === curveDrag.pointerId) {
+        stopCurveNodeVoice(curveDrag.voiceId);
+        curveDrag = null;
+      }
+      if (focusDrag && event.pointerId === focusDrag.pointerId) {
+        stopCurveNodeVoice(focusDrag.voiceId);
+        focusDrag = null;
+      }
     }
 
     /** 双击：有曲线格 → 聚焦编辑；无曲线格 → 归零（persist）。 */
@@ -1874,10 +1970,18 @@ export function MatrixField({
               velocity: 0,
               held: true,
               startValue: focusCurveTargets[focusSelectedIndex] ?? 0,
+              voiceId: startCurveNodeVoice('focus', focusSelectedIndex, focusCurveTargets[focusSelectedIndex] ?? 0),
             };
           } else {
             focusArrow.dir = dir;
             focusArrow.held = true;
+            if (focusArrow.voiceId <= 0) {
+              focusArrow.voiceId = startCurveNodeVoice(
+                'focus',
+                focusSelectedIndex,
+                focusCurveTargets[focusSelectedIndex] ?? 0,
+              );
+            }
           }
           pushFocusUi();
           return;
@@ -1940,6 +2044,9 @@ export function MatrixField({
       if (!focusArrow) return;
       const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
       if (focusArrow.dir !== dir) return;
+      // 松键立即停持续音；惯性减速只保留视觉/数值。
+      stopCurveNodeVoice(focusArrow.voiceId);
+      focusArrow.voiceId = 0;
       focusArrow.held = false;
       if (focusArrow.velocity === 0) finalizeFocusArrow(true);
     }
@@ -2374,6 +2481,7 @@ export function MatrixField({
       }
       pushPlayUi();
       updateCurveKeyVoices(now);
+      updateCurveDragVoices(now);
       recordActiveCurveTrails(now);
 
       // 数值缓动（约 180ms）
@@ -2613,6 +2721,7 @@ export function MatrixField({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       flushAllCurveKeyEdits(false);
+      stopCurveGestureVoices();
       curveKeyMarks.clear();
       curveTrails.clear();
       if (window.__neurouMatrix === debugApi) delete window.__neurouMatrix;
