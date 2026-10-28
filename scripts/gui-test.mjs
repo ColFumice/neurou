@@ -1013,6 +1013,22 @@ check('聚焦曲线拖点改值并写回', Number(focusAfter[1]) > Number(focusC
 await page.keyboard.press('Escape');
 await page.waitForTimeout(760);
 check('Esc 退出聚焦回到矩阵', (await matrixRoot.getAttribute('data-focus')) === 'false' && (await appAttr('data-screen')) === 'matrix', `${await matrixRoot.getAttribute('data-focus')}`);
+// v2.4.1：双击空白增点 / Delete 删点
+const editPoints = await page.evaluate(() => window.__neurouMatrix?.curvePositions() ?? []);
+const p0 = editPoints.find((p) => p.index === 0);
+const p1 = editPoints.find((p) => p.index === 1);
+if (p0 && p1) {
+  await page.mouse.dblclick((p0.x + p1.x) / 2, 850);
+  await page.waitForTimeout(800);
+}
+const afterAddRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+const afterAdd = afterAddRaw ? JSON.parse(afterAddRaw) : [];
+check('双击空白新增曲线节点', Number(await matrixRoot.getAttribute('data-curve-point-adds')) >= 1 && afterAdd.length === 4 && /曲线 信任 色温(?: [0-9.]+){4}/.test(readFileSync(WORLD_PATH, 'utf8')), `${afterAdd.length}/${await matrixRoot.getAttribute('data-curve-point-adds')}`);
+await page.keyboard.press('Delete');
+await page.waitForTimeout(800);
+const afterRemoveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+const afterRemove = afterRemoveRaw ? JSON.parse(afterRemoveRaw) : [];
+check('Delete 删除曲线节点', Number(await matrixRoot.getAttribute('data-curve-point-removes')) >= 1 && afterRemove.length === 3, `${afterRemove.length}/${await matrixRoot.getAttribute('data-curve-point-removes')}`);
 await page.mouse.move(720, 450);
 await page.waitForTimeout(300);
 await page.mouse.move(720, 450);

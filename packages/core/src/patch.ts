@@ -99,7 +99,6 @@ function structuralSignature(ir: WorldIR): string {
       curves: (m.curves ?? []).map((curve) => ({
         row: curve.row,
         col: curve.col,
-        bandCount: curve.bands.length,
       })),
       interpolation: m.interpolation ?? '线性',
       loop: m.loop === true,
@@ -188,10 +187,10 @@ function matrixCurveBandsEdits(text: string, base: IRMatrix, edited: IRMatrix): 
   const edits: TextEdit[] = [];
   for (const editedCurve of edited.curves ?? []) {
     const baseCurve = (base.curves ?? []).find((c) => c.row === editedCurve.row && c.col === editedCurve.col);
-    if (!baseCurve || baseCurve.bands.length !== editedCurve.bands.length) continue;
-    let differs = false;
-    for (let i = 0; i < baseCurve.bands.length; i++) {
-      if (Math.abs((baseCurve.bands[i] ?? 0) - (editedCurve.bands[i] ?? 0)) > 1e-9) differs = true;
+    if (!baseCurve) continue;
+    let differs = baseCurve.bands.length !== editedCurve.bands.length;
+    if (!differs) {
+      differs = baseCurve.bands.some((band, i) => Math.abs(band - (editedCurve.bands[i] ?? 0)) > 1e-9);
     }
     if (!differs) continue;
     const line = curveLines.find((item) => {
@@ -201,19 +200,14 @@ function matrixCurveBandsEdits(text: string, base: IRMatrix, edited: IRMatrix): 
     if (!line) return { error: `关系谱「${base.id}」的曲线行无法定位` };
     const content = contentOf(text, line);
     const tokens = content.trim().split(/\s+/);
-    const prefix = new RegExp(`^(\\s*曲线\\s+${escapeRegExp(tokens[1]!)}\\s+${escapeRegExp(tokens[2]!)}\\s+)`);
+    const prefix = new RegExp(`^(\\s*曲线\\s+${escapeRegExp(tokens[1]!)}\\s+${escapeRegExp(tokens[2]!)}\\s*)`);
     const head = prefix.exec(content)?.[1];
     if (!head) return { error: `关系谱「${base.id}」的曲线行格式无法识别` };
-    const body = content.slice(head.length);
-    const matches = [...body.matchAll(/-?\d+(?:\.\d+)?/g)];
-    if (matches.length !== baseCurve.bands.length) return { error: `关系谱「${base.id}」的曲线段数不一致` };
-    let nextBody = body;
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const match = matches[i]!;
-      const at = match.index ?? 0;
-      nextBody = nextBody.slice(0, at) + formatNumber(editedCurve.bands[i]!) + nextBody.slice(at + match[0].length);
-    }
-    edits.push({ start: line.contentStart + head.length, end: line.contentEnd, text: nextBody });
+    const tail = content.slice(head.length);
+    // 保留行尾注释；数字段整段重写，因此增删节点也能行级写回。
+    const comment = /\s*(#.*)$/.exec(tail)?.[1] ?? '';
+    const body = editedCurve.bands.map((band) => formatNumber(band)).join(' ');
+    edits.push({ start: line.contentStart + head.length, end: line.contentEnd, text: `${body}${comment ? ` ${comment}` : ''}` });
   }
   return edits;
 }

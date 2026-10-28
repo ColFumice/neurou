@@ -242,6 +242,26 @@ export function setMatrixCurveBand(
   return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, curves } : m)) } };
 }
 
+/** v2.4.1：整条替换关系谱曲线采样值（增删节点用）；保持 1..64 个有限数字。 */
+export function setMatrixCurveBands(
+  ir: WorldIR,
+  id: string,
+  row: string,
+  col: string,
+  bands: readonly number[],
+): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  const curve = matrix.curves?.find((c) => c.row === row && c.col === col);
+  if (!curve) return fail(`关系谱「${id}」的「${row} × ${col}」没有曲线`);
+  if (bands.length === 0 || bands.length > 64) return fail('曲线需要 1..64 个采样点');
+  if (bands.some((band) => !Number.isFinite(band))) return fail('曲线采样值必须是有限数字');
+  const curves = (matrix.curves ?? []).map((c) =>
+    c.row === row && c.col === col ? { ...c, bands: bands.map((band) => round(band)) } : c,
+  );
+  return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, curves } : m)) } };
+}
+
 export function setSpectrumBand(ir: WorldIR, id: string, index: number, value: number): EditResult {
   const spectrum = ir.spectra.find((s) => s.id === id);
   if (!spectrum) return fail(`没有谱「${id}」`);

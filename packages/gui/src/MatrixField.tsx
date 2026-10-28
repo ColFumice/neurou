@@ -50,6 +50,14 @@ export interface MatrixFieldProps {
     value: number,
     persist?: boolean,
   ) => void;
+  /** 整条曲线写回（增删段点后调用；core 支持 1..64 值）。 */
+  onEditCurveBands: (
+    matrixId: string,
+    row: string,
+    col: string,
+    bands: number[],
+    persist?: boolean,
+  ) => void;
   onExit: () => void;
 }
 
@@ -103,6 +111,8 @@ interface MatrixDebugState {
   playhead: number;
   playSpeed: number;
   curveKeyEdits: number;
+  curvePointAdds: number;
+  curvePointRemoves: number;
   synced: boolean;
   period: number | null;
   targetPlayhead: number;
@@ -397,6 +407,7 @@ export function MatrixField({
   onCycleMatrix,
   onEditCell,
   onEditCurveBand,
+  onEditCurveBands,
   onExit,
 }: MatrixFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -407,6 +418,7 @@ export function MatrixField({
   const cycleRef = useRef(onCycleMatrix);
   const editRef = useRef(onEditCell);
   const curveEditRef = useRef(onEditCurveBand);
+  const curveBandsEditRef = useRef(onEditCurveBands);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
@@ -414,6 +426,7 @@ export function MatrixField({
   cycleRef.current = onCycleMatrix;
   editRef.current = onEditCell;
   curveEditRef.current = onEditCurveBand;
+  curveBandsEditRef.current = onEditCurveBands;
   exitRef.current = onExit;
 
   const matrixCount = matrices.length;
@@ -442,6 +455,8 @@ export function MatrixField({
   const [playheadUi, setPlayheadUi] = useState(0);
   const [playSpeedUi, setPlaySpeedUi] = useState(0);
   const [curveKeyEditsUi, setCurveKeyEditsUi] = useState(0);
+  const [curvePointAddsUi, setCurvePointAddsUi] = useState(0);
+  const [curvePointRemovesUi, setCurvePointRemovesUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -586,6 +601,9 @@ export function MatrixField({
     let curveKeyEditsNow = 0;
     let lastCurveVoiceUpdate = 0;
     let lastCurveNodeVoiceUpdate = 0;
+    /** 曲线段点增删计数。 */
+    let curvePointAddsNow = 0;
+    let curvePointRemovesNow = 0;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
     /** 节点拖尾：context:band → 最近 450ms 位置。 */
@@ -1326,6 +1344,131 @@ export function MatrixField({
       }
     }
 
+    function bumpCurvePointAdds(): void {
+      curvePointAddsNow += 1;
+      setCurvePointAddsUi(curvePointAddsNow);
+    }
+
+    function bumpCurvePointRemoves(): void {
+      curvePointRemovesNow += 1;
+      setCurvePointRemovesUi(curvePointRemovesNow);
+    }
+
+    function curvePointHitQuick(matrix: MatrixView, x: number, y: number): boolean {
+      const count = curveBands.length;
+      for (let i = 0; i < count; i += 1) {
+        const px = curvePointX(matrix, i, count);
+        const py = curveValueToY(curveBands[i] ?? 0);
+        if (Math.hypot(x - px, y - py) <= CURVE_HIT_RADIUS) return true;
+      }
+      return false;
+    }
+
+    function curvePointHitFocus(matrix: MatrixView, x: number, y: number): boolean {
+      const count = focusCurveBands.length;
+      for (let i = 0; i < count; i += 1) {
+        const px = focusCurvePointX(matrix, i, count);
+        const py = focusValueToY(focusCurveBands[i] ?? 0);
+        if (Math.hypot(x - px, y - py) <= CURVE_HIT_RADIUS) return true;
+      }
+      return false;
+    }
+
+    function curveInsertIndex(matrix: MatrixView, count: number, t: number): number {
+      return matrix.loop
+        ? clamp(Math.round(t * count), 0, count)
+        : clamp(Math.round(t * (count - 1)), 0, count);
+    }
+
+    /** 底部编辑器空白处双击：插入节点并一次整条写回。 */
+    function addQuickCurvePoint(matrix: MatrixView, point: { x: number; y: number }): boolean {
+      if (!curveActive || curveTargets.length < 2 || curveTargets.length >= 64) return false;
+      if (curvePointHitQuick(matrix, point.x, point.y)) return false;
+      const count = curveTargets.length;
+      const t = clamp((point.x - CURVE_EDITOR_LEFT) / (CURVE_EDITOR_RIGHT - CURVE_EDITOR_LEFT), 0, 1);
+      const index = curveInsertIndex(matrix, count, t);
+      const value = clampValue((CURVE_EDITOR_BOTTOM - point.y) / (CURVE_EDITOR_BOTTOM - CURVE_EDITOR_TOP));
+      const next = curveTargets.slice();
+      next.splice(index, 0, value);
+      curveTargets = next;
+      curveBands = next.slice();
+      curvePointScales.splice(index, 0, new Spring(0));
+      curveSelectedIndex = index;
+      curveBandsEditRef.current?.(
+        curveMatrixId || matrix.id,
+        curveRow || (matrix.rows[selected?.row ?? 0] ?? ''),
+        curveCol || (matrix.cols[selected?.col ?? 0] ?? ''),
+        next.map((band) => round4(band)),
+        true,
+      );
+      bumpCurvePointAdds();
+      pushCurveUi(true);
+      return true;
+    }
+
+    /** 聚焦大曲线空白处双击：插入节点并一次整条写回。 */
+    function addFocusCurvePoint(matrix: MatrixView, point: { x: number; y: number }): boolean {
+      if (!focusTargetActive || focusCurveTargets.length < 2 || focusCurveTargets.length >= 64) return false;
+      if (curvePointHitFocus(matrix, point.x, point.y)) return false;
+      const graph = focusGraphRect(focusSpring.value);
+      const count = focusCurveTargets.length;
+      const t = clamp((point.x - graph.left) / (graph.right - graph.left), 0, 1);
+      const index = curveInsertIndex(matrix, count, t);
+      const value = clampValue((graph.bottom - point.y) / (graph.bottom - graph.top));
+      const next = focusCurveTargets.slice();
+      next.splice(index, 0, value);
+      focusCurveTargets = next;
+      focusCurveBands = next.slice();
+      focusPointScales.splice(index, 0, new Spring(0));
+      focusSelectedIndex = index;
+      curveBandsEditRef.current?.(focusMatrixId, focusRow, focusCol, next.map((band) => round4(band)), true);
+      bumpCurvePointAdds();
+      pushFocusUi(true);
+      return true;
+    }
+
+    function removeQuickCurvePoint(): boolean {
+      if (!curveActive || curveTargets.length <= 2 || curveSelectedIndex === null) return false;
+      const index = curveSelectedIndex;
+      const next = curveTargets.slice();
+      next.splice(index, 1);
+      curveTargets = next;
+      curveBands = next.slice();
+      if (curvePointScales.length > index) curvePointScales.splice(index, 1);
+      curveSelectedIndex = Math.min(index, next.length - 1);
+      curveBandsEditRef.current?.(
+        curveMatrixId,
+        curveRow,
+        curveCol,
+        next.map((band) => round4(band)),
+        true,
+      );
+      bumpCurvePointRemoves();
+      pushCurveUi(true);
+      return true;
+    }
+
+    function removeFocusCurvePoint(): boolean {
+      if (!focusTargetActive || focusCurveTargets.length <= 2 || focusSelectedIndex === null) return false;
+      const index = focusSelectedIndex;
+      const next = focusCurveTargets.slice();
+      next.splice(index, 1);
+      focusCurveTargets = next;
+      focusCurveBands = next.slice();
+      if (focusPointScales.length > index) focusPointScales.splice(index, 1);
+      focusSelectedIndex = Math.min(index, next.length - 1);
+      curveBandsEditRef.current?.(focusMatrixId, focusRow, focusCol, next.map((band) => round4(band)), true);
+      bumpCurvePointRemoves();
+      pushFocusUi(true);
+      return true;
+    }
+
+    function removeSelectedCurvePoint(): boolean {
+      if (focusTargetActive && focusSelectedIndex !== null) return removeFocusCurvePoint();
+      if (curveSelectedIndex !== null) return removeQuickCurvePoint();
+      return false;
+    }
+
     function finalizeFocusArrow(persist = true): void {
       const arrow = focusArrow;
       if (!arrow) return;
@@ -1846,12 +1989,32 @@ export function MatrixField({
       }
     }
 
-    /** 双击：有曲线格 → 聚焦编辑；无曲线格 → 归零（persist）。 */
+    /** 双击：曲线编辑器空白插点；有曲线矩阵格 → 聚焦；无曲线格 → 归零。 */
     function onDoubleClick(event: MouseEvent): void {
-      if (focusIsOpen()) return;
       const matrix = currentMatrix();
       if (!matrix) return;
       const point = pointToLogical(event.clientX, event.clientY);
+      if (focusIsOpen()) {
+        if (focusTargetActive && focusCurveTargets.length >= 2) {
+          const graph = focusGraphRect(focusSpring.value);
+          if (
+            point.x >= graph.left - CURVE_HIT_RADIUS &&
+            point.x <= graph.right + CURVE_HIT_RADIUS &&
+            point.y >= graph.top - CURVE_HIT_RADIUS &&
+            point.y <= graph.bottom + CURVE_HIT_RADIUS
+          ) {
+            event.preventDefault();
+            addFocusCurvePoint(matrix, point);
+          }
+        }
+        return;
+      }
+      const selectedCurve = selectedCurveInfo(matrix);
+      if (selectedCurve && curveEditorContains(point)) {
+        event.preventDefault();
+        addQuickCurvePoint(matrix, point);
+        return;
+      }
       const cell = cellAtPointer(point.x, point.y);
       if (!cell) return;
       event.preventDefault();
@@ -1968,6 +2131,14 @@ export function MatrixField({
           event.preventDefault();
           event.stopImmediatePropagation();
           beginCurveKeyEdit(event.code, mappedKey);
+          return;
+        }
+      }
+      // Delete/Backspace：删除当前选中曲线段点（最少保留 2 个）。
+      if (!event.repeat && (event.code === 'Delete' || event.code === 'Backspace')) {
+        if (removeSelectedCurvePoint()) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
           return;
         }
       }
@@ -2671,6 +2842,8 @@ export function MatrixField({
         playhead: Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
         playSpeed: Math.round(clamp(playSpeed, 0, 1) * 1000) / 1000,
         curveKeyEdits: curveKeyEditsNow,
+        curvePointAdds: curvePointAddsNow,
+        curvePointRemoves: curvePointRemovesNow,
         synced: period !== null,
         period,
         targetPlayhead: Math.round(clamp(syncedTargetPlayhead, 0, 1) * 10000) / 10000,
@@ -2809,6 +2982,8 @@ export function MatrixField({
       data-synced={syncedAttr}
       data-period={periodAttr}
       data-curve-key-edits={curveKeyEditsUi}
+      data-curve-point-adds={curvePointAddsUi}
+      data-curve-point-removes={curvePointRemovesUi}
       style={{
         position: 'absolute',
         inset: 0,

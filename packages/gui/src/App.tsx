@@ -13,6 +13,7 @@ import {
   setSpectrumBand,
   setMatrixCell,
   setMatrixCurveBand,
+  setMatrixCurveBands,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
@@ -731,6 +732,27 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  /** 矩阵曲线：插入/删除节点后整条写回。 */
+  const onEditMatrixCurveBands = (
+    matrixId: string,
+    row: string,
+    col: string,
+    bands: number[],
+    persist = false,
+  ): void => {
+    if (transitionRef.current) return;
+    const result = setMatrixCurveBands(worldIR, matrixId, row, col, bands);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixCurveEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    if (persist) scheduleSave();
+  };
+
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
       <MatrixField
@@ -742,6 +764,7 @@ export function App() {
         }
         onEditCell={onEditMatrixCell}
         onEditCurveBand={onEditMatrixCurveBand}
+        onEditCurveBands={onEditMatrixCurveBands}
         onExit={() => setScreen('strings')}
       />
     ) : screen === 'spectrum' && spectra.length > 0 ? (

@@ -744,9 +744,9 @@ ${segments}
     expect(again.ir.matrices[0]?.curves).toEqual(base.ir.matrices[0]?.curves);
   });
 
-  it('曲线或矩阵结构变化会让 patch 回退规范序列化（v2.3a 尚无曲线编辑）', () => {
+  it('曲线段值/节点数可行级 patch；矩阵改名仍回退规范序列化', () => {
     const source = WORLD + CURVED_MATRIX;
-    const base = compileText(source, 'matrix-curve-fallback.nro');
+    const base = compileText(source, 'matrix-curve-patch.nro');
     expect(base.ok).toBe(true);
 
     const editedCurve: WorldIR = {
@@ -757,9 +757,10 @@ ${segments}
       })),
     };
     const curveResult = patchWorldText(source, base.ir, editedCurve);
-    expect(curveResult.ok).toBe(false);
-    if (curveResult.ok) return;
-    expect(curveResult.reason).toContain('结构变化');
+    expect(curveResult.ok).toBe(true);
+    if (!curveResult.ok) return;
+    expect(curveResult.changed).toContain(`${editedCurve.matrices[0]!.id}.curves`);
+    expect(curveResult.text).toContain('曲线');
 
     const renamed: WorldIR = {
       ...base.ir,

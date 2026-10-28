@@ -35,6 +35,7 @@ export {
   setSpectrumBand,
   setMatrixCell,
   setMatrixCurveBand,
+  setMatrixCurveBands,
   findCoupling,
   type ThresholdName,
   type EditResult,
