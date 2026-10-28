@@ -15,6 +15,7 @@ import type {
   LoopDecl,
   LoopEdgeAst,
   MatrixDecl,
+  MatrixCurveAst,
   PhaseAst,
   Program,
   ResponseCurve,
@@ -696,6 +697,17 @@ class Parser {
             // 数字，因为词法器已经按 token 类型区分。
             const rowLabel = this.readName('行标签');
             const colLabel = this.readName('列标签');
+            let curveInterpolation: MatrixCurveAst['interpolation'];
+            if (this.atIdent('插值')) {
+              this.advance();
+              const valueStart = this.peek();
+              const value = this.readName('插值方式');
+              if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
+                this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑、阶跃。');
+              } else {
+                curveInterpolation = value as NonNullable<MatrixCurveAst['interpolation']>;
+              }
+            }
             const bands: number[] = [];
             let bad = false;
             while (!this.atLineEnd()) {
@@ -725,7 +737,7 @@ class Parser {
                 '例如「曲线 信任 色温 0.1 0.5 0.9」。',
               );
             } else {
-              decl.curves.push({ row: rowLabel, col: colLabel, bands, span });
+              decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), span });
             }
             break;
           }

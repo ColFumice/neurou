@@ -41,4 +41,14 @@ describe('阶跃插值（v2.9）', () => {
     const text = serialize(m.ir);
     expect(text).toContain('插值 阶跃');
   });
+
+  it('单条曲线可覆盖矩阵级插值（v2.12）', () => {
+    const source = MATRIX.replace('  曲线 甲 乙 0 1 2\n', '  曲线 甲 乙 插值 阶跃 0 1 2\n');
+    const r = compileText(source, 'curve-step-override.nro');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ir.matrices[0]?.curves[0]?.interpolation).toBe('阶跃');
+    const text = serialize(r.ir);
+    expect(text).toContain('曲线 甲 乙 插值 阶跃 0 1 2');
+  });
 });

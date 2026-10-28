@@ -98,6 +98,7 @@ function structuralSignature(ir: WorldIR): string {
       curves: (m.curves ?? []).map((curve) => ({
         row: curve.row,
         col: curve.col,
+        interpolation: curve.interpolation,
       })),
       interpolation: m.interpolation ?? '线性',
       loop: m.loop === true,

@@ -184,6 +184,8 @@ export interface IRMatrixCurve {
   col: string;
   /** 1..64 个有限采样值，位置 0..1 均匀分布。 */
   bands: number[];
+  /** v2.12：该格插值覆盖；未设时沿用矩阵级插值。 */
+  interpolation?: '线性' | '平滑' | '阶跃';
 }
 
 /**

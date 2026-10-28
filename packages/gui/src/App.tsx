@@ -580,7 +580,12 @@ export function App() {
     rows: [...m.rows],
     cols: [...m.cols],
     values: m.values.map((row) => [...row]),
-    curves: (m.curves ?? []).map((c) => ({ row: c.row, col: c.col, bands: [...c.bands] })),
+    curves: (m.curves ?? []).map((c) => ({
+      row: c.row,
+      col: c.col,
+      bands: [...c.bands],
+      ...(c.interpolation ? { interpolation: c.interpolation } : {}),
+    })),
     interpolation: m.interpolation,
     loop: m.loop,
     ...(m.period !== undefined ? { period: m.period } : {}),

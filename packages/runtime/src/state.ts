@@ -57,6 +57,8 @@ export interface MatrixCurveState {
   col: string;
   /** 1..64 个采样值，位置 0..1 均匀分布。 */
   bands: number[];
+  /** v2.12：该格单独的插值覆盖。 */
+  interpolation?: SpectrumInterpolation;
 }
 
 /**
@@ -88,7 +90,12 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
     rows: [...ir.rows],
     cols: [...ir.cols],
     values: ir.values.map((row) => [...row]),
-    curves: (ir.curves ?? []).map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
+    curves: (ir.curves ?? []).map((curve) => ({
+      row: curve.row,
+      col: curve.col,
+      bands: [...curve.bands],
+      ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
+    })),
     interpolation: ir.interpolation === '平滑' ? '平滑' : ir.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: ir.loop === true,
     ...(ir.period !== undefined ? { period: ir.period } : {}),
@@ -113,6 +120,9 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
         bands: Array.isArray(curve.bands)
           ? curve.bands.map((b) => (typeof b === 'number' && Number.isFinite(b) ? b : 0))
           : [],
+        ...(curve.interpolation === '平滑' || curve.interpolation === '阶跃' || curve.interpolation === '线性'
+          ? { interpolation: curve.interpolation }
+          : {}),
       }))
     : [];
   const period = typeof s.period === 'number' && Number.isFinite(s.period) && s.period > 0 ? s.period : undefined;

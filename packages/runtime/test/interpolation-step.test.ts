@@ -33,4 +33,13 @@ describe('阶跃采样（v2.9）', () => {
     const u = new Universe(r.ir, { seed: 1 });
     expect(u.state.matrices?.['阶梯网']?.interpolation).toBe('阶跃');
   });
+
+  it('单条曲线覆盖矩阵级插值（v2.12）', () => {
+    const source = WORLD.replace('曲线 甲 乙 0 1 2', '曲线 甲 乙 插值 阶跃 0 1 2');
+    const r = compileText(source, 'step-curve-override.nro');
+    if (!r.ok) throw new Error('compile failed');
+    const u = new Universe(r.ir, { seed: 1 });
+    expect(u.state.matrices?.['阶梯网']?.curves[0]?.interpolation).toBe('阶跃');
+    expect(u.getMatrixCell('阶梯网', '甲', '乙', 0.4)).toBe(1);
+  });
 });

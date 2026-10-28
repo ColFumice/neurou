@@ -534,7 +534,12 @@ class Compiler {
       rows: [...d.rows],
       cols: [...d.cols],
       values: d.values.map((row) => [...row]),
-      curves: d.curves.map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
+      curves: d.curves.map((curve) => ({
+        row: curve.row,
+        col: curve.col,
+        bands: [...curve.bands],
+        ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
+      })),
       interpolation: d.interpolation,
       loop: d.loop,
       ...(period !== undefined ? { period } : {}),

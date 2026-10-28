@@ -229,7 +229,8 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
   // v2.3a：曲线按作者声明顺序写回；矩阵级默认值（线性/不循环）不写。
   for (const curve of matrix.curves ?? []) {
     const bands = curve.bands.map((b) => numberText(b)).join(' ');
-    w.line(1, `曲线 ${curve.row} ${curve.col}${bands ? ` ${bands}` : ''}`);
+    const interpolation = curve.interpolation ? `插值 ${curve.interpolation} ` : '';
+    w.line(1, `曲线 ${curve.row} ${curve.col} ${interpolation}${bands}`);
   }
   if ((matrix.interpolation ?? '线性') !== '线性') w.line(1, `插值 ${matrix.interpolation}`);
   if (matrix.loop) w.line(1, '循环 是');

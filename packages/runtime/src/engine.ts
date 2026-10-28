@@ -270,7 +270,7 @@ export class Universe {
     if (position === undefined) return scalar;
     const curve = st.curves.find((c) => c.row === row && c.col === col);
     if (!curve) return scalar;
-    const sampled = sampleMatrixCurve(curve, position, st.interpolation, st.loop);
+    const sampled = sampleMatrixCurve(curve, position, curve.interpolation ?? st.interpolation, st.loop);
     return sampled === undefined ? scalar : sampled;
   }
 
