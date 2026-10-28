@@ -699,7 +699,9 @@ class Parser {
             const colLabel = this.readName('列标签');
             let curveInterpolation: MatrixCurveAst['interpolation'];
             let curveLoop: boolean | undefined;
-            while (this.atIdent('插值') || this.atIdent('循环')) {
+            let curveSpeed: number | undefined;
+            let curvePhase: number | undefined;
+            while (this.atIdent('插值') || this.atIdent('循环') || this.atIdent('速度') || this.atIdent('相位')) {
               if (this.atIdent('插值')) {
                 this.advance();
                 const valueStart = this.peek();
@@ -709,7 +711,7 @@ class Parser {
                 } else {
                   curveInterpolation = value as NonNullable<MatrixCurveAst['interpolation']>;
                 }
-              } else {
+              } else if (this.atIdent('循环')) {
                 this.advance();
                 if (this.atIdent('是') || this.atIdent('真')) {
                   this.advance();
@@ -723,6 +725,12 @@ class Parser {
                   this.skipToLineEnd();
                   break;
                 }
+              } else if (this.atIdent('速度')) {
+                this.advance();
+                curveSpeed = this.readNumber('曲线速度');
+              } else {
+                this.advance();
+                curvePhase = this.readNumber('曲线相位');
               }
             }
             const bands: number[] = [];
@@ -754,7 +762,7 @@ class Parser {
                 '例如「曲线 信任 色温 0.1 0.5 0.9」。',
               );
             } else {
-              decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), ...(curveLoop !== undefined ? { loop: curveLoop } : {}), span });
+              decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), ...(curveLoop !== undefined ? { loop: curveLoop } : {}), ...(curveSpeed !== undefined ? { speed: curveSpeed } : {}), ...(curvePhase !== undefined ? { phase: curvePhase } : {}), span });
             }
             break;
           }

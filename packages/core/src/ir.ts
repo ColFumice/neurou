@@ -188,6 +188,10 @@ export interface IRMatrixCurve {
   interpolation?: '线性' | '平滑' | '阶跃';
   /** v2.14：该格循环覆盖；未设时沿用矩阵级循环。 */
   loop?: boolean;
+  /** v2.15：该格自己的时间速度；未设时沿用矩阵级。 */
+  speed?: number;
+  /** v2.15：该格自己的时间相位；未设时沿用矩阵级。 */
+  phase?: number;
 }
 
 /**

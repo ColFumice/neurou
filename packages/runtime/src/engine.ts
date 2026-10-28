@@ -21,6 +21,7 @@ import {
   createMatrixState,
   createSpectrumState,
   createState,
+  curveLocalPosition,
   sampleMatrixCurve,
   sampleSpectrum,
 } from './state.js';
@@ -270,7 +271,7 @@ export class Universe {
     if (position === undefined) return scalar;
     const curve = st.curves.find((c) => c.row === row && c.col === col);
     if (!curve) return scalar;
-    const sampled = sampleMatrixCurve(curve, position, curve.interpolation ?? st.interpolation, curve.loop ?? st.loop);
+    const sampled = sampleMatrixCurve(curve, curveLocalPosition(curve, position), curve.interpolation ?? st.interpolation, curve.loop ?? st.loop);
     return sampled === undefined ? scalar : sampled;
   }
 

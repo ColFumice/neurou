@@ -215,6 +215,10 @@ export interface MatrixCurveAst {
   interpolation?: '线性' | '平滑' | '阶跃';
   /** v2.14：该格单独覆盖矩阵级循环；未设时沿用矩阵的循环。 */
   loop?: boolean;
+  /** v2.15：该格自己的时间速度（0.1..8），未设沿用矩阵级。 */
+  speed?: number;
+  /** v2.15：该格自己的时间相位（0..1），未设沿用矩阵级。 */
+  phase?: number;
   span?: Span;
 }
 

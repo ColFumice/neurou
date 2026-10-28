@@ -495,6 +495,12 @@ class Compiler {
           );
         }
       }
+      if (curve.speed !== undefined && (!Number.isFinite(curve.speed) || curve.speed <= 0 || curve.speed > 8)) {
+        this.error('NRO2100', `关系谱「${d.name}」的曲线「${curve.row} × ${curve.col}」速度无效：必须是 0..8 之间的正数。`, span);
+      }
+      if (curve.phase !== undefined && !Number.isFinite(curve.phase)) {
+        this.error('NRO2100', `关系谱「${d.name}」的曲线「${curve.row} × ${curve.col}」相位无效。`, span);
+      }
       if (rowIndex >= 0 && colIndex >= 0) {
         const cell = `${curve.row}\u0000${curve.col}`;
         if (seenCurves.has(cell)) {
@@ -540,6 +546,8 @@ class Compiler {
         bands: [...curve.bands],
         ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
         ...(curve.loop !== undefined ? { loop: curve.loop } : {}),
+        ...(curve.speed !== undefined ? { speed: curve.speed } : {}),
+        ...(curve.phase !== undefined ? { phase: ((curve.phase % 1) + 1) % 1 } : {}),
       })),
       interpolation: d.interpolation,
       loop: d.loop,

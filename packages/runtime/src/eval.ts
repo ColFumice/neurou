@@ -1,5 +1,5 @@
 import type { LExpr } from '@neurou/core';
-import { sampleMatrixCurve, sampleSpectrum, type MatrixState, type RuntimeValue, type WorldState } from './state.js';
+import { curveLocalPosition, sampleMatrixCurve, sampleSpectrum, type MatrixState, type RuntimeValue, type WorldState } from './state.js';
 
 /** v2.7：多矩阵联动——相位源可递归，编译器已保证无环；运行时仍留深度保护。 */
 function matrixTimePosition(name: string, state: WorldState, depth = 0): number {
@@ -14,7 +14,7 @@ function matrixTimePosition(name: string, state: WorldState, depth = 0): number 
         (candidate) => candidate.row === matrix.phaseSource!.row && candidate.col === matrix.phaseSource!.col,
       );
       if (curve) {
-        const sampled = sampleMatrixCurve(curve, sourcePosition, curve.interpolation ?? source.interpolation, curve.loop ?? source.loop);
+        const sampled = sampleMatrixCurve(curve, curveLocalPosition(curve, sourcePosition), curve.interpolation ?? source.interpolation, curve.loop ?? source.loop);
         if (sampled !== undefined && Number.isFinite(sampled)) phase = sampled;
       }
     }
@@ -118,7 +118,7 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           if (args.length < 4) return scalar;
           const curve = matrix.curves.find((c) => c.row === row && c.col === col);
           if (!curve) return scalar;
-          const sampled = sampleMatrixCurve(curve, asNumber(args[3] ?? null), curve.interpolation ?? matrix.interpolation, curve.loop ?? matrix.loop);
+          const sampled = sampleMatrixCurve(curve, curveLocalPosition(curve, asNumber(args[3] ?? null)), curve.interpolation ?? matrix.interpolation, curve.loop ?? matrix.loop);
           // 非有限位置或空曲线：回退到静态标量（没有标量才是 0）。
           return sampled === undefined ? scalar : sampled;
         }

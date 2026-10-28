@@ -61,6 +61,9 @@ export interface MatrixCurveState {
   interpolation?: SpectrumInterpolation;
   /** v2.14：该格单独的循环覆盖。 */
   loop?: boolean;
+  /** v2.15：该格单独的时间速度/相位覆盖。 */
+  speed?: number;
+  phase?: number;
 }
 
 /**
@@ -98,6 +101,8 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
       bands: [...curve.bands],
       ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
       ...(curve.loop !== undefined ? { loop: curve.loop } : {}),
+      ...(curve.speed !== undefined ? { speed: curve.speed } : {}),
+      ...(curve.phase !== undefined ? { phase: curve.phase } : {}),
     })),
     interpolation: ir.interpolation === '平滑' ? '平滑' : ir.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: ir.loop === true,
@@ -127,6 +132,12 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
           ? { interpolation: curve.interpolation }
           : {}),
         ...(typeof curve.loop === 'boolean' ? { loop: curve.loop } : {}),
+        ...(typeof curve.speed === 'number' && Number.isFinite(curve.speed) && curve.speed > 0
+          ? { speed: curve.speed }
+          : {}),
+        ...(typeof curve.phase === 'number' && Number.isFinite(curve.phase)
+          ? { phase: ((curve.phase % 1) + 1) % 1 }
+          : {}),
       }))
     : [];
   const period = typeof s.period === 'number' && Number.isFinite(s.period) && s.period > 0 ? s.period : undefined;
@@ -195,6 +206,14 @@ function sampleBands(
     return a + (b - a) * eased;
   }
   return a + (b - a) * t;
+}
+
+/** v2.15：把矩阵时间位置映射到某条曲线自己的时间轴。 */
+export function curveLocalPosition(
+  curve: Pick<MatrixCurveState, 'speed' | 'phase'>,
+  position: number,
+): number {
+  return position * (curve.speed ?? 1) + (curve.phase ?? 0);
 }
 
 /**

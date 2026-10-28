@@ -24,6 +24,9 @@ export interface MatrixCurveView {
   interpolation?: '线性' | '平滑' | '阶跃';
   /** v2.11：单条曲线的循环覆盖（缺省跟随矩阵）。 */
   loop?: boolean;
+  /** v2.15：单条曲线自身的时间轴速度/相位（缺省 1 / 0）。 */
+  speed?: number;
+  phase?: number;
 }
 
 export interface MatrixView {
@@ -152,6 +155,12 @@ interface MatrixDebugState {
   focusCurveInterpolation: '线性' | '平滑' | '阶跃';
   selectedCurveLoop: boolean;
   focusCurveLoop: boolean;
+  selectedCurveSpeed: number;
+  selectedCurvePhase: number;
+  selectedCurveLocalPlayhead: number;
+  focusCurveSpeed: number;
+  focusCurvePhase: number;
+  focusCurveLocalPlayhead: number;
   tick: number;
   curveKeyEdits: number;
   curvePointAdds: number;
@@ -823,17 +832,7 @@ export function MatrixField({
         (candidate) => candidate.row === source.row && candidate.col === source.col,
       );
       if (!curve || curve.bands.length < 2) return matrixTimePhase(matrix);
-      return clamp(
-        sampleCurveBands(
-          sourceMatrix,
-          curve.bands,
-          position,
-          curveInterpolation(sourceMatrix, curve),
-          curveLoopOf(sourceMatrix, curve),
-        ),
-        0,
-        1,
-      );
+      return clamp(sampleCurveAt(sourceMatrix, curve, position), 0, 1);
     }
 
     function matrixRows(matrix: MatrixView): number {
@@ -1027,6 +1026,62 @@ export function MatrixField({
     function focusCurveLoop(matrix: MatrixView): boolean {
       const curve = matrix.curves?.find((candidate) => candidate.row === focusRow && candidate.col === focusCol);
       return curveLoopOf(matrix, curve);
+    }
+
+    function curveSpeedOf(curve: MatrixCurveView | null | undefined): number {
+      return curve && typeof curve.speed === 'number' && Number.isFinite(curve.speed) && curve.speed > 0
+        ? curve.speed
+        : 1;
+    }
+
+    function curvePhaseOf(curve: MatrixCurveView | null | undefined): number {
+      return curve && typeof curve.phase === 'number' && Number.isFinite(curve.phase)
+        ? wrap01(curve.phase)
+        : 0;
+    }
+
+    /** 矩阵时间位置 → 曲线自己的本地位置（未 clamp/wrap）。 */
+    function curveLocalPosition(matrix: MatrixView, curve: MatrixCurveView | null, t: number): number {
+      return t * curveSpeedOf(curve) + curvePhaseOf(curve);
+    }
+
+    /** 本地位置映射到 0..1 的显示位置：循环 wrap，非循环 clamp。 */
+    function curveDisplayPosition(matrix: MatrixView, curve: MatrixCurveView | null, t: number): number {
+      const raw = curveLocalPosition(matrix, curve, t);
+      return curveLoopOf(matrix, curve) ? wrap01(raw) : clamp(raw, 0, 1);
+    }
+
+    function sampleCurveAt(matrix: MatrixView, curve: MatrixCurveView | null, t: number): number {
+      if (!curve) return 0;
+      return sampleCurveBands(
+        matrix,
+        curve.bands,
+        curveLocalPosition(matrix, curve, t),
+        curveInterpolation(matrix, curve),
+        curveLoopOf(matrix, curve),
+      );
+    }
+
+    function focusCurveInfo(matrix: MatrixView): MatrixCurveView | null {
+      return (
+        matrix.curves?.find((candidate) => candidate.row === focusRow && candidate.col === focusCol) ?? null
+      );
+    }
+
+    function sampleFocusCurveAt(matrix: MatrixView, t: number): number {
+      const curve = focusCurveInfo(matrix);
+      if (!curve) return 0;
+      return sampleCurveBands(
+        matrix,
+        curve.bands,
+        curveLocalPosition(matrix, curve, t),
+        curveInterpolation(matrix, curve),
+        curveLoopOf(matrix, curve),
+      );
+    }
+
+    function focusCurveDisplayPosition(matrix: MatrixView, t: number): number {
+      return curveDisplayPosition(matrix, focusCurveInfo(matrix), t);
     }
 
     function curveForCell(matrix: MatrixView, row: string, col: string): MatrixCurveView | null {
@@ -2895,9 +2950,9 @@ export function MatrixField({
           }
         }
         ctx.stroke();
-        // 播放头：沿 sparkline 移动的小亮点。
-        const playSample = sampleCurveBands(matrix, curve.bands, playhead, curveMode, curveLoopOf(matrix, curve));
-        const playX = lerp(x0, x1, playhead);
+        // 播放头：沿 sparkline 移动的小亮点（显示曲线本地位置）。
+        const playSample = sampleCurveAt(matrix, curve, playhead);
+        const playX = lerp(x0, x1, curveDisplayPosition(matrix, curve, playhead));
         const playY = lerp(y0, y1, playSample);
         ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA * curveAlpha);
         ctx.beginPath();
@@ -3022,9 +3077,10 @@ export function MatrixField({
       }
       ctx.stroke();
 
-      // 450ms 节点拖尾 + 播放头（拖尾在曲线下、播放头在段点上方）。
+      // 450ms 节点拖尾 + 播放头（显示曲线本地位置）。
       drawCurveTrail('curve', now);
-      const playX = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, playhead);
+      const selected = selectedCurveInfo(matrix);
+      const playX = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, curveDisplayPosition(matrix, selected, playhead));
       ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -3046,13 +3102,7 @@ export function MatrixField({
         ctx.fill();
       }
       // 播放头亮点画在段点之上，保证可见。
-      const playSample = sampleCurveBands(
-        matrix,
-        curveBands,
-        playhead,
-        curveMode,
-        curveLoopOf(matrix, selectedCurveInfo(matrix)),
-      );
+      const playSample = sampleCurveAt(matrix, selected, playhead);
       ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
       ctx.beginPath();
       ctx.arc(playX, curveValueToY(playSample), PLAYHEAD_DOT_RADIUS, 0, Math.PI * 2);
@@ -3108,9 +3158,9 @@ export function MatrixField({
           }
         }
         ctx.stroke();
-        // 450ms 节点拖尾（大曲线下方）+ 播放头。
+        // 450ms 节点拖尾（大曲线下方）+ 播放头（显示曲线本地位置）。
         drawCurveTrail('focus', now);
-        const playX = lerp(graph.left, graph.right, playhead);
+        const playX = lerp(graph.left, graph.right, focusCurveDisplayPosition(matrix, playhead));
         ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -3130,14 +3180,8 @@ export function MatrixField({
           ctx.arc(x, y, radius, 0, Math.PI * 2);
           ctx.fill();
         }
-        // 聚焦播放头亮点（大曲线继续播放）。
-        const focusPlaySample = sampleCurveBands(
-          matrix,
-          focusCurveBands,
-          playhead,
-          focusMode,
-          focusCurveLoop(matrix),
-        );
+        // 聚焦播放头亮点（大曲线继续播放，显示本地位置）。
+        const focusPlaySample = sampleFocusCurveAt(matrix, playhead);
         ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
         ctx.beginPath();
         ctx.arc(playX, lerp(graph.bottom, graph.top, focusPlaySample), PLAYHEAD_DOT_RADIUS + 0.6, 0, Math.PI * 2);
@@ -3544,6 +3588,14 @@ export function MatrixField({
         focusCurveInterpolation: matrix ? focusCurveInterpolation(matrix) : '线性',
         selectedCurveLoop: matrix ? curveLoopOf(matrix, selectedCurveInfo(matrix)) : true,
         focusCurveLoop: matrix ? focusCurveLoop(matrix) : true,
+        selectedCurveSpeed: matrix ? curveSpeedOf(selectedCurveInfo(matrix)) : 1,
+        selectedCurvePhase: matrix ? curvePhaseOf(selectedCurveInfo(matrix)) : 0,
+        selectedCurveLocalPlayhead: matrix
+          ? curveDisplayPosition(matrix, selectedCurveInfo(matrix), playhead)
+          : 0,
+        focusCurveSpeed: matrix ? curveSpeedOf(focusCurveInfo(matrix)) : 1,
+        focusCurvePhase: matrix ? curvePhaseOf(focusCurveInfo(matrix)) : 0,
+        focusCurveLocalPlayhead: matrix ? focusCurveDisplayPosition(matrix, playhead) : 0,
         tick: tickRef.current,
         curveKeyEdits: curveKeyEditsNow,
         curvePointAdds: curvePointAddsNow,
@@ -3604,13 +3656,7 @@ export function MatrixField({
         const matrix = currentMatrix();
         const curve = selectedCurveInfo(matrix);
         if (!matrix || !curve) return 0;
-        return sampleCurveBands(
-          matrix,
-          curve.bands,
-          t,
-          curveInterpolation(matrix, curve),
-          curveLoopOf(matrix, curve),
-        );
+        return sampleCurveAt(matrix, curve, t);
       },
       labelPositions: () => {
         const matrix = currentMatrix();

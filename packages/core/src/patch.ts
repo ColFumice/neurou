@@ -100,6 +100,8 @@ function structuralSignature(ir: WorldIR): string {
         col: curve.col,
         interpolation: curve.interpolation,
         loop: curve.loop,
+        speed: curve.speed,
+        phase: curve.phase,
       })),
       interpolation: m.interpolation ?? '线性',
       loop: m.loop === true,

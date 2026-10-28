@@ -231,7 +231,9 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
     const bands = curve.bands.map((b) => numberText(b)).join(' ');
     const interpolation = curve.interpolation ? `插值 ${curve.interpolation} ` : '';
     const loop = curve.loop !== undefined ? `循环 ${curve.loop ? '是' : '否'} ` : '';
-    w.line(1, `曲线 ${curve.row} ${curve.col} ${interpolation}${loop}${bands}`);
+    const speed = curve.speed !== undefined ? `速度 ${numberText(curve.speed)} ` : '';
+    const phase = curve.phase !== undefined ? `相位 ${numberText(curve.phase)} ` : '';
+    w.line(1, `曲线 ${curve.row} ${curve.col} ${interpolation}${loop}${speed}${phase}${bands}`);
   }
   if ((matrix.interpolation ?? '线性') !== '线性') w.line(1, `插值 ${matrix.interpolation}`);
   if (matrix.loop) w.line(1, '循环 是');
