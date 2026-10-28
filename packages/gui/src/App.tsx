@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   addCoupling,
   addString,
@@ -29,11 +29,15 @@ import {
 } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
-import { SpectrumField, type SpectrumView } from './SpectrumField.js';
-import { MatrixField, type MatrixView } from './MatrixField.js';
+import type { SpectrumView } from './SpectrumField.js';
+import type { MatrixView } from './MatrixField.js';
 import type { Lane, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
+
+// v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
+const SpectrumField = lazy(async () => ({ default: (await import('./SpectrumField.js')).SpectrumField }));
+const MatrixField = lazy(async () => ({ default: (await import('./MatrixField.js')).MatrixField }));
 
 const TICK_MS = 480;
 const DEFAULT_WORLD_FILE = 'examples/tuner.nro';
@@ -264,6 +268,15 @@ export function App() {
     }, TICK_MS);
     return () => window.clearInterval(timer);
   }, [universe]);
+
+  // 首屏稳定后预取 F2/F3 组件：主包首屏更轻，按键时已经加载好。
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void import('./MatrixField.js');
+      void import('./SpectrumField.js');
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // 撤销/重做缓动：每帧重绘插值后的 lanes，结束时应用目标文本并等待新世界就绪。
   useEffect(() => {
@@ -937,6 +950,7 @@ export function App() {
 
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
+      <Suspense fallback={null}>
       <MatrixField
         matrices={matrices}
         index={Math.min(matrixIndex, matrices.length - 1)}
@@ -958,7 +972,9 @@ export function App() {
         onEditTiming={onEditMatrixTiming}
         onExit={() => setScreen('strings')}
       />
+      </Suspense>
     ) : screen === 'spectrum' && spectra.length > 0 ? (
+      <Suspense fallback={null}>
       <SpectrumField
         spectra={spectra}
         index={Math.min(spectrumIndex, spectra.length - 1)}
@@ -969,6 +985,7 @@ export function App() {
         onEditBands={onEditSpectrumBands}
         onExit={exitSpectrum}
       />
+      </Suspense>
     ) : (
       <StringField
         view={view}
