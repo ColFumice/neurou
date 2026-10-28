@@ -74,6 +74,8 @@ export interface MatrixFieldProps {
   /** 选中格曲线增删（Shift+C 切换；v2.4.4）。 */
   onAddCurve?: (matrixId: string, row: string, col: string) => void;
   onRemoveCurve?: (matrixId: string, row: string, col: string) => void;
+  /** v2.8 键盘微调时间轴：速度与相位一次写回。 */
+  onEditTiming?: (matrixId: string, speed: number, phase: number) => void;
   onExit: () => void;
 }
 
@@ -458,6 +460,7 @@ export function MatrixField({
   onRenameCol,
   onAddCurve,
   onRemoveCurve,
+  onEditTiming,
   onExit,
 }: MatrixFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -477,6 +480,7 @@ export function MatrixField({
   const renameColRef = useRef(onRenameCol);
   const addCurveRef = useRef(onAddCurve);
   const removeCurveRef = useRef(onRemoveCurve);
+  const editTimingRef = useRef(onEditTiming);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
@@ -493,6 +497,7 @@ export function MatrixField({
   renameColRef.current = onRenameCol;
   addCurveRef.current = onAddCurve;
   removeCurveRef.current = onRemoveCurve;
+  editTimingRef.current = onEditTiming;
   exitRef.current = onExit;
 
   const matrixCount = matrices.length;
@@ -668,6 +673,8 @@ export function MatrixField({
     let playing = true;
     let playhead = 0;
     let playSpeed = 0;
+    /** 键盘连续微调时间轴时的本地乐观值（App props 追上后失效）。 */
+    let timingPending: { matrixId: string; speed: number; phase: number } | null = null;
     let syncedTargetPlayhead = 0;
     let playingUiNow = false;
     let playheadUiNow = 0;
@@ -753,6 +760,28 @@ export function MatrixField({
     function wrap01(value: number): number {
       if (!Number.isFinite(value)) return 0;
       return ((value % 1) + 1) % 1;
+    }
+
+    /** ]/[ 速度 ±0.2（0.2..4）；Shift+]/[ 相位 ±0.05（wrap）。 */
+    function adjustMatrixTiming(deltaSpeed: number, deltaPhase: number): void {
+      if (focusIsOpen() || curveDrag !== null || focusDrag !== null || curveKeyEdits.size > 0) return;
+      const matrix = currentMatrix();
+      if (!matrix || !editTimingRef.current) return;
+      let speed = matrixTimeSpeed(matrix);
+      let phase = matrixTimePhase(matrix);
+      if (timingPending && timingPending.matrixId === matrix.id) {
+        const propsMatchPending =
+          Math.abs(matrixTimeSpeed(matrix) - timingPending.speed) < 1e-4 &&
+          Math.abs(matrixTimePhase(matrix) - timingPending.phase) < 1e-4;
+        if (!propsMatchPending) {
+          speed = timingPending.speed;
+          phase = timingPending.phase;
+        }
+      }
+      speed = clamp(speed + deltaSpeed, 0.2, 4);
+      phase = wrap01(phase + deltaPhase);
+      timingPending = { matrixId: matrix.id, speed, phase };
+      editTimingRef.current(matrix.id, speed, phase);
     }
 
     /** v2.7 有效相位：有 phaseSource 时递归采样源矩阵曲线，否则用静态 phase。 */
@@ -2518,6 +2547,18 @@ export function MatrixField({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      // ]/[ 速度 ±0.2；Shift+]/[ 相位 ±0.05（聚焦内不响应，交给曲线键盘映射）。
+      if (
+        (event.code === 'BracketRight' || event.code === 'BracketLeft') &&
+        !focusIsOpen()
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const dir = event.code === 'BracketRight' ? 1 : -1;
+        if (event.shiftKey) adjustMatrixTiming(0, dir * 0.05);
+        else adjustMatrixTiming(dir * 0.2, 0);
+        return;
+      }
       // Space：只打开/关闭聚焦（无曲线时添加一次）；Shift+Space：显式移除曲线。
       if (event.code === 'Space') {
         event.preventDefault();
@@ -3143,6 +3184,7 @@ export function MatrixField({
       const matrix = syncMatrix(now);
       const rows = targets.length;
       const cols = targets[0]?.length ?? 0;
+      if (timingPending && (!matrix || timingPending.matrixId !== matrix.id)) timingPending = null;
       syncCurveEditor(now, matrix);
       stepCurveEditor(now, dt);
       stepFocus(now, dt);

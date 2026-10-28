@@ -1203,6 +1203,7 @@ await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 
 // v2.6：关系谱速度/相位 —— moon-tide 的速度 1.4、相位 0.1
+const moonTideBackup = readFileSync('examples/moon-tide.nro', 'utf8');
 await page.goto(`${URL}?world=${encodeURIComponent('examples/moon-tide.nro')}`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await page.waitForTimeout(900);
@@ -1230,12 +1231,30 @@ check('灯影有效相位随源谱曲线变化', Math.abs(linkedPhase2 - linkedP
 await page.keyboard.press('Shift+Tab');
 await page.waitForTimeout(700);
 check('Shift+Tab 切回月潮并恢复静态相位', (await matrixRoot.getAttribute('data-matrix-name')) === '月潮' && (await matrixRoot.getAttribute('data-phase-source')) === 'false', `${await matrixRoot.getAttribute('data-matrix-name')}/${await matrixRoot.getAttribute('data-phase-source')}`);
+// v2.8：] / [ 调速度，Shift 调相位
+await page.keyboard.press(']');
+await page.waitForTimeout(700);
+check('] 提高关系谱速度', Math.abs(Number(await matrixRoot.getAttribute('data-time-speed')) - 1.6) < 1e-6, String(await matrixRoot.getAttribute('data-time-speed')));
+await page.keyboard.press('[');
+await page.waitForTimeout(700);
+check('[ 降低关系谱速度回 1.4', Math.abs(Number(await matrixRoot.getAttribute('data-time-speed')) - 1.4) < 1e-6, String(await matrixRoot.getAttribute('data-time-speed')));
+await page.keyboard.down('Shift');
+await page.keyboard.press(']');
+await page.keyboard.up('Shift');
+await page.waitForTimeout(700);
+check('Shift+] 提高相位到 0.15', Math.abs(Number(await matrixRoot.getAttribute('data-time-phase')) - 0.15) < 1e-6, String(await matrixRoot.getAttribute('data-time-phase')));
+await page.keyboard.down('Shift');
+await page.keyboard.press('[');
+await page.keyboard.up('Shift');
+await page.waitForTimeout(700);
+check('Shift+[ 降低相位回 0.1', Math.abs(Number(await matrixRoot.getAttribute('data-time-phase')) - 0.1) < 1e-6, String(await matrixRoot.getAttribute('data-time-phase')));
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
+writeFileSync('examples/moon-tide.nro', moonTideBackup);
 
 const summary = {
   when: new Date().toISOString(),

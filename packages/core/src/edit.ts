@@ -407,3 +407,13 @@ export function removeMatrixCurve(ir: WorldIR, id: string, row: string, col: str
     curves: matrix.curves.filter((curve) => !(curve.row === row && curve.col === col)),
   });
 }
+
+/** v2.8：改关系谱的时间轴速度/相位（相位源存在时相位仍被忽略）。 */
+export function setMatrixTiming(ir: WorldIR, id: string, speed: number, phase: number): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!Number.isFinite(speed) || speed <= 0 || speed > 8) return fail('速度必须是 0..8 之间的正数');
+  if (!Number.isFinite(phase)) return fail('相位必须是有限数字');
+  const wrapped = ((phase % 1) + 1) % 1;
+  return matrixReplace(ir, id, { ...matrix, speed: round(speed), phase: round(wrapped) });
+}

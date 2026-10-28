@@ -23,6 +23,7 @@ import {
   renameMatrixCol,
   addMatrixCurve,
   removeMatrixCurve,
+  setMatrixTiming,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
@@ -203,6 +204,7 @@ export function App() {
   const [matrixRenames, setMatrixRenames] = useState(0);
   const [matrixCurveAdds, setMatrixCurveAdds] = useState(0);
   const [matrixCurveRemoves, setMatrixCurveRemoves] = useState(0);
+  const [matrixTimingEdits, setMatrixTimingEdits] = useState(0);
   const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
@@ -527,6 +529,7 @@ export function App() {
       data-matrix-renames={matrixRenames}
       data-matrix-curve-adds={matrixCurveAdds}
       data-matrix-curve-removes={matrixCurveRemoves}
+      data-matrix-timing-edits={matrixTimingEdits}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -911,6 +914,19 @@ export function App() {
     scheduleSave();
   };
 
+  const onEditMatrixTiming = (matrixId: string, speed: number, phase: number): void => {
+    const result = setMatrixTiming(worldIR, matrixId, speed, phase);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixTimingEdits((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
       <MatrixField
@@ -931,6 +947,7 @@ export function App() {
         onRenameCol={onRenameMatrixCol}
         onAddCurve={onAddMatrixCurve}
         onRemoveCurve={onRemoveMatrixCurve}
+        onEditTiming={onEditMatrixTiming}
         onExit={() => setScreen('strings')}
       />
     ) : screen === 'spectrum' && spectra.length > 0 ? (

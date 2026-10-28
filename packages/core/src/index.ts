@@ -45,6 +45,7 @@ export {
   renameMatrixCol,
   addMatrixCurve,
   removeMatrixCurve,
+  setMatrixTiming,
   findCoupling,
   type ThresholdName,
   type EditResult,

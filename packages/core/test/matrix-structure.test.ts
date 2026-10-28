@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileText, addMatrixRow, addMatrixCol, removeMatrixRow, removeMatrixCol, renameMatrixRow, renameMatrixCol, addMatrixCurve, removeMatrixCurve } from '../src/index.js';
+import { compileText, addMatrixRow, addMatrixCol, removeMatrixRow, removeMatrixCol, renameMatrixRow, renameMatrixCol, addMatrixCurve, removeMatrixCurve, setMatrixTiming } from '../src/index.js';
 
 const SOURCE = `世界 关系结构
 
@@ -53,6 +53,18 @@ describe('关系谱：行列增删/改名（v2.4.3）', () => {
     if (!renamed.ok) return;
     expect(renamed.ir.matrices[0]?.curves[0]?.col).toBe('信赖');
     expect(renameMatrixRow(ir, '势力网', 1, '信任').ok).toBe(false);
+  });
+
+  it('可改时间轴速度/相位（v2.8）', () => {
+    const r = compileText(SOURCE, 'matrix-timing.nro');
+    if (!r.ok) throw new Error('compile failed');
+    const edited = setMatrixTiming(r.ir, '势力网', 1.5, 1.25);
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    expect(edited.ir.matrices[0]?.speed).toBe(1.5);
+    expect(edited.ir.matrices[0]?.phase).toBe(0.25);
+    expect(setMatrixTiming(r.ir, '势力网', 0, 0).ok).toBe(false);
+    expect(setMatrixTiming(r.ir, '势力网', 9, 0).ok).toBe(false);
   });
 
   it('格子可添加/移除曲线（默认平直 3 点）', () => {
