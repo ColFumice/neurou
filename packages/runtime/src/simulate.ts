@@ -412,7 +412,6 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
 
   const models = options.models.map((m) => summarize(runs.filter((r) => r.model === m), m, allForcings, allSignals, allActions));
   const overall = summarize(runs, 'overall', allForcings, allSignals, allActions);
-  const health = diagnose(overall, ir);
 
   let reference: ReferenceBatch | undefined;
   if (options.reference) {
@@ -440,6 +439,8 @@ export function simulate(ir: WorldIR, opts: Partial<SimOptions> = {}): BatchResu
       };
     }
   }
+
+  const health = diagnose(overall, ir, reference);
 
   return {
     ir,
@@ -518,7 +519,7 @@ function normalizedEntropy(counts: number[]): number {
  * 绿区是 60–85，不是 100——100 分意味着所有模拟都收敛到同一个结果，
  * 那是一个精确但没有意外的世界。
  */
-export function diagnose(overall: ModelStats, ir: WorldIR): HealthReport {
+export function diagnose(overall: ModelStats, ir: WorldIR, reference?: ReferenceBatch): HealthReport {
   const notes: string[] = [];
   const dims: HealthDimension[] = [];
 
@@ -590,6 +591,17 @@ export function diagnose(overall: ModelStats, ir: WorldIR): HealthReport {
       : '没有可识别的终局',
   });
 
+  if (reference) {
+    dims.push({
+      key: 'reference',
+      label: '参考谱贴合',
+      value: round(reference.meanScore),
+      ratio: Math.max(0, Math.min(1, reference.meanScore / 100)),
+      detail: `${reference.spectrumId} × ${reference.stringId} · MAE ${round(reference.meanMae)} · RMSE ${round(reference.meanRmse)}`,
+    });
+    if (reference.meanScore < 60) notes.push('参考谱贴合度偏低：检查弦的响应/耦合是否能走出目标曲线的形状。');
+  }
+
   // 满分被刻意压在 85 以下：一个「哪里都对」的世界不该拿满分。
   const base =
     5 +
@@ -599,7 +611,8 @@ export function diagnose(overall: ModelStats, ir: WorldIR): HealthReport {
     actionRatio * 4 +
     overall.entropy * 30 +
     spread * 8 +
-    (overall.attractors[0] ? (1 - overall.attractors[0].count / Math.max(1, overall.runs)) * 4 : 0);
+    (overall.attractors[0] ? (1 - overall.attractors[0].count / Math.max(1, overall.runs)) * 4 : 0) +
+    (reference ? (Math.max(0, Math.min(100, reference.meanScore)) / 100) * 8 : 0);
 
   const score = Math.max(0, Math.min(100, Math.round(base - hardPenalty - deadPenalty)));
   const grade: HealthReport['grade'] = score < 60 ? '红' : score <= 85 ? '绿' : '黄';

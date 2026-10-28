@@ -47,6 +47,11 @@ describe('参考谱：批量模拟集成', () => {
     expect(result.reference?.meanScore).toBeGreaterThanOrEqual(0);
     expect(result.reference?.meanScore).toBeLessThanOrEqual(100);
     expect(result.runs.every((run) => run.reference)).toBe(true);
+    const dimension = result.health.dimensions.find((d) => d.key === 'reference');
+    expect(dimension?.label).toBe('参考谱贴合');
+    expect(dimension?.ratio).toBeCloseTo((result.reference?.meanScore ?? 0) / 100, 2);
+    const withoutRef = simulate(IR, { runs: 2, maxTicks: 4, models: ['random'] });
+    expect(withoutRef.health.dimensions.some((d) => d.key === 'reference')).toBe(false);
   });
 
   it('谱或弦不存在时报错', () => {
