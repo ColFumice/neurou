@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "test:gui": "node scripts/gui-test.mjs",
     "gui": "pnpm --filter @neurou/gui dev",
+    "preview": "pnpm --filter @neurou/gui exec vite preview --host 127.0.0.1 --port 5189 --strictPort",
+    "perf": "tsx scripts/perf-bench.ts",
     "dev": "tsx packages/cli/src/index.ts",
     "sim": "tsx packages/cli/src/index.ts sim",
     "build": "tsc -b && pnpm --filter @neurou/gui build"

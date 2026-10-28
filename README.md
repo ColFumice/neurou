@@ -42,6 +42,9 @@ pnpm test           # 288 个单元测试（内核 / 运行时 / 弦物理 / 调
 # 调律台 GUI
 pnpm gui            # http://127.0.0.1:5188/
 pnpm test:gui       # 真实浏览器验收（需要本机 Edge）
+
+# 性能基线（需先 pnpm build + pnpm preview）
+pnpm perf
 ```
 
 手势：
