@@ -381,3 +381,27 @@ export function renameMatrixCol(ir: WorldIR, id: string, index: number, label: s
     curves: matrix.curves.map((curve) => (curve.col === old ? { ...curve, col: label } : curve)),
   });
 }
+
+/** v2.4.4：给一个格子添加平直曲线（默认取该格标量值 3 点）。 */
+export function addMatrixCurve(ir: WorldIR, id: string, row: string, col: string): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!matrix.rows.includes(row)) return fail(`关系谱「${id}」没有行「${row}」`);
+  if (!matrix.cols.includes(col)) return fail(`关系谱「${id}」没有列「${col}」`);
+  if (matrix.curves.some((curve) => curve.row === row && curve.col === col)) return fail('这个格子已经有曲线');
+  const r = matrix.rows.indexOf(row);
+  const c = matrix.cols.indexOf(col);
+  const value = round(matrix.values[r]?.[c] ?? 0);
+  return matrixReplace(ir, id, { ...matrix, curves: [...matrix.curves, { row, col, bands: [value, value, value] }] });
+}
+
+/** v2.4.4：移除一个格子的曲线，保留标量回退。 */
+export function removeMatrixCurve(ir: WorldIR, id: string, row: string, col: string): EditResult {
+  const matrix = ir.matrices.find((m) => m.id === id);
+  if (!matrix) return fail(`没有关系谱「${id}」`);
+  if (!matrix.curves.some((curve) => curve.row === row && curve.col === col)) return fail('这个格子没有曲线');
+  return matrixReplace(ir, id, {
+    ...matrix,
+    curves: matrix.curves.filter((curve) => !(curve.row === row && curve.col === col)),
+  });
+}

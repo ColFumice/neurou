@@ -21,6 +21,8 @@ import {
   removeMatrixCol,
   renameMatrixRow,
   renameMatrixCol,
+  addMatrixCurve,
+  removeMatrixCurve,
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
@@ -199,6 +201,8 @@ export function App() {
   const [matrixColAdds, setMatrixColAdds] = useState(0);
   const [matrixColRemoves, setMatrixColRemoves] = useState(0);
   const [matrixRenames, setMatrixRenames] = useState(0);
+  const [matrixCurveAdds, setMatrixCurveAdds] = useState(0);
+  const [matrixCurveRemoves, setMatrixCurveRemoves] = useState(0);
   const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
@@ -521,6 +525,8 @@ export function App() {
       data-matrix-col-adds={matrixColAdds}
       data-matrix-col-removes={matrixColRemoves}
       data-matrix-renames={matrixRenames}
+      data-matrix-curve-adds={matrixCurveAdds}
+      data-matrix-curve-removes={matrixCurveRemoves}
       data-last-coupling={lastCoupling ? JSON.stringify(lastCoupling) : ''}
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
@@ -876,6 +882,32 @@ export function App() {
     scheduleSave();
   };
 
+  const onAddMatrixCurve = (matrixId: string, row: string, col: string): void => {
+    const result = addMatrixCurve(worldIR, matrixId, row, col);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixCurveAdds((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
+  const onRemoveMatrixCurve = (matrixId: string, row: string, col: string): void => {
+    const result = removeMatrixCurve(worldIR, matrixId, row, col);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    setMatrixCurveRemoves((n) => n + 1);
+    setVersion((v) => v + 1);
+    scheduleSave();
+  };
+
   return shell(
     screen === 'matrix' && matrices.length > 0 ? (
       <MatrixField
@@ -894,6 +926,8 @@ export function App() {
         onRemoveCol={onRemoveMatrixCol}
         onRenameRow={onRenameMatrixRow}
         onRenameCol={onRenameMatrixCol}
+        onAddCurve={onAddMatrixCurve}
+        onRemoveCurve={onRemoveMatrixCurve}
         onExit={() => setScreen('strings')}
       />
     ) : screen === 'spectrum' && spectra.length > 0 ? (

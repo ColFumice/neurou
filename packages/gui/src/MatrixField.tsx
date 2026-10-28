@@ -65,6 +65,9 @@ export interface MatrixFieldProps {
   onRemoveCol?: (matrixId: string, index: number) => void;
   onRenameRow?: (matrixId: string, index: number, label: string) => void;
   onRenameCol?: (matrixId: string, index: number, label: string) => void;
+  /** 选中格曲线增删（Shift+C 切换；v2.4.4）。 */
+  onAddCurve?: (matrixId: string, row: string, col: string) => void;
+  onRemoveCurve?: (matrixId: string, row: string, col: string) => void;
   onExit: () => void;
 }
 
@@ -136,6 +139,8 @@ interface MatrixDebugState {
   matrixColAdds: number;
   matrixColRemoves: number;
   matrixRenames: number;
+  matrixCurveAdds: number;
+  matrixCurveRemoves: number;
   synced: boolean;
   period: number | null;
   targetPlayhead: number;
@@ -438,6 +443,8 @@ export function MatrixField({
   onRemoveCol,
   onRenameRow,
   onRenameCol,
+  onAddCurve,
+  onRemoveCurve,
   onExit,
 }: MatrixFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -455,6 +462,8 @@ export function MatrixField({
   const removeColRef = useRef(onRemoveCol);
   const renameRowRef = useRef(onRenameRow);
   const renameColRef = useRef(onRenameCol);
+  const addCurveRef = useRef(onAddCurve);
+  const removeCurveRef = useRef(onRemoveCurve);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
@@ -469,6 +478,8 @@ export function MatrixField({
   removeColRef.current = onRemoveCol;
   renameRowRef.current = onRenameRow;
   renameColRef.current = onRenameCol;
+  addCurveRef.current = onAddCurve;
+  removeCurveRef.current = onRemoveCurve;
   exitRef.current = onExit;
 
   const matrixCount = matrices.length;
@@ -504,6 +515,8 @@ export function MatrixField({
   const [matrixColAddsUi, setMatrixColAddsUi] = useState(0);
   const [matrixColRemovesUi, setMatrixColRemovesUi] = useState(0);
   const [matrixRenamesUi, setMatrixRenamesUi] = useState(0);
+  const [matrixCurveAddsUi, setMatrixCurveAddsUi] = useState(0);
+  const [matrixCurveRemovesUi, setMatrixCurveRemovesUi] = useState(0);
   const [renameEditor, setRenameEditor] = useState<RenameEditor | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const renameCommitRef = useRef<(value: string) => void>(() => {});
@@ -669,6 +682,8 @@ export function MatrixField({
     let matrixColAddsNow = 0;
     let matrixColRemovesNow = 0;
     let matrixRenamesNow = 0;
+    let matrixCurveAddsNow = 0;
+    let matrixCurveRemovesNow = 0;
     let renameTarget: { kind: 'row' | 'col'; index: number; matrixId: string; original: string } | null = null;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
@@ -2209,6 +2224,35 @@ export function MatrixField({
       setMatrixRenamesUi(matrixRenamesNow);
     }
 
+    function bumpMatrixCurveAdds(): void {
+      matrixCurveAddsNow += 1;
+      setMatrixCurveAddsUi(matrixCurveAddsNow);
+    }
+
+    function bumpMatrixCurveRemoves(): void {
+      matrixCurveRemovesNow += 1;
+      setMatrixCurveRemovesUi(matrixCurveRemovesNow);
+    }
+
+    /** Shift+C：选中格无曲线则添加（默认 3 点），有曲线则移除。 */
+    function toggleSelectedCellCurve(): void {
+      const matrix = currentMatrix();
+      if (!matrix || !selected) return;
+      if (focusIsOpen() || curveDrag !== null || curveKeyEdits.size > 0) return;
+      const row = matrix.rows[selected.row] ?? '';
+      const col = matrix.cols[selected.col] ?? '';
+      const existing = matrix.curves?.find((curve) => curve.row === row && curve.col === col);
+      if (existing) {
+        if (!removeCurveRef.current) return;
+        removeCurveRef.current(matrix.id, row, col);
+        bumpMatrixCurveRemoves();
+      } else {
+        if (!addCurveRef.current) return;
+        addCurveRef.current(matrix.id, row, col);
+        bumpMatrixCurveAdds();
+      }
+    }
+
     function addRowStructure(): void {
       const matrix = currentMatrix();
       if (!matrix || matrix.rows.length >= 64 || !addRowRef.current) return;
@@ -2358,6 +2402,13 @@ export function MatrixField({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      // Shift+C：切换选中格曲线（无 Shift 的 c 仍走 46 键映射改段值）。
+      if (event.code === 'KeyC' && event.shiftKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toggleSelectedCellCurve();
+        return;
+      }
       if (event.code === 'Space') {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -3128,6 +3179,8 @@ export function MatrixField({
         matrixColAdds: matrixColAddsNow,
         matrixColRemoves: matrixColRemovesNow,
         matrixRenames: matrixRenamesNow,
+        matrixCurveAdds: matrixCurveAddsNow,
+        matrixCurveRemoves: matrixCurveRemovesNow,
         synced: period !== null,
         period,
         targetPlayhead: Math.round(clamp(syncedTargetPlayhead, 0, 1) * 10000) / 10000,
@@ -3303,6 +3356,8 @@ export function MatrixField({
       data-matrix-col-adds={matrixColAddsUi}
       data-matrix-col-removes={matrixColRemovesUi}
       data-matrix-renames={matrixRenamesUi}
+      data-matrix-curve-adds={matrixCurveAddsUi}
+      data-matrix-curve-removes={matrixCurveRemovesUi}
       style={{
         position: 'absolute',
         inset: 0,

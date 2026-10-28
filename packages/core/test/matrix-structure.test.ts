@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileText, addMatrixRow, addMatrixCol, removeMatrixRow, removeMatrixCol, renameMatrixRow, renameMatrixCol } from '../src/index.js';
+import { compileText, addMatrixRow, addMatrixCol, removeMatrixRow, removeMatrixCol, renameMatrixRow, renameMatrixCol, addMatrixCurve, removeMatrixCurve } from '../src/index.js';
 
 const SOURCE = `世界 关系结构
 
@@ -53,6 +53,20 @@ describe('关系谱：行列增删/改名（v2.4.3）', () => {
     if (!renamed.ok) return;
     expect(renamed.ir.matrices[0]?.curves[0]?.col).toBe('信赖');
     expect(renameMatrixRow(ir, '势力网', 1, '信任').ok).toBe(false);
+  });
+
+  it('格子可添加/移除曲线（默认平直 3 点）', () => {
+    const ir = base();
+    const added = addMatrixCurve(ir, '势力网', '信任', '信任');
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const curve = added.ir.matrices[0]?.curves.find((c) => c.row === '信任' && c.col === '信任');
+    expect(curve?.bands).toEqual([1, 1, 1]);
+    expect(addMatrixCurve(added.ir, '势力网', '信任', '信任').ok).toBe(false);
+    const removed = removeMatrixCurve(added.ir, '势力网', '信任', '信任');
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.ir.matrices[0]?.curves.find((c) => c.row === '信任' && c.col === '信任')).toBeUndefined();
   });
 
   it('至少保留一行/一列', () => {

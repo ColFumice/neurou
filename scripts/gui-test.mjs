@@ -1132,6 +1132,22 @@ if (thirdRow) {
 }
 const renamedFinal = readFileSync(WORLD_PATH, 'utf8');
 check('双击行标签可内联改名', Number(await appAttr('data-matrix-renames')) >= 1 && /^\s*行 .* 信赖$/m.test(renamedFinal), `${await appAttr('data-matrix-renames')}/${(/^\s*行 .*$/m.exec(renamedFinal) ?? [''])[0]}`);
+// v2.4.4：Shift+C 给格子增/删曲线
+const curveCells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);
+const emptyCell = curveCells.find((c) => c.row === 0 && c.col === 0);
+if (emptyCell) {
+  await page.mouse.click(emptyCell.x, emptyCell.y);
+  await page.waitForTimeout(250);
+}
+await page.keyboard.press('Shift+C');
+await page.waitForTimeout(700);
+const addedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+const addedCurve = addedCurveRaw ? JSON.parse(addedCurveRaw) : [];
+check('Shift+C 给格子添加曲线', Number(await appAttr('data-matrix-curve-adds')) >= 1 && addedCurve.length === 3, `${await appAttr('data-matrix-curve-adds')}/${addedCurve.length}`);
+await page.keyboard.press('Shift+C');
+await page.waitForTimeout(700);
+const removedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
+check('Shift+C 移除格子曲线', Number(await appAttr('data-matrix-curve-removes')) >= 1 && removedCurveRaw === '', `${await appAttr('data-matrix-curve-removes')}/${removedCurveRaw}`);
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));

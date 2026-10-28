@@ -43,6 +43,8 @@ export {
   removeMatrixCol,
   renameMatrixRow,
   renameMatrixCol,
+  addMatrixCurve,
+  removeMatrixCurve,
   findCoupling,
   type ThresholdName,
   type EditResult,
