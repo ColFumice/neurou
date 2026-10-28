@@ -2336,7 +2336,7 @@ export function MatrixField({
 
       // 自定义光标画在最上层，不受矩阵视差影响（difference 反色）。
       if (cursor && cursorVisible && (cursorActive || cursorFade > 0)) {
-        drawCursor(cursor, cursorFade, crosshairScale, !focusIsOpen());
+        drawCursor(cursor, cursorFade, crosshairScale, true);
       }
     }
 

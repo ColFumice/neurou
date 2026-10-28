@@ -46,6 +46,22 @@ function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
+interface RetiredVoice {
+  osc: OscillatorNode;
+  gain: GainNode;
+}
+
+interface SustainedVoice {
+  osc: OscillatorNode;
+  gain: GainNode;
+  pan: StereoPannerNode | null;
+  baseGain: number;
+  xNorm: number;
+  yNorm: number;
+  lastWaveAt?: number;
+  retires: RetiredVoice[];
+}
+
 export class StringAudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -56,10 +72,7 @@ export class StringAudioEngine {
   private listeners = new Set<(state: StringAudioState) => void>();
   private bufferCache = new Map<string, AudioBuffer>();
   private sources = new Set<AudioBufferSourceNode>();
-  private voices = new Map<
-    number,
-    { osc: OscillatorNode; gain: GainNode; pan: StereoPannerNode | null; baseGain: number; xNorm: number; yNorm: number }
-  >();
+  private voices = new Map<number, SustainedVoice>();
   private voiceSeq = 0;
 
   getState(): StringAudioState {
@@ -348,7 +361,7 @@ export class StringAudioEngine {
     }
     osc.start();
     const id = ++this.voiceSeq;
-    this.voices.set(id, { osc, gain, pan, baseGain: target, xNorm: x, yNorm: clamp(yNorm, 0, 1) });
+    this.voices.set(id, { osc, gain, pan, baseGain: target, xNorm: x, yNorm: clamp(yNorm, 0, 1), retires: [] });
     return id;
   }
 
@@ -374,14 +387,63 @@ export class StringAudioEngine {
     voice.yNorm = y;
   }
 
-  /** 实时更新持续音的波形（拖段点/键盘改段值后音色跟随）。 */
+  /** 实时更新持续音的波形（拖段点/键盘改段值后音色跟随；交叉淡化避免爆音）。 */
   updateSustainedSpectrum(id: number, bands: readonly number[], smooth: boolean, loop: boolean): void {
     const voice = this.voices.get(id);
     const ctx = this.ctx;
-    if (!voice || !ctx || bands.length < 2) return;
-    const fourier = spectrumFourier(bands, { min: 0, max: 1, smooth, loop });
+    const master = this.master;
+    if (!voice || !ctx || !master || bands.length < 2) return;
+    const now = ctx.currentTime;
+    if (voice.lastWaveAt !== undefined && now - voice.lastWaveAt < 0.07) return;
+    voice.lastWaveAt = now;
     try {
-      voice.osc.setPeriodicWave(ctx.createPeriodicWave(fourier.real, fourier.imag));
+      const fourier = spectrumFourier(bands, { min: 0, max: 1, smooth, loop });
+      const wave = ctx.createPeriodicWave(fourier.real, fourier.imag);
+      const osc = ctx.createOscillator();
+      osc.setPeriodicWave(wave);
+      try {
+        osc.frequency.value = voice.osc.frequency.value;
+      } catch {
+        osc.frequency.value = 220;
+      }
+      const gain = ctx.createGain();
+      const target = clamp(voice.baseGain * (0.22 + voice.yNorm * 0.78), 0.0005, 0.35);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(target, now + 0.05);
+      if (voice.pan) gain.connect(voice.pan);
+      else gain.connect(master);
+      osc.connect(gain);
+      osc.start();
+      // 旧波淡出后停止，避免 setPeriodicWave 的相位跳变变成爆音。
+      const oldOsc = voice.osc;
+      const oldGain = voice.gain;
+      try {
+        oldGain.gain.cancelScheduledValues(now);
+        oldGain.gain.setValueAtTime(Math.max(0.0001, oldGain.gain.value), now);
+        oldGain.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+        oldOsc.stop(now + 0.08);
+      } catch {
+        /* ignore */
+      }
+      voice.retires.push({ osc: oldOsc, gain: oldGain });
+      voice.osc = osc;
+      voice.gain = gain;
+      osc.onended = () => {
+        try {
+          gain.disconnect();
+        } catch {
+          /* ignore */
+        }
+        voice.retires = voice.retires.filter((item) => item.osc !== osc);
+      };
+      oldOsc.onended = () => {
+        try {
+          oldGain.disconnect();
+        } catch {
+          /* ignore */
+        }
+        voice.retires = voice.retires.filter((item) => item.osc !== oldOsc);
+      };
     } catch {
       /* ignore */
     }
@@ -412,6 +474,23 @@ export class StringAudioEngine {
         /* ignore */
       }
     };
+    for (const retired of voice.retires) {
+      try {
+        retired.gain.gain.cancelScheduledValues(ctx?.currentTime ?? 0);
+        retired.gain.gain.setValueAtTime(Math.max(0.0001, retired.gain.gain.value), ctx?.currentTime ?? 0);
+        retired.gain.gain.exponentialRampToValueAtTime(0.0001, end);
+        retired.osc.stop(end + 0.02);
+        retired.osc.onended = () => {
+          try {
+            retired.gain.disconnect();
+          } catch {
+            /* ignore */
+          }
+        };
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
