@@ -1251,6 +1251,19 @@ check('Shift+[ 降低相位回 0.1', Math.abs(Number(await matrixRoot.getAttribu
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 
+// v2.17.3：lighthouse 示例的阶跃矩阵 + 相位源 Tab
+await page.goto(`${URL}?world=${encodeURIComponent('examples/lighthouse.nro')}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(800);
+await page.keyboard.press('F3');
+await page.waitForTimeout(900);
+const lighthouseState = await page.evaluate(() => window.__neurouMatrix?.state?.() ?? null);
+check('lighthouse 有两个关系谱（潮阶/心图）', Number(await matrixRoot.getAttribute('data-matrix-count')) === 2 && (await matrixRoot.getAttribute('data-matrix-name')) === '潮阶', `${await matrixRoot.getAttribute('data-matrix-count')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
+check('lighthouse 潮阶使用阶跃插值', lighthouseState?.interpolation === '阶跃', String(lighthouseState?.interpolation));
+await page.keyboard.press('Tab');
+await page.waitForTimeout(700);
+check('lighthouse Tab 到心图且相位源生效', (await matrixRoot.getAttribute('data-matrix-name')) === '心图' && (await matrixRoot.getAttribute('data-phase-source')) === 'true', `${await matrixRoot.getAttribute('data-matrix-name')}/${await matrixRoot.getAttribute('data-phase-source')}`);
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
