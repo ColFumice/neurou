@@ -61,7 +61,7 @@ describe('关系谱：行列增删/改名（v2.4.3）', () => {
     expect(added.ok).toBe(true);
     if (!added.ok) return;
     const curve = added.ir.matrices[0]?.curves.find((c) => c.row === '信任' && c.col === '信任');
-    expect(curve?.bands).toEqual([1, 1, 1]);
+    expect(curve?.bands).toEqual([0.82, 0.94, 1, 0.94, 0.82]);
     expect(addMatrixCurve(added.ir, '势力网', '信任', '信任').ok).toBe(false);
     const removed = removeMatrixCurve(added.ir, '势力网', '信任', '信任');
     expect(removed.ok).toBe(true);

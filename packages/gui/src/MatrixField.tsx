@@ -245,7 +245,7 @@ const CURVE_EDITOR_LEFT = 200;
 const CURVE_EDITOR_RIGHT = 1240;
 const CURVE_EDITOR_TOP = 770;
 const CURVE_EDITOR_BOTTOM = 860;
-const CURVE_EDITOR_FADE_MS = 200;
+const CURVE_EDITOR_FADE_MS = 250;
 const CURVE_EDITOR_SAMPLES = 120;
 const CURVE_SPARK_SAMPLES = 24;
 const CURVE_SPARK_ALPHA = 0.22;
@@ -684,6 +684,10 @@ export function MatrixField({
     let matrixRenamesNow = 0;
     let matrixCurveAddsNow = 0;
     let matrixCurveRemovesNow = 0;
+    /** 加/删格曲线时 sparkline/角标 250ms 淡入淡出；加曲线后自动聚焦。 */
+    const curveCellAlphas = new Map<string, number>();
+    let pendingFocusAfterAdd = false;
+    let pendingFocusAt = 0;
     let renameTarget: { kind: 'row' | 'col'; index: number; matrixId: string; original: string } | null = null;
     /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
     const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
@@ -1718,6 +1722,8 @@ export function MatrixField({
         flushAllCurveKeyEdits(true);
         stopCurveGestureVoices();
         curveTrails.clear();
+        curveCellAlphas.clear();
+        pendingFocusAfterAdd = false;
         layout = layoutOf(rows, cols);
         displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
         targets = displayed.map((row) => row.slice());
@@ -1752,6 +1758,8 @@ export function MatrixField({
         flushAllCurveKeyEdits(true);
         stopCurveGestureVoices();
         curveTrails.clear();
+        curveCellAlphas.clear();
+        pendingFocusAfterAdd = false;
         layout = layoutOf(rows, cols);
         displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
         targets = displayed.map((row) => row.slice());
@@ -2234,11 +2242,21 @@ export function MatrixField({
       setMatrixCurveRemovesUi(matrixCurveRemovesNow);
     }
 
-    /** Shift+C：选中格无曲线则添加（默认 3 点），有曲线则移除。 */
+    /** Space：选中格无曲线则添加（默认 5 点钟形）并自动聚焦，有曲线则移除并退出聚焦。 */
     function toggleSelectedCellCurve(): void {
       const matrix = currentMatrix();
-      if (!matrix || !selected) return;
-      if (focusIsOpen() || curveDrag !== null || curveKeyEdits.size > 0) return;
+      if (!matrix) return;
+      if (focusTargetActive) {
+        // 聚焦内 Space：移除当前聚焦格曲线并缩回矩阵。
+        if (!removeCurveRef.current) return;
+        removeCurveRef.current(focusMatrixId, focusRow, focusCol);
+        bumpMatrixCurveRemoves();
+        pendingFocusAfterAdd = false;
+        closeFocus();
+        return;
+      }
+      if (focusIsOpen() || !selected) return;
+      if (curveDrag !== null || curveKeyEdits.size > 0) return;
       const row = matrix.rows[selected.row] ?? '';
       const col = matrix.cols[selected.col] ?? '';
       const existing = matrix.curves?.find((curve) => curve.row === row && curve.col === col);
@@ -2246,10 +2264,13 @@ export function MatrixField({
         if (!removeCurveRef.current) return;
         removeCurveRef.current(matrix.id, row, col);
         bumpMatrixCurveRemoves();
+        pendingFocusAfterAdd = false;
       } else {
         if (!addCurveRef.current) return;
         addCurveRef.current(matrix.id, row, col);
         bumpMatrixCurveAdds();
+        pendingFocusAfterAdd = true;
+        pendingFocusAt = performance.now() + 180;
       }
     }
 
@@ -2402,14 +2423,15 @@ export function MatrixField({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
-      // Shift+C：切换选中格曲线（无 Shift 的 c 仍走 46 键映射改段值）。
-      if (event.code === 'KeyC' && event.shiftKey) {
+      // Space：增删选中格曲线（加曲线后自动聚焦；聚焦内也切换）。
+      if (event.code === 'Space') {
         event.preventDefault();
         event.stopImmediatePropagation();
         toggleSelectedCellCurve();
         return;
       }
-      if (event.code === 'Space') {
+      // P：播放/暂停（保留 playSpeed 惯性；与 Space 解耦）。
+      if (event.code === 'KeyP' && !event.shiftKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
         const matrix = currentMatrix();
@@ -2455,7 +2477,7 @@ export function MatrixField({
         }
       }
       // 46 键映射：底部曲线编辑器可见或聚焦大曲线打开时改最近段（不影响 Enter/Space/方向键等）。
-      if (!event.repeat) {
+      if (!event.repeat && !event.shiftKey) {
         const mappedKey = keyByCode(keys, event.code);
         if (mappedKey && curveKeyboardContext()) {
           event.preventDefault();
@@ -2589,6 +2611,7 @@ export function MatrixField({
       curve: MatrixCurveView | null,
       hovered: boolean,
       matrix: MatrixView,
+      curveAlpha: number,
     ): void {
       const size = layout.cell * scale;
       const radius = layout.radius * (0.85 + scale * 0.15);
@@ -2597,12 +2620,15 @@ export function MatrixField({
       ctx.roundRect(centerX - size / 2, centerY - size / 2, size, size, radius);
       ctx.fill();
       // 格内底部极淡 sparkline（不改变填充/尺寸/图层/差速）。
-      if (curve && curve.bands.length > 1) {
+      if (curve && curve.bands.length > 1 && curveAlpha > 0.004) {
         const x0 = centerX - size * 0.3;
         const x1 = centerX + size * 0.3;
         const y0 = centerY + size * 0.38;
         const y1 = centerY + size * 0.2;
-        ctx.strokeStyle = rgba(LABEL_RGB, hovered ? CURVE_SPARK_HOVER_ALPHA : CURVE_SPARK_ALPHA);
+        ctx.strokeStyle = rgba(
+          LABEL_RGB,
+          (hovered ? CURVE_SPARK_HOVER_ALPHA : CURVE_SPARK_ALPHA) * curveAlpha,
+        );
         ctx.lineWidth = 1;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -2620,10 +2646,23 @@ export function MatrixField({
         const playSample = sampleCurveBands(matrix, curve.bands, playhead);
         const playX = lerp(x0, x1, playhead);
         const playY = lerp(y0, y1, playSample);
-        ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
+        ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA * curveAlpha);
         ctx.beginPath();
         ctx.arc(playX, playY, SPARK_PLAYHEAD_RADIUS, 0, Math.PI * 2);
         ctx.fill();
+        // 有曲线的格子右上角极淡角标（小点 + 短刻度），hover 略亮。
+        const markerX = centerX + size * 0.3;
+        const markerY = centerY - size * 0.32;
+        ctx.fillStyle = rgba(LABEL_RGB, (hovered ? 0.4 : 0.22) * curveAlpha);
+        ctx.beginPath();
+        ctx.arc(markerX, markerY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = rgba(LABEL_RGB, (hovered ? 0.4 : 0.22) * curveAlpha);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(markerX + 3, markerY);
+        ctx.lineTo(markerX + 9, markerY);
+        ctx.stroke();
       }
       if (selectedCell) {
         ctx.strokeStyle = rgba(LABEL_RGB, 0.55);
@@ -2892,7 +2931,18 @@ export function MatrixField({
       for (const cell of cells) {
         const curve = curveForCell(matrix, matrix.rows[cell.row] ?? '', matrix.cols[cell.col] ?? '');
         const hovered = hover !== null && hover.row === cell.row && hover.col === cell.col;
-        drawCell(cell.centerX, cell.centerY, cell.value, cell.size / layout.cell, cell.isSelected, curve, hovered, matrix);
+        const curveAlpha = curve ? (curveCellAlphas.get(`${cell.row},${cell.col}`) ?? 0) : 0;
+        drawCell(
+          cell.centerX,
+          cell.centerY,
+          cell.value,
+          cell.size / layout.cell,
+          cell.isSelected,
+          curve,
+          hovered,
+          matrix,
+          curveAlpha,
+        );
       }
 
       // 选中框：所有格子之后画（即使被大格盖住也能看见）；difference 白描边适配深浅底；
@@ -2987,6 +3037,29 @@ export function MatrixField({
       syncCurveEditor(now, matrix);
       stepCurveEditor(now, dt);
       stepFocus(now, dt);
+
+      // 加曲线后自动聚焦；格曲线 sparkline/角标 250ms 淡入淡出。
+      if (pendingFocusAfterAdd && now >= pendingFocusAt && matrix && !focusTargetActive) {
+        const added = selectedCurveInfo(matrix);
+        if (added && added.bands.length > 0) {
+          pendingFocusAfterAdd = false;
+          beginFocus(matrix, now);
+        }
+      }
+      const curveFadeFactor = 1 - Math.exp(-dt / (CURVE_EDITOR_FADE_MS / 1000));
+      if (matrix) {
+        for (let r = 0; r < rows; r += 1) {
+          for (let c = 0; c < cols; c += 1) {
+            const key = `${r},${c}`;
+            const hasCurve = curveForCell(matrix, matrix.rows[r] ?? '', matrix.cols[c] ?? '') !== null;
+            const currentAlpha = curveCellAlphas.get(key) ?? (hasCurve ? 0 : 1);
+            const targetAlpha = hasCurve ? 1 : 0;
+            const nextAlpha = currentAlpha + (targetAlpha - currentAlpha) * curveFadeFactor;
+            if (!hasCurve && nextAlpha < 0.002) curveCellAlphas.delete(key);
+            else curveCellAlphas.set(key, nextAlpha);
+          }
+        }
+      }
 
       // 播放头：有 period 的矩阵与运行时 tick 同步；否则保持自由 8s 循环 + 惯性。
       const hasCurves = matrix !== null && (matrix.curves?.length ?? 0) > 0;

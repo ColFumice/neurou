@@ -946,6 +946,18 @@ check('松开后持续音停止', Number(await spectrumRoot.getAttribute('data-s
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 check('谱模式 Esc 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
+// v2.4.5：F2 ↔ F3 模式互切
+await page.keyboard.press('F2');
+await page.waitForTimeout(500);
+check('F2 可从八弦进入谱模式（模式切换起点）', (await appAttr('data-screen')) === 'spectrum', String(await appAttr('data-screen')));
+await page.keyboard.press('F3');
+await page.waitForTimeout(600);
+check('谱模式按 F3 可切到关系谱矩阵', (await appAttr('data-screen')) === 'matrix', String(await appAttr('data-screen')));
+await page.keyboard.press('F2');
+await page.waitForTimeout(600);
+check('矩阵按 F2 可切回谱模式', (await appAttr('data-screen')) === 'spectrum', String(await appAttr('data-screen')));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(400);
 restoreWorld();
 await page.waitForTimeout(400);
 // v2.2 关系谱：F3 黑底矩阵
@@ -960,7 +972,7 @@ const playheadStart = Number(await matrixRoot.getAttribute('data-playhead'));
 await page.waitForTimeout(520);
 const playheadMoving = Number(await matrixRoot.getAttribute('data-playhead'));
 check('曲线自动播放（播放头前进）', (await matrixRoot.getAttribute('data-playing')) === 'true' && Math.abs(playheadMoving - playheadStart) > 0.02, `${playheadStart}→${playheadMoving}`);
-await page.keyboard.press('Space');
+await page.keyboard.press('p');
 await page.waitForTimeout(150);
 const playheadGlide = Number(await matrixRoot.getAttribute('data-playhead'));
 await page.waitForTimeout(520);
@@ -969,7 +981,7 @@ await page.waitForTimeout(320);
 const playheadPaused2 = Number(await matrixRoot.getAttribute('data-playhead'));
 const playSpeed = Number(await matrixRoot.getAttribute('data-play-speed'));
 check('Space 暂停带惯性滑行后停住', (await matrixRoot.getAttribute('data-playing')) === 'false' && playheadPaused > playheadGlide && Math.abs(playheadPaused2 - playheadPaused) < 1e-6 && playSpeed < 0.02, `${playheadGlide}→${playheadPaused}→${playheadPaused2}/v=${playSpeed}`);
-await page.keyboard.press('Space');
+await page.keyboard.press('p');
 await page.waitForTimeout(320);
 const playheadResumed = Number(await matrixRoot.getAttribute('data-playhead'));
 check('Space 恢复播放', (await matrixRoot.getAttribute('data-playing')) === 'true' && Math.abs(playheadResumed - playheadPaused2) > 0.01, `${playheadPaused2}→${playheadResumed}`);
@@ -1132,22 +1144,22 @@ if (thirdRow) {
 }
 const renamedFinal = readFileSync(WORLD_PATH, 'utf8');
 check('双击行标签可内联改名', Number(await appAttr('data-matrix-renames')) >= 1 && /^\s*行 .* 信赖$/m.test(renamedFinal), `${await appAttr('data-matrix-renames')}/${(/^\s*行 .*$/m.exec(renamedFinal) ?? [''])[0]}`);
-// v2.4.4：Shift+C 给格子增/删曲线
+// v2.4.5：Space 给格子增/删曲线 + 自动聚焦
 const curveCells = await page.evaluate(() => window.__neurouMatrix?.cellPositions() ?? []);
 const emptyCell = curveCells.find((c) => c.row === 0 && c.col === 0);
 if (emptyCell) {
   await page.mouse.click(emptyCell.x, emptyCell.y);
   await page.waitForTimeout(250);
 }
-await page.keyboard.press('Shift+C');
-await page.waitForTimeout(700);
+await page.keyboard.press('Space');
+await page.waitForTimeout(1000);
 const addedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
 const addedCurve = addedCurveRaw ? JSON.parse(addedCurveRaw) : [];
-check('Shift+C 给格子添加曲线', Number(await appAttr('data-matrix-curve-adds')) >= 1 && addedCurve.length === 3, `${await appAttr('data-matrix-curve-adds')}/${addedCurve.length}`);
-await page.keyboard.press('Shift+C');
-await page.waitForTimeout(700);
+check('Space 给格子添加钟形曲线并自动聚焦', Number(await appAttr('data-matrix-curve-adds')) >= 1 && addedCurve.length === 5 && (await matrixRoot.getAttribute('data-focus')) === 'true', `${await appAttr('data-matrix-curve-adds')}/${addedCurve.length}/${await matrixRoot.getAttribute('data-focus')}`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(900);
 const removedCurveRaw = String((await matrixRoot.getAttribute('data-selected-curve')) ?? '');
-check('Shift+C 移除格子曲线', Number(await appAttr('data-matrix-curve-removes')) >= 1 && removedCurveRaw === '', `${await appAttr('data-matrix-curve-removes')}/${removedCurveRaw}`);
+check('Space 移除格子曲线并退出聚焦', Number(await appAttr('data-matrix-curve-removes')) >= 1 && removedCurveRaw === '' && (await matrixRoot.getAttribute('data-focus')) === 'false', `${await appAttr('data-matrix-curve-removes')}/${removedCurveRaw}/${await matrixRoot.getAttribute('data-focus')}`);
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
@@ -1165,13 +1177,13 @@ const syncHeadStart = Number(await syncedRoot.getAttribute('data-playhead'));
 await page.waitForTimeout(1800);
 const syncHeadAfter = Number(await syncedRoot.getAttribute('data-playhead'));
 check('同步播放头随 tick 连续前进', Math.abs(syncHeadAfter - syncHeadStart) > 0.02 && syncHeadAfter !== syncHeadStart, `${syncHeadStart}→${syncHeadAfter}`);
-await page.keyboard.press('Space');
+await page.keyboard.press('p');
 await page.waitForTimeout(180);
 const syncPaused = Number(await syncedRoot.getAttribute('data-playhead'));
 await page.waitForTimeout(650);
 const syncPaused2 = Number(await syncedRoot.getAttribute('data-playhead'));
 check('同步模式 Space 暂停冻结播放头', (await syncedRoot.getAttribute('data-playing')) === 'false' && Math.abs(syncPaused2 - syncPaused) < 1e-6, `${syncPaused}→${syncPaused2}`);
-await page.keyboard.press('Space');
+await page.keyboard.press('p');
 await page.waitForTimeout(900);
 const syncResumed = Number(await syncedRoot.getAttribute('data-playhead'));
 check('同步模式恢复后追上实时 tick', (await syncedRoot.getAttribute('data-playing')) === 'true' && Math.abs(syncResumed - syncPaused2) > 0.01, `${syncPaused2}→${syncResumed}`);

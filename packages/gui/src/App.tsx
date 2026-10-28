@@ -468,11 +468,11 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // F2：从八弦进入谱模式（世界里至少有一条谱）。谱模式内的 F2/Esc 由 SpectrumField 处理。
+  // F2：从八弦或关系谱进入谱模式（世界里至少有一条谱）。谱模式内的 F2/Esc 由 SpectrumField 处理。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'F2' || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (screenRef.current !== 'strings') return;
+      if (screenRef.current === 'spectrum') return;
       if ((worldIRRef.current?.spectra.length ?? 0) === 0) return;
       event.preventDefault();
       setSpectrumIndex(0);
@@ -482,11 +482,11 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // F3：从八弦进入关系谱矩阵（世界里至少有关系谱）。矩阵内的 F3/Esc 由 MatrixField 处理。
+  // F3：从八弦或谱模式进入关系谱矩阵（世界里至少有关系谱）。矩阵内的 F3/Esc 由 MatrixField 处理。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'F3' || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (screenRef.current !== 'strings') return;
+      if (screenRef.current === 'matrix') return;
       if ((worldIRRef.current?.matrices.length ?? 0) === 0) return;
       event.preventDefault();
       setMatrixIndex(0);

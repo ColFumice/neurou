@@ -391,8 +391,10 @@ export function addMatrixCurve(ir: WorldIR, id: string, row: string, col: string
   if (matrix.curves.some((curve) => curve.row === row && curve.col === col)) return fail('这个格子已经有曲线');
   const r = matrix.rows.indexOf(row);
   const c = matrix.cols.indexOf(col);
-  const value = round(matrix.values[r]?.[c] ?? 0);
-  return matrixReplace(ir, id, { ...matrix, curves: [...matrix.curves, { row, col, bands: [value, value, value] }] });
+  const value = matrix.values[r]?.[c] ?? 0;
+  // v2.4.5：默认给一个轻微起伏的 5 点钟形，而不是死平线；0/1 时自然贴边。
+  const shape = [0.82, 0.94, 1, 0.94, 0.82].map((factor) => round(Math.max(0, Math.min(1, value * factor))));
+  return matrixReplace(ir, id, { ...matrix, curves: [...matrix.curves, { row, col, bands: shape }] });
 }
 
 /** v2.4.4：移除一个格子的曲线，保留标量回退。 */
