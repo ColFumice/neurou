@@ -831,8 +831,13 @@ export function MatrixField({
       const curve = sourceMatrix.curves?.find(
         (candidate) => candidate.row === source.row && candidate.col === source.col,
       );
-      if (!curve || curve.bands.length < 2) return matrixTimePhase(matrix);
-      return clamp(sampleCurveAt(sourceMatrix, curve, position), 0, 1);
+      if (curve) return clamp(sampleCurveAt(sourceMatrix, curve, position), 0, 1);
+      // v2.16：源格无曲线时回退到该格标量值（不回退静态 phase）；标签不存在/非有限按 runtime 取 0。
+      const sourceRowIndex = sourceMatrix.rows.indexOf(source.row);
+      const sourceColIndex = sourceMatrix.cols.indexOf(source.col);
+      if (sourceRowIndex < 0 || sourceColIndex < 0) return 0;
+      const scalar = sourceMatrix.values[sourceRowIndex]?.[sourceColIndex];
+      return typeof scalar === 'number' && Number.isFinite(scalar) ? scalar : 0;
     }
 
     function matrixRows(matrix: MatrixView): number {

@@ -38,12 +38,12 @@ describe('多矩阵联动：相位源（v2.7）', () => {
     expect(again.ok).toBe(true);
   });
 
-  it('相位源必须指向有曲线的格子', () => {
-    const bad = WORLD.replace('相位源 源谱 甲 乙', '相位源 源谱 乙 乙');
-    const r = compileText(bad, 'phase-source-bad.nro');
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.diagnostics.errors.some((e) => e.code === 'NRO2100')).toBe(true);
+  it('相位源也可指向标量格（v2.16）', () => {
+    const scalar = WORLD.replace('相位源 源谱 甲 乙', '相位源 源谱 乙 乙');
+    const r = compileText(scalar, 'phase-source-scalar.nro');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ir.matrices.find((m) => m.name === '从谱')?.phaseSource).toEqual({ matrix: '源谱', row: '乙', col: '乙' });
   });
 
   it('相位源不能成环', () => {

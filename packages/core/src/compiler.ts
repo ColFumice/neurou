@@ -222,7 +222,7 @@ class Compiler {
     this.checkTimbreReferences();
   }
 
-  /** v2.7：多矩阵联动——相位源必须指向有曲线、有周期的矩阵格子，且不能成环。 */
+  /** v2.7：多矩阵联动——相位源指向源矩阵的格子（曲线或标量），且不能成环。 */
   private checkMatrixPhaseSources(): void {
     for (const matrix of this.matrices) {
       const source = matrix.phaseSource;
@@ -252,13 +252,6 @@ class Compiler {
         }
         if (!target.cols.includes(link.col)) {
           this.error('NRO2101', `关系谱「${target.name}」没有列标签「${link.col}」。`, matrix.span ?? zeroSpan());
-          delete matrix.phaseSource;
-          break;
-        }
-        if (!target.curves.some((curve) => curve.row === link.row && curve.col === link.col)) {
-          this.error('NRO2100', `相位源「${target.name}」的「${link.row} × ${link.col}」没有曲线。`, matrix.span ?? zeroSpan(), {
-            hint: '给源格子加一条曲线，或换一个有曲线的格子。',
-          });
           delete matrix.phaseSource;
           break;
         }

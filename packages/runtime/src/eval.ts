@@ -13,10 +13,15 @@ function matrixTimePosition(name: string, state: WorldState, depth = 0): number 
       const curve = source.curves.find(
         (candidate) => candidate.row === matrix.phaseSource!.row && candidate.col === matrix.phaseSource!.col,
       );
-      if (curve) {
-        const sampled = sampleMatrixCurve(curve, curveLocalPosition(curve, sourcePosition), curve.interpolation ?? source.interpolation, curve.loop ?? source.loop);
-        if (sampled !== undefined && Number.isFinite(sampled)) phase = sampled;
-      }
+      const sampled = curve
+        ? sampleMatrixCurve(
+            curve,
+            curveLocalPosition(curve, sourcePosition),
+            curve.interpolation ?? source.interpolation,
+            curve.loop ?? source.loop,
+          )
+        : matrixScalar(source, matrix.phaseSource.row, matrix.phaseSource.col);
+      if (sampled !== undefined && Number.isFinite(sampled)) phase = sampled;
     }
   }
   const raw = (state.tick / matrix.period) * (matrix.speed ?? 1) + phase;
