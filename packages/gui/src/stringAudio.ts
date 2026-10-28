@@ -56,7 +56,10 @@ export class StringAudioEngine {
   private listeners = new Set<(state: StringAudioState) => void>();
   private bufferCache = new Map<string, AudioBuffer>();
   private sources = new Set<AudioBufferSourceNode>();
-  private voices = new Map<number, { osc: OscillatorNode; gain: GainNode; pan: StereoPannerNode | null }>();
+  private voices = new Map<
+    number,
+    { osc: OscillatorNode; gain: GainNode; pan: StereoPannerNode | null; baseGain: number; xNorm: number; yNorm: number }
+  >();
   private voiceSeq = 0;
 
   getState(): StringAudioState {
@@ -345,8 +348,30 @@ export class StringAudioEngine {
     }
     osc.start();
     const id = ++this.voiceSeq;
-    this.voices.set(id, { osc, gain, pan });
+    this.voices.set(id, { osc, gain, pan, baseGain: target, xNorm: x, yNorm: clamp(yNorm, 0, 1) });
     return id;
+  }
+
+  /** v2.3.3：节点移动时持续音高/音量跟随（音高按节点 x，音量按节点 y）。 */
+  updateSustainedTone(id: number, xNorm: number, yNorm: number): void {
+    const voice = this.voices.get(id);
+    const ctx = this.ctx;
+    if (!voice || !ctx) return;
+    const x = clamp(xNorm, 0, 1);
+    const y = clamp(yNorm, 0, 1);
+    const profile = KIND_AUDIO['叙事'];
+    const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
+    const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
+    const now = ctx.currentTime;
+    try {
+      voice.osc.frequency.setTargetAtTime(freq, now, 0.035);
+      voice.gain.gain.setTargetAtTime(clamp(voice.baseGain * (0.22 + y * 0.78), 0.0005, 0.35), now, 0.05);
+      voice.pan?.pan.setTargetAtTime((x * 2 - 1) * 0.4, now, 0.05);
+    } catch {
+      /* ignore */
+    }
+    voice.xNorm = x;
+    voice.yNorm = y;
   }
 
   /** 实时更新持续音的波形（拖段点/键盘改段值后音色跟随）。 */

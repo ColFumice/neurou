@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { getStringAudio } from './stringAudio.js';
+import { keyByCode, layoutKeyboard } from './stringMath.js';
 
 /* ------------------------------------------------------------------ *
  * Props / 数据契约
@@ -96,6 +97,8 @@ interface MatrixDebugState {
   focusBandEdits: number;
   playing: boolean;
   playhead: number;
+  playSpeed: number;
+  curveKeyEdits: number;
 }
 
 declare global {
@@ -214,6 +217,16 @@ const PLAYHEAD_LINE_ALPHA = 0.14;
 const PLAYHEAD_DOT_ALPHA = 0.85;
 const PLAYHEAD_DOT_RADIUS = 2.8;
 const SPARK_PLAYHEAD_RADIUS = 1.6;
+/** 播放速度惯性：0→1 加速 0.35s；1→0 减速 0.28s。 */
+const PLAY_ACCEL_SECONDS = 0.35;
+const PLAY_DECEL_SECONDS = 0.28;
+/** 曲线节点拖尾：最近约 450ms 的位置淡出。 */
+const CURVE_TRAIL_MS = 450;
+const CURVE_TRAIL_ALPHA = 0.36;
+const CURVE_TRAIL_SAMPLE_MS = 18;
+/** 持续 voice 波形/音高更新间隔；按键标记松开后淡出时长。 */
+const SUSTAINED_UPDATE_MS = 60;
+const FEEDBACK_FADE_MS = 300;
 
 /** 聚焦编辑：双击曲线格（或选中后 Enter）用 iOS spring 放大成中央大圆角矩形。 */
 const FOCUS_PANEL_WIDTH = 960;
@@ -415,6 +428,8 @@ export function MatrixField({
   const [focusBandEditsUi, setFocusBandEditsUi] = useState(0);
   const [playingUi, setPlayingUi] = useState(false);
   const [playheadUi, setPlayheadUi] = useState(0);
+  const [playSpeedUi, setPlaySpeedUi] = useState(0);
+  const [curveKeyEditsUi, setCurveKeyEditsUi] = useState(0);
 
   const valuesJson = JSON.stringify(valuesUi.map((row) => row.map((value) => round4(value))));
   const selectedAttr = selectedUi === null ? '' : `${selectedUi.row},${selectedUi.col}`;
@@ -520,8 +535,34 @@ export function MatrixField({
     /** 曲线播放头：playing + 归一化 t（0..1，8s 循环）。 */
     let playing = true;
     let playhead = 0;
+    let playSpeed = 0;
     let playingUiNow = false;
     let playheadUiNow = 0;
+    let playSpeedUiNow = 0;
+    /** 46 键 → 关系谱曲线段映射；多键各自一个 voice。 */
+    const keys = layoutKeyboard();
+    const curveKeyEdits = new Map<
+      string,
+      {
+        context: 'curve' | 'focus';
+        matrixId: string;
+        row: string;
+        col: string;
+        band: number;
+        startValue: number;
+        targets: number[];
+        voiceId: number;
+        smooth: boolean;
+        loop: boolean;
+      }
+    >();
+    let curveKeyEditsNow = 0;
+    let lastCurveVoiceUpdate = 0;
+    /** 键盘/拖动的极简按键标记（松开后 300ms 淡出）。 */
+    const curveKeyMarks = new Map<string, { context: 'curve' | 'focus'; x: number; label: string; releasedAt: number | null }>();
+    /** 节点拖尾：context:band → 最近 450ms 位置。 */
+    const curveTrails = new Map<string, Array<{ t: number; x: number; y: number }>>();
+    let lastTrailSample = 0;
     /** 拖动/滚轮冻结期间缓存各格亮度差速倍率，让所有格子位置一起静止。 */
     let frozenFactors: number[][] | null = null;
     /** 滚轮编辑后短暂冻结视差。 */
@@ -741,7 +782,7 @@ export function MatrixField({
           curveActive = true;
           curveAlpha = Math.max(curveAlpha, 0);
           pushCurveUi(true);
-        } else if (!curveDrag && desired.bands.length === curveTargets.length) {
+        } else if (!curveDrag && !hasCurveKeyEdit('curve') && desired.bands.length === curveTargets.length) {
           let changed = false;
           for (let i = 0; i < desired.bands.length; i += 1) {
             const next = clampValue(desired.bands[i] ?? 0);
@@ -899,6 +940,293 @@ export function MatrixField({
         playheadUiNow = rounded;
         setPlayheadUi(rounded);
       }
+      const roundedSpeed = Math.round(clamp(playSpeed, 0, 1) * 1000) / 1000;
+      if (force || Math.abs(roundedSpeed - playSpeedUiNow) >= 0.005) {
+        playSpeedUiNow = roundedSpeed;
+        setPlaySpeedUi(roundedSpeed);
+      }
+    }
+
+    /* —— 关系谱曲线键盘映射 + 节点拖尾 —— */
+    function curveKeyboardContext(): {
+      context: 'curve' | 'focus';
+      matrix: MatrixView;
+      matrixId: string;
+      row: string;
+      col: string;
+      targets: number[];
+      bands: number[];
+      smooth: boolean;
+      loop: boolean;
+    } | null {
+      const matrix = currentMatrix();
+      if (!matrix) return null;
+      if (focusTargetActive && focusCurveTargets.length > 1) {
+        return {
+          context: 'focus',
+          matrix,
+          matrixId: focusMatrixId || matrix.id,
+          row: focusRow,
+          col: focusCol,
+          targets: focusCurveTargets,
+          bands: focusCurveBands,
+          smooth: matrix.interpolation === '平滑',
+          loop: matrix.loop,
+        };
+      }
+      const curve = selectedCurveInfo(matrix);
+      if (curve && curveTargets.length > 1) {
+        return {
+          context: 'curve',
+          matrix,
+          matrixId: curveMatrixId || matrix.id,
+          row: curveRow || curve.row,
+          col: curveCol || curve.col,
+          targets: curveTargets,
+          bands: curveBands,
+          smooth: matrix.interpolation === '平滑',
+          loop: matrix.loop,
+        };
+      }
+      return null;
+    }
+
+    function curveKeyboardBandX(context: 'curve' | 'focus', matrix: MatrixView, index: number, count: number): number {
+      return context === 'focus' ? focusCurvePointX(matrix, index, count) : curvePointX(matrix, index, count);
+    }
+
+    function curveKeyboardBandY(context: 'curve' | 'focus', value: number): number {
+      return context === 'focus' ? focusValueToY(value) : curveValueToY(value);
+    }
+
+    function trailKey(context: 'curve' | 'focus', band: number): string {
+      return `${context}:${band}`;
+    }
+
+    function recordCurveTrail(context: 'curve' | 'focus', band: number, x: number, y: number, now: number): void {
+      const key = trailKey(context, band);
+      let points = curveTrails.get(key);
+      if (!points) {
+        points = [];
+        curveTrails.set(key, points);
+      }
+      const last = points[points.length - 1];
+      if (last && now - last.t < CURVE_TRAIL_SAMPLE_MS && Math.hypot(last.x - x, last.y - y) < 1.5) return;
+      points.push({ t: now, x, y });
+      while (points.length > 0 && now - (points[0]?.t ?? now) > CURVE_TRAIL_MS) points.shift();
+      while (points.length > 80) points.shift();
+    }
+
+    function pruneCurveTrails(now: number): void {
+      for (const [key, points] of [...curveTrails]) {
+        while (points.length > 0 && now - (points[0]?.t ?? now) > CURVE_TRAIL_MS) points.shift();
+        if (points.length === 0) curveTrails.delete(key);
+      }
+    }
+
+    /** 绘制 450ms 淡出拖尾（点 + 极淡连线），颜色只用灰阶。 */
+    function drawCurveTrail(context: 'curve' | 'focus', now: number): void {
+      for (const [key, points] of curveTrails) {
+        if (!key.startsWith(`${context}:`)) continue;
+        if (points.length === 0) continue;
+        let prev: { x: number; y: number; alpha: number } | null = null;
+        for (const point of points) {
+          const age = clamp((now - point.t) / CURVE_TRAIL_MS, 0, 1);
+          const alpha = (1 - age) * CURVE_TRAIL_ALPHA;
+          if (alpha <= 0.004) {
+            prev = null;
+            continue;
+          }
+          if (prev && Math.hypot(prev.x - point.x, prev.y - point.y) < 60) {
+            ctx.strokeStyle = rgba(LABEL_RGB, alpha * 0.5);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(prev.x, prev.y);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+          }
+          ctx.fillStyle = rgba(LABEL_RGB, alpha);
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 1.2 + (1 - age) * 0.8, 0, Math.PI * 2);
+          ctx.fill();
+          prev = { x: point.x, y: point.y, alpha };
+        }
+      }
+    }
+
+    /** 记录当前正在被拖动/键盘调整的曲线节点位置（每帧调用）。 */
+    function recordActiveCurveTrails(now: number): void {
+      const matrix = currentMatrix();
+      if (!matrix) return;
+      if (curveDrag && curveBands.length > 1) {
+        const count = curveBands.length;
+        const index = curveDrag.index;
+        const x = curvePointX(matrix, index, count);
+        const y = curveValueToY(curveBands[index] ?? 0);
+        recordCurveTrail('curve', index, x, y, now);
+      }
+      if (focusDrag && focusCurveBands.length > 1) {
+        const count = focusCurveBands.length;
+        const index = focusDrag.index;
+        const x = focusCurvePointX(matrix, index, count);
+        const y = focusValueToY(focusCurveBands[index] ?? 0);
+        recordCurveTrail('focus', index, x, y, now);
+      }
+      if (focusArrow && focusSelectedIndex !== null && focusCurveBands.length > 1) {
+        const count = focusCurveBands.length;
+        const index = focusSelectedIndex;
+        const x = focusCurvePointX(matrix, index, count);
+        const y = focusValueToY(focusCurveBands[index] ?? 0);
+        recordCurveTrail('focus', index, x, y, now);
+      }
+      for (const edit of curveKeyEdits.values()) {
+        const count = edit.context === 'focus' ? focusCurveBands.length : curveBands.length;
+        if (count <= 1) continue;
+        const value = edit.context === 'focus' ? (focusCurveBands[edit.band] ?? 0) : (curveBands[edit.band] ?? 0);
+        recordCurveTrail(
+          edit.context,
+          edit.band,
+          curveKeyboardBandX(edit.context, matrix, edit.band, count),
+          curveKeyboardBandY(edit.context, value),
+          now,
+        );
+      }
+      pruneCurveTrails(now);
+    }
+
+    function bumpCurveKeyEdits(): void {
+      curveKeyEditsNow += 1;
+      setCurveKeyEditsUi(curveKeyEditsNow);
+    }
+
+    function flushCurveKeyEdit(code: string, persist = true): void {
+      const edit = curveKeyEdits.get(code);
+      if (!edit) return;
+      curveKeyEdits.delete(code);
+      audio.stopSustainedSpectrum(edit.voiceId);
+      const mark = curveKeyMarks.get(code);
+      if (mark) mark.releasedAt = performance.now();
+      if (!persist) return;
+      const value = clampValue(edit.targets[edit.band] ?? edit.startValue);
+      if (Math.abs(value - edit.startValue) > 1e-6) {
+        curveEditRef.current?.(edit.matrixId, edit.row, edit.col, edit.band, value, true);
+        bumpCurveKeyEdits();
+      }
+    }
+
+    function flushAllCurveKeyEdits(persist = true): void {
+      for (const code of [...curveKeyEdits.keys()]) flushCurveKeyEdit(code, persist);
+    }
+
+    function hasCurveKeyEdit(context: 'curve' | 'focus'): boolean {
+      for (const edit of curveKeyEdits.values()) if (edit.context === context) return true;
+      return false;
+    }
+
+    /** 46 键按下：最近段 + key.cy 目标值；持续发声，keyup 持久化一次。 */
+    function beginCurveKeyEdit(code: string, key: ReturnType<typeof layoutKeyboard>[number]): boolean {
+      const context = curveKeyboardContext();
+      if (!context) return false;
+      if (curveKeyEdits.has(code)) flushCurveKeyEdit(code, true);
+      const count = context.targets.length;
+      if (count === 0) return false;
+      let index = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < count; i += 1) {
+        const distance = Math.abs(key.cx - curveKeyboardBandX(context.context, context.matrix, i, count));
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          index = i;
+        }
+      }
+      const value = clampValue(1 - key.cy / LOGICAL_H);
+      const startValue = context.targets[index] ?? 0;
+      if (Math.abs(value - startValue) < 1e-6) {
+        // 仍播放一次声音，但不产生改动。
+      }
+      // 跳跃前先记录旧位置，拖尾能连上。
+      const now = performance.now();
+      recordCurveTrail(
+        context.context,
+        index,
+        curveKeyboardBandX(context.context, context.matrix, index, count),
+        curveKeyboardBandY(context.context, startValue),
+        now,
+      );
+      context.targets[index] = value;
+      if (context.context === 'focus') {
+        focusSelectedIndex = index;
+        pushFocusUi(true);
+      } else {
+        curveSelectedIndex = index;
+        pushCurveUi(true);
+      }
+      const xNorm = count <= 1 ? 0.5 : index / (count - 1);
+      void audio.ensureStarted();
+      const voiceId = audio.startSustainedSpectrum(context.bands, xNorm, value, context.smooth, context.loop);
+      curveKeyEdits.set(code, {
+        context: context.context,
+        matrixId: context.matrixId,
+        row: context.row,
+        col: context.col,
+        band: index,
+        startValue,
+        targets: context.targets,
+        voiceId,
+        smooth: context.smooth,
+        loop: context.loop,
+      });
+      curveKeyMarks.set(code, {
+        context: context.context,
+        x: key.cx,
+        label: key.label,
+        releasedAt: null,
+      });
+      return true;
+    }
+
+    /** 每 ~60ms 用当前显示曲线更新所有键盘 voice 的波形/音高音量。 */
+    function updateCurveKeyVoices(now: number, force = false): void {
+      if (curveKeyEdits.size === 0) return;
+      if (!force && now - lastCurveVoiceUpdate < SUSTAINED_UPDATE_MS) return;
+      lastCurveVoiceUpdate = now;
+      const matrix = currentMatrix();
+      if (!matrix) return;
+      for (const edit of curveKeyEdits.values()) {
+        const bands = edit.context === 'focus' ? focusCurveBands : curveBands;
+        const count = bands.length;
+        if (edit.voiceId > 0 && count >= 2) {
+          audio.updateSustainedSpectrum(edit.voiceId, bands, edit.smooth, edit.loop);
+          const value = edit.targets[edit.band] ?? 0;
+          const xNorm = count <= 1 ? 0.5 : edit.band / (count - 1);
+          audio.updateSustainedTone(edit.voiceId, xNorm, value);
+        }
+      }
+      void matrix;
+    }
+
+    function drawCurveKeyMarks(context: 'curve' | 'focus', now: number): void {
+      if (curveKeyMarks.size === 0) return;
+      ctx.save();
+      ctx.font = `10px ${DEFAULT_SERIF}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const [code, mark] of [...curveKeyMarks]) {
+        if (mark.context !== context) continue;
+        const fade =
+          mark.releasedAt === null ? 1 : Math.max(0, 1 - (now - mark.releasedAt) / FEEDBACK_FADE_MS);
+        if (fade <= 0) {
+          curveKeyMarks.delete(code);
+          continue;
+        }
+        ctx.fillStyle = rgba(LABEL_RGB, 0.28 * fade);
+        ctx.beginPath();
+        ctx.arc(clamp(mark.x, 0, LOGICAL_W), 742, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = rgba(LABEL_RGB, 0.22 * fade);
+        ctx.fillText(mark.label, clamp(mark.x, 12, LOGICAL_W - 12), 730);
+      }
+      ctx.restore();
     }
 
     function finalizeFocusArrow(persist = true): void {
@@ -944,6 +1272,7 @@ export function MatrixField({
 
     function closeFocus(): void {
       if (!focusTargetActive && focusSpring.value < 0.01) return;
+      flushAllCurveKeyEdits(true);
       finalizeFocusArrow(true);
       focusTargetActive = false;
       focusSpring.target = 0;
@@ -1061,6 +1390,8 @@ export function MatrixField({
       const key = `${matrix.id}::${rows}x${cols}`;
       if (key !== matrixKey) {
         matrixKey = key;
+        flushAllCurveKeyEdits(true);
+        curveTrails.clear();
         layout = layoutOf(rows, cols);
         displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
         targets = displayed.map((row) => row.slice());
@@ -1475,6 +1806,7 @@ export function MatrixField({
       if (event.code === 'Tab') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        flushAllCurveKeyEdits(true);
         if (focusIsOpen()) closeFocus();
         cycleRef.current(event.shiftKey ? -1 : 1);
         return;
@@ -1482,12 +1814,14 @@ export function MatrixField({
       if (event.code === 'F3') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        flushAllCurveKeyEdits(true);
         startClosing(performance.now());
         return;
       }
       if (event.code === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
+        flushAllCurveKeyEdits(true);
         if (focusIsOpen()) {
           closeFocus();
           return;
@@ -1501,6 +1835,16 @@ export function MatrixField({
           event.preventDefault();
           event.stopImmediatePropagation();
           beginFocus(matrix, performance.now());
+          return;
+        }
+      }
+      // 46 键映射：底部曲线编辑器可见或聚焦大曲线打开时改最近段（不影响 Enter/Space/方向键等）。
+      if (!event.repeat) {
+        const mappedKey = keyByCode(keys, event.code);
+        if (mappedKey && curveKeyboardContext()) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          beginCurveKeyEdit(event.code, mappedKey);
           return;
         }
       }
@@ -1588,6 +1932,10 @@ export function MatrixField({
     }
 
     function onKeyUp(event: KeyboardEvent): void {
+      if (curveKeyEdits.has(event.code)) {
+        flushCurveKeyEdit(event.code, true);
+        return;
+      }
       if (event.code !== 'ArrowUp' && event.code !== 'ArrowDown') return;
       if (!focusArrow) return;
       const dir: 1 | -1 = event.code === 'ArrowUp' ? 1 : -1;
@@ -1740,7 +2088,8 @@ export function MatrixField({
       }
       ctx.stroke();
 
-      // 播放头：极淡竖线 + 亮点（暂停时停在当前位置）。
+      // 450ms 节点拖尾 + 播放头（拖尾在曲线下、播放头在段点上方）。
+      drawCurveTrail('curve', now);
       const playX = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, playhead);
       ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
       ctx.lineWidth = 1;
@@ -1768,6 +2117,7 @@ export function MatrixField({
       ctx.beginPath();
       ctx.arc(playX, curveValueToY(playSample), PLAYHEAD_DOT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
+      drawCurveKeyMarks('curve', now);
       ctx.restore();
     }
 
@@ -1807,6 +2157,8 @@ export function MatrixField({
           else ctx.lineTo(x, y);
         }
         ctx.stroke();
+        // 450ms 节点拖尾（大曲线下方）+ 播放头。
+        drawCurveTrail('focus', now);
         const playX = lerp(graph.left, graph.right, playhead);
         ctx.strokeStyle = rgba(LABEL_RGB, PLAYHEAD_LINE_ALPHA);
         ctx.lineWidth = 1;
@@ -1844,6 +2196,7 @@ export function MatrixField({
         ctx.fillStyle = rgba(LABEL_RGB, NAME_ALPHA);
         ctx.fillText(`${rowName} × ${colName}`, panel.left + panel.width / 2, panel.top + panel.height - 34);
       }
+      drawCurveKeyMarks('focus', now);
       ctx.restore();
       void now;
       void value;
@@ -2000,14 +2353,28 @@ export function MatrixField({
       stepCurveEditor(now, dt);
       stepFocus(now, dt);
 
-      // 播放头：有曲线的矩阵自动 8s 循环；拖动/滚轮时冻结，松手恢复。
+      // 播放头：有曲线的矩阵自动 8s 循环；速度 0..1 线性加减速；拖动/滚轮冻结。
       const hasCurves = matrix !== null && (matrix.curves?.length ?? 0) > 0;
       const playFrozen = drag !== null || curveDrag !== null || focusDrag !== null || now < wheelFreezeUntil;
-      if (hasCurves && playing && !playFrozen) {
-        playhead = (playhead + dt / (PLAY_DURATION_MS / 1000)) % 1;
+      const targetSpeed = hasCurves && playing ? 1 : 0;
+      if (playFrozen) {
+        playSpeed = 0;
+      } else if (hasCurves) {
+        if (targetSpeed > playSpeed) {
+          playSpeed = Math.min(targetSpeed, playSpeed + dt / PLAY_ACCEL_SECONDS);
+        } else if (targetSpeed < playSpeed) {
+          playSpeed = Math.max(targetSpeed, playSpeed - dt / PLAY_DECEL_SECONDS);
+        }
       }
-      if (!hasCurves) playhead = 0;
+      if (!hasCurves) {
+        playSpeed = 0;
+        playhead = 0;
+      } else if (playSpeed > 0) {
+        playhead = (playhead + (dt / (PLAY_DURATION_MS / 1000)) * playSpeed) % 1;
+      }
       pushPlayUi();
+      updateCurveKeyVoices(now);
+      recordActiveCurveTrails(now);
 
       // 数值缓动（约 180ms）
       if (rows > 0) {
@@ -2147,6 +2514,8 @@ export function MatrixField({
         focusBandEdits: focusBandEditsNow,
         playing: (matrix?.curves?.length ?? 0) > 0 ? playing : false,
         playhead: Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
+        playSpeed: Math.round(clamp(playSpeed, 0, 1) * 1000) / 1000,
+        curveKeyEdits: curveKeyEditsNow,
       };
     }
 
@@ -2243,6 +2612,9 @@ export function MatrixField({
       canvas.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      flushAllCurveKeyEdits(false);
+      curveKeyMarks.clear();
+      curveTrails.clear();
       if (window.__neurouMatrix === debugApi) delete window.__neurouMatrix;
     };
   }, []);
@@ -2274,6 +2646,8 @@ export function MatrixField({
       data-focus-band-edits={focusBandEditsUi}
       data-playing={playingUi ? 'true' : 'false'}
       data-playhead={playheadUi.toFixed(4)}
+      data-play-speed={playSpeedUi.toFixed(3)}
+      data-curve-key-edits={curveKeyEditsUi}
       style={{
         position: 'absolute',
         inset: 0,
