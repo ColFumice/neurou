@@ -452,6 +452,14 @@ class Compiler {
       }
     }
 
+    let period = d.period;
+    if (period !== undefined && (!Number.isFinite(period) || period <= 0 || period > 10000)) {
+      this.error('NRO2100', `关系谱「${d.name}」的周期「${String(period)}」无效：必须是 0..10000 之间的正数拍。`, d.span, {
+        hint: '周期表示曲线一个循环对应多少拍，例如「周期 40」。',
+      });
+      period = undefined;
+    }
+
     const matrix: IRMatrix = {
       id: d.name,
       name: d.name,
@@ -461,6 +469,7 @@ class Compiler {
       curves: d.curves.map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
       interpolation: d.interpolation,
       loop: d.loop,
+      ...(period !== undefined ? { period } : {}),
       span: d.span,
     };
     this.matrices.push(matrix);

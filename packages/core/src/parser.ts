@@ -756,8 +756,13 @@ class Parser {
             this.finishLine();
             break;
           }
+          case '周期': {
+            decl.period = this.readNumber('周期拍数');
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环。');
+            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期。');
             this.skipToLineEnd();
         }
       }

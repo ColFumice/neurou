@@ -198,6 +198,8 @@ export interface IRMatrix {
   curves: IRMatrixCurve[];
   interpolation: '线性' | '平滑';
   loop: boolean;
+  /** v2.4：曲线的世界时间周期（拍）；有它时 GUI 播放头可跟随运行时 tick。 */
+  period?: number;
   span?: Span;
 }
 

@@ -556,6 +556,7 @@ export function App() {
     curves: (m.curves ?? []).map((c) => ({ row: c.row, col: c.col, bands: [...c.bands] })),
     interpolation: m.interpolation,
     loop: m.loop,
+    ...(m.period !== undefined ? { period: m.period } : {}),
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {
@@ -735,6 +736,7 @@ export function App() {
       <MatrixField
         matrices={matrices}
         index={Math.min(matrixIndex, matrices.length - 1)}
+        tick={view.tick}
         onCycleMatrix={(dir) =>
           setMatrixIndex((current) => ((current + dir) % matrices.length + matrices.length) % matrices.length)
         }

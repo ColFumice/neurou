@@ -233,6 +233,7 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
   }
   if ((matrix.interpolation ?? '线性') !== '线性') w.line(1, `插值 ${matrix.interpolation}`);
   if (matrix.loop) w.line(1, '循环 是');
+  if (matrix.period !== undefined) w.line(1, `周期 ${numberText(matrix.period)}`);
   w.blank();
 }
 

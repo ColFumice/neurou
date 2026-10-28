@@ -1073,6 +1073,31 @@ await page.waitForTimeout(500);
 check('矩阵 F3 退出', (await appAttr('data-screen')) === 'strings', String(await appAttr('data-screen')));
 restoreWorld();
 
+// v2.4：关系谱周期 → 播放头同步运行时 tick
+await page.goto(`${URL}?world=${encodeURIComponent('examples/relations.nro')}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+await page.keyboard.press('F3');
+await page.waitForTimeout(700);
+const syncedRoot = page.locator('[data-testid="matrix-field"]');
+check('有周期时播放头同步运行时', (await syncedRoot.getAttribute('data-synced')) === 'true' && Number(await syncedRoot.getAttribute('data-period')) === 40, `${await syncedRoot.getAttribute('data-synced')}/${await syncedRoot.getAttribute('data-period')}`);
+const syncHeadStart = Number(await syncedRoot.getAttribute('data-playhead'));
+await page.waitForTimeout(1800);
+const syncHeadAfter = Number(await syncedRoot.getAttribute('data-playhead'));
+check('同步播放头随 tick 连续前进', Math.abs(syncHeadAfter - syncHeadStart) > 0.02 && syncHeadAfter !== syncHeadStart, `${syncHeadStart}→${syncHeadAfter}`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(180);
+const syncPaused = Number(await syncedRoot.getAttribute('data-playhead'));
+await page.waitForTimeout(650);
+const syncPaused2 = Number(await syncedRoot.getAttribute('data-playhead'));
+check('同步模式 Space 暂停冻结播放头', (await syncedRoot.getAttribute('data-playing')) === 'false' && Math.abs(syncPaused2 - syncPaused) < 1e-6, `${syncPaused}→${syncPaused2}`);
+await page.keyboard.press('Space');
+await page.waitForTimeout(900);
+const syncResumed = Number(await syncedRoot.getAttribute('data-playhead'));
+check('同步模式恢复后追上实时 tick', (await syncedRoot.getAttribute('data-playing')) === 'true' && Math.abs(syncResumed - syncPaused2) > 0.01, `${syncPaused2}→${syncResumed}`);
+await page.keyboard.press('F3');
+await page.waitForTimeout(500);
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

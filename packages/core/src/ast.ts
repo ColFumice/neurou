@@ -233,6 +233,8 @@ export interface MatrixDecl extends DeclBase {
   interpolation: '线性' | '平滑';
   /** 矩阵级循环开关，默认 false。 */
   loop: boolean;
+  /** v2.4：曲线的世界时间周期（拍），供 GUI 播放头与运行时同步；可选。 */
+  period?: number;
 }
 
 export type Decl =

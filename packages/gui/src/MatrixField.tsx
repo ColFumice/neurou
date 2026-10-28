@@ -31,11 +31,15 @@ export interface MatrixView {
   curves: MatrixCurveView[];
   interpolation: '线性' | '平滑';
   loop: boolean;
+  /** 运行时拍周期（v2.3.6）：有周期时播放头与 tick 同步。 */
+  period?: number;
 }
 
 export interface MatrixFieldProps {
   matrices: MatrixView[];
   index: number;
+  /** 运行时拍数（App 每次 tick 变化传入）。 */
+  tick: number;
   onCycleMatrix: (dir: 1 | -1) => void;
   onEditCell: (matrixId: string, row: number, col: number, value: number, persist?: boolean) => void;
   onEditCurveBand: (
@@ -99,6 +103,9 @@ interface MatrixDebugState {
   playhead: number;
   playSpeed: number;
   curveKeyEdits: number;
+  synced: boolean;
+  period: number | null;
+  targetPlayhead: number;
 }
 
 declare global {
@@ -220,6 +227,8 @@ const SPARK_PLAYHEAD_RADIUS = 1.6;
 /** 播放速度惯性：0→1 加速 0.35s；1→0 减速 0.28s。 */
 const PLAY_ACCEL_SECONDS = 0.35;
 const PLAY_DECEL_SECONDS = 0.28;
+/** 与运行时 tick 同步时，播放头用约 0.35s 平滑追随（480ms 一跳变连续）。 */
+const SYNCED_FOLLOW_SECONDS = 0.35;
 /** 曲线节点拖尾：最近约 450ms 的位置淡出。 */
 const CURVE_TRAIL_MS = 450;
 const CURVE_TRAIL_ALPHA = 0.36;
@@ -384,6 +393,7 @@ function cellCenter(layout: MatrixLayout, row: number, col: number): { x: number
 export function MatrixField({
   matrices,
   index,
+  tick,
   onCycleMatrix,
   onEditCell,
   onEditCurveBand,
@@ -393,12 +403,14 @@ export function MatrixField({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const matricesRef = useRef<MatrixView[]>(matrices);
   const indexRef = useRef<number>(index);
+  const tickRef = useRef<number>(tick);
   const cycleRef = useRef(onCycleMatrix);
   const editRef = useRef(onEditCell);
   const curveEditRef = useRef(onEditCurveBand);
   const exitRef = useRef(onExit);
   matricesRef.current = matrices;
   indexRef.current = index;
+  tickRef.current = tick;
   cycleRef.current = onCycleMatrix;
   editRef.current = onEditCell;
   curveEditRef.current = onEditCurveBand;
@@ -443,6 +455,12 @@ export function MatrixField({
   const selectedCurveAttr =
     selectedCurveUi === null ? '' : JSON.stringify(selectedCurveUi.map((value) => round4(value)));
   const focusAttr = focusUi ? 'true' : 'false';
+  const periodValue =
+    current && typeof current.period === 'number' && Number.isFinite(current.period) && current.period > 0
+      ? current.period
+      : null;
+  const syncedAttr = periodValue !== null ? 'true' : 'false';
+  const periodAttr = periodValue !== null ? String(periodValue) : '';
   useEffect(() => {
     const hostElement = hostRef.current;
     const canvasElement = canvasRef.current;
@@ -544,6 +562,7 @@ export function MatrixField({
     let playing = true;
     let playhead = 0;
     let playSpeed = 0;
+    let syncedTargetPlayhead = 0;
     let playingUiNow = false;
     let playheadUiNow = 0;
     let playSpeedUiNow = 0;
@@ -1485,8 +1504,16 @@ export function MatrixField({
         selectionX = new Spring(center.x);
         selectionY = new Spring(center.y);
         fadeStart = now;
-        // 有曲线的矩阵自动播放播放头；无曲线则隐藏（t=0、playing=false）。
-        playhead = 0;
+        // 有 curve 的矩阵自动播放播放头；有 period 的矩阵与运行时 tick 同步。
+        const period =
+          typeof matrix.period === 'number' && Number.isFinite(matrix.period) && matrix.period > 0
+            ? matrix.period
+            : null;
+        playSpeed = 0;
+        playhead =
+          period !== null
+            ? (((tickRef.current % period) + period) % period) / period
+            : 0;
         playing = (matrix.curves?.length ?? 0) > 0;
         pushPlayUi(true);
         pushUi(true);
@@ -2460,24 +2487,40 @@ export function MatrixField({
       stepCurveEditor(now, dt);
       stepFocus(now, dt);
 
-      // 播放头：有曲线的矩阵自动 8s 循环；速度 0..1 线性加减速；拖动/滚轮冻结。
+      // 播放头：有 period 的矩阵与运行时 tick 同步；否则保持自由 8s 循环 + 惯性。
       const hasCurves = matrix !== null && (matrix.curves?.length ?? 0) > 0;
       const playFrozen = drag !== null || curveDrag !== null || focusDrag !== null || now < wheelFreezeUntil;
-      const targetSpeed = hasCurves && playing ? 1 : 0;
-      if (playFrozen) {
+      const period =
+        matrix && typeof matrix.period === 'number' && Number.isFinite(matrix.period) && matrix.period > 0
+          ? matrix.period
+          : null;
+      if (period !== null) {
+        // 同步模式：目标 = (tick % period)/period，约 0.35s 平滑追随（跨 1 回绕走最短正向路径）。
+        syncedTargetPlayhead = (((tickRef.current % period) + period) % period) / period;
         playSpeed = 0;
-      } else if (hasCurves) {
-        if (targetSpeed > playSpeed) {
-          playSpeed = Math.min(targetSpeed, playSpeed + dt / PLAY_ACCEL_SECONDS);
-        } else if (targetSpeed < playSpeed) {
-          playSpeed = Math.max(targetSpeed, playSpeed - dt / PLAY_DECEL_SECONDS);
+        if (!playFrozen && playing) {
+          const delta = ((((syncedTargetPlayhead - playhead + 0.5) % 1) + 1) % 1) - 0.5;
+          const factor = 1 - Math.exp(-dt / SYNCED_FOLLOW_SECONDS);
+          playhead = (((playhead + delta * factor) % 1) + 1) % 1;
         }
-      }
-      if (!hasCurves) {
-        playSpeed = 0;
-        playhead = 0;
-      } else if (playSpeed > 0) {
-        playhead = (playhead + (dt / (PLAY_DURATION_MS / 1000)) * playSpeed) % 1;
+      } else {
+        syncedTargetPlayhead = 0;
+        const targetSpeed = hasCurves && playing ? 1 : 0;
+        if (playFrozen) {
+          playSpeed = 0;
+        } else if (hasCurves) {
+          if (targetSpeed > playSpeed) {
+            playSpeed = Math.min(targetSpeed, playSpeed + dt / PLAY_ACCEL_SECONDS);
+          } else if (targetSpeed < playSpeed) {
+            playSpeed = Math.max(targetSpeed, playSpeed - dt / PLAY_DECEL_SECONDS);
+          }
+        }
+        if (!hasCurves) {
+          playSpeed = 0;
+          playhead = 0;
+        } else if (playSpeed > 0) {
+          playhead = (playhead + (dt / (PLAY_DURATION_MS / 1000)) * playSpeed) % 1;
+        }
       }
       pushPlayUi();
       updateCurveKeyVoices(now);
@@ -2586,6 +2629,10 @@ export function MatrixField({
       const matrix = currentMatrix();
       const count = matricesRef.current.length;
       const safe = count > 0 ? clamp(indexRef.current, 0, count - 1) : 0;
+      const period =
+        matrix && typeof matrix.period === 'number' && Number.isFinite(matrix.period) && matrix.period > 0
+          ? matrix.period
+          : null;
       return {
         id: matrix?.id ?? '',
         name: matrix?.name ?? '',
@@ -2624,6 +2671,9 @@ export function MatrixField({
         playhead: Math.round(clamp(playhead, 0, 1) * 10000) / 10000,
         playSpeed: Math.round(clamp(playSpeed, 0, 1) * 1000) / 1000,
         curveKeyEdits: curveKeyEditsNow,
+        synced: period !== null,
+        period,
+        targetPlayhead: Math.round(clamp(syncedTargetPlayhead, 0, 1) * 10000) / 10000,
       };
     }
 
@@ -2756,6 +2806,8 @@ export function MatrixField({
       data-playing={playingUi ? 'true' : 'false'}
       data-playhead={playheadUi.toFixed(4)}
       data-play-speed={playSpeedUi.toFixed(3)}
+      data-synced={syncedAttr}
+      data-period={periodAttr}
       data-curve-key-edits={curveKeyEditsUi}
       style={{
         position: 'absolute',
