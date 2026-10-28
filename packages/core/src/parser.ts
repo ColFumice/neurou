@@ -33,7 +33,7 @@ class ParseError extends Error {}
 
 const RESPONSE_CURVES: ResponseCurve[] = ['线性', '缓入', '缓出', '阶跃'];
 
-const SPECTRUM_INTERPOLATIONS: readonly string[] = ['线性', '平滑'];
+const SPECTRUM_INTERPOLATIONS: readonly string[] = ['线性', '平滑', '阶跃'];
 const SPECTRUM_MODES: readonly string[] = ['固定', '受迫'];
 const SPECTRUM_ARTICULATIONS: readonly string[] = ['拨弦', '持续'];
 

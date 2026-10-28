@@ -13,7 +13,7 @@ export type RuntimeValue = number | boolean | string | Set<string> | null;
 export type SpectrumMode = '固定' | '受迫';
 
 /** 谱的插值方式；运行时按快照里的元数据采样。 */
-export type SpectrumInterpolation = '线性' | '平滑';
+export type SpectrumInterpolation = '线性' | '平滑' | '阶跃';
 
 /**
  * 谱在一局里的可变状态。
@@ -89,7 +89,7 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
     cols: [...ir.cols],
     values: ir.values.map((row) => [...row]),
     curves: (ir.curves ?? []).map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
-    interpolation: ir.interpolation === '平滑' ? '平滑' : '线性',
+    interpolation: ir.interpolation === '平滑' ? '平滑' : ir.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: ir.loop === true,
     ...(ir.period !== undefined ? { period: ir.period } : {}),
     speed: ir.speed ?? 1,
@@ -123,7 +123,7 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
     cols,
     values,
     curves,
-    interpolation: s.interpolation === '平滑' ? '平滑' : '线性',
+    interpolation: s.interpolation === '平滑' ? '平滑' : s.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: s.loop === true,
     ...(period !== undefined ? { period } : {}),
     speed,
@@ -163,6 +163,12 @@ function sampleBands(
 
   const p = loop ? ((position % 1) + 1) % 1 : Math.min(1, Math.max(0, position));
   if (n === 1) return bands[0]!;
+
+  // v2.9：阶跃按 n 个等宽平台保持，不插值。
+  if (interpolation === '阶跃') {
+    const stepIndex = Math.min(n - 1, Math.floor(p * n));
+    return bands[stepIndex]!;
+  }
 
   const x = p * (n - 1);
   const i = Math.floor(x);
@@ -290,7 +296,7 @@ function normalizeSpectrumState(s: SpectrumState): SpectrumState {
     mode: s.mode === '受迫' ? '受迫' : '固定',
     min: validRange ? min : 0,
     max: validRange ? max : 1,
-    interpolation: s.interpolation === '平滑' ? '平滑' : '线性',
+    interpolation: s.interpolation === '平滑' ? '平滑' : s.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: s.loop === true,
   };
 }

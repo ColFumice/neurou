@@ -198,7 +198,7 @@ export interface SpectrumDecl extends DeclBase {
   bands: number[];
   min: number;
   max: number;
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   mode: '固定' | '受迫';
   /** 演奏方式：拨弦（一次性）或持续（按住发声，v2.0.1）。 */
@@ -230,7 +230,7 @@ export interface MatrixDecl extends DeclBase {
   values: number[][];
   curves: MatrixCurveAst[];
   /** 矩阵级插值方式，默认「线性」。 */
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   /** 矩阵级循环开关，默认 false。 */
   loop: boolean;
   /** v2.4：曲线的世界时间周期（拍），供 GUI 播放头与运行时同步；可选。 */

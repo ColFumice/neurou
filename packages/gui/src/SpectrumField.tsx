@@ -23,7 +23,7 @@ export interface SpectrumView {
   bands: number[];
   min: number;
   max: number;
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   mode: '固定' | '受迫';
   /** 演奏方式：拨弦 = 一次性；持续 = 按住循环发声（v2.0.1）。 */
@@ -50,7 +50,7 @@ interface SpectrumDebugState {
   targets: number[];
   selected: number | null;
   hover: number | null;
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   mode: '固定' | '受迫';
   articulation: '拨弦' | '持续';
@@ -344,6 +344,10 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       const count = values.length;
       if (count === 0) return spectrum.min;
       if (count === 1) return values[0] ?? spectrum.min;
+      if (spectrum.interpolation === '阶跃') {
+        const index = Math.min(count - 1, Math.floor(clamp(t, 0, 1) * count));
+        return values[index] ?? spectrum.min;
+      }
       if (spectrum.loop) {
         const scaled = clamp(t, 0, 1) * count;
         const i0 = Math.floor(scaled) % count;
@@ -412,22 +416,34 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       return clamp((value - spectrum.min) / spectrumSpan(spectrum), 0, 1);
     }
 
+    /** 阶跃试听：把 n 个平台值展开成密集阶梯，借现有 one-shot/sustained 波形引擎近似阶跃音色。 */
+    function audioBandsFor(spectrum: SpectrumView, values: readonly number[]): readonly number[] {
+      if (spectrum.interpolation !== '阶跃' || values.length < 2) return values;
+      const expanded: number[] = [];
+      for (const value of values) {
+        for (let repeat = 0; repeat < 12; repeat += 1) expanded.push(value);
+      }
+      return expanded;
+    }
+
+    function audioSmooth(spectrum: SpectrumView): boolean {
+      return spectrum.interpolation === '平滑';
+    }
+
     function startNodeVoice(spectrum: SpectrumView, band: number, value: number): number {
       void audio.ensureStarted();
-      const smooth = spectrum.interpolation === '平滑';
       return audio.startSustainedSpectrum(
-        displayed,
+        audioBandsFor(spectrum, displayed),
         nodeXNorm(spectrum, band),
         nodeYNorm(spectrum, value),
-        smooth,
+        audioSmooth(spectrum),
         spectrum.loop,
       );
     }
 
     function updateNodeVoice(id: number, spectrum: SpectrumView, band: number, value: number): void {
       if (id <= 0) return;
-      const smooth = spectrum.interpolation === '平滑';
-      audio.updateSustainedSpectrum(id, displayed, smooth, spectrum.loop);
+      audio.updateSustainedSpectrum(id, audioBandsFor(spectrum, displayed), audioSmooth(spectrum), spectrum.loop);
       audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
     }
 
@@ -538,7 +554,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       const spectrum = currentSpectrum();
       for (const edit of keyEdits.values()) {
         if (edit.voiceId > 0) {
-          audio.updateSustainedSpectrum(edit.voiceId, displayed, edit.smooth, edit.loop);
+          const bands = spectrum ? audioBandsFor(spectrum, displayed) : displayed;
+          audio.updateSustainedSpectrum(edit.voiceId, bands, edit.smooth, edit.loop);
           if (spectrum) {
             const count = displayed.length;
             const xNorm = count <= 1 ? 0.5 : clamp(bandX(spectrum, edit.band, count) / LOGICAL_W, 0, 1);
@@ -793,19 +810,36 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         ctx.stroke();
       }
 
-      // 曲线（480 点采样）
+      // 曲线：阶跃画等宽平台，线性/平滑按 480 点采样。
       ctx.strokeStyle = rgba(ink, CURVE_ALPHA);
       ctx.lineWidth = CURVE_WIDTH;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.beginPath();
-      for (let step = 0; step <= CURVE_STEPS; step += 1) {
-        const t = step / CURVE_STEPS;
-        const x = PLOT_LEFT + t * (PLOT_RIGHT - PLOT_LEFT);
-        const value = sampleCurve(spectrum, displayed, t);
-        const y = valueToY(spectrum, value);
-        if (step === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      if (spectrum.interpolation === '阶跃' && displayed.length >= 2) {
+        const count = displayed.length;
+        const width = PLOT_RIGHT - PLOT_LEFT;
+        for (let i = 0; i < count; i += 1) {
+          const x0 = PLOT_LEFT + (i / count) * width;
+          const x1 = PLOT_LEFT + ((i + 1) / count) * width;
+          const y = valueToY(spectrum, displayed[i] ?? spectrum.min);
+          if (i === 0) ctx.moveTo(x0, y);
+          else ctx.lineTo(x0, y);
+          ctx.lineTo(x1, y);
+          if (i < count - 1) {
+            const nextY = valueToY(spectrum, displayed[i + 1] ?? spectrum.min);
+            ctx.lineTo(x1, nextY);
+          }
+        }
+      } else {
+        for (let step = 0; step <= CURVE_STEPS; step += 1) {
+          const t = step / CURVE_STEPS;
+          const x = PLOT_LEFT + t * (PLOT_RIGHT - PLOT_LEFT);
+          const value = sampleCurve(spectrum, displayed, t);
+          const y = valueToY(spectrum, value);
+          if (step === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
 
@@ -944,10 +978,10 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         const band = session.band;
         const value = clamp(targets[band] ?? spectrum.min, spectrum.min, spectrum.max);
         audio.previewSpectrum(
-          displayed,
+          audioBandsFor(spectrum, displayed),
           nodeXNorm(spectrum, band),
           nodeYNorm(spectrum, value),
-          spectrum.interpolation === '平滑',
+          audioSmooth(spectrum),
           spectrum.loop,
         );
         return;
@@ -1030,18 +1064,30 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         const now = performance.now();
         auditionMarks.set(event.code, { x: auditionKey.cx, label: auditionKey.label, pressedAt: now, releasedAt: null });
         void audio.ensureStarted();
-        const smooth = spectrum.interpolation === '平滑';
+        const smooth = audioSmooth(spectrum);
         const loop = spectrum.loop;
         const startValue = spectrum.bands[band] ?? value;
         if (spectrum.articulation === '持续') {
           // 持续（拉奏/吹奏）：按住期间 voice 用显示曲线实时换波表。
-          const voiceId = audio.startSustainedSpectrum(displayed, auditionKey.cx / LOGICAL_W, 0.5, smooth, loop);
+          const voiceId = audio.startSustainedSpectrum(
+            audioBandsFor(spectrum, displayed),
+            auditionKey.cx / LOGICAL_W,
+            0.5,
+            smooth,
+            loop,
+          );
           keyEdits.set(event.code, { band, spectrumId: spectrum.id, startValue, voiceId, smooth, loop });
           setSustainedCount(activeVoiceCount());
           syncSustainedVoices(now, true);
         } else {
           // 拨弦：one-shot；仍记录改动，keyup 时持久化。
-          audio.previewSpectrum(displayed, auditionKey.cx / LOGICAL_W, 0.5, smooth, loop);
+          audio.previewSpectrum(
+            audioBandsFor(spectrum, displayed),
+            auditionKey.cx / LOGICAL_W,
+            0.5,
+            smooth,
+            loop,
+          );
           keyEdits.set(event.code, { band, spectrumId: spectrum.id, startValue, voiceId: 0, smooth, loop });
         }
         pushUi();

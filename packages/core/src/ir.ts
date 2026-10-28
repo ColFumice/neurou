@@ -167,7 +167,7 @@ export interface IRSpectrum {
   bands: number[];
   min: number;
   max: number;
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   /** 调制模式：固定（持久叠加）或受迫（每拍衰减回锚点）。 */
   mode: '固定' | '受迫';
@@ -199,7 +199,7 @@ export interface IRMatrix {
   cols: string[];
   values: number[][];
   curves: IRMatrixCurve[];
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   /** v2.4：曲线的世界时间周期（拍）；有它时 GUI 播放头可跟随运行时 tick。 */
   period?: number;

@@ -29,7 +29,7 @@ export interface MatrixView {
   cols: string[];
   values: number[][];
   curves: MatrixCurveView[];
-  interpolation: '线性' | '平滑';
+  interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   /** 运行时拍周期（v2.3.6）：有周期时播放头与 tick 同步。 */
   period?: number;
@@ -143,6 +143,7 @@ interface MatrixDebugState {
   phase: number;
   effectivePhase: number;
   phaseSource: boolean;
+  interpolation: '线性' | '平滑' | '阶跃';
   tick: number;
   curveKeyEdits: number;
   curvePointAdds: number;
@@ -929,6 +930,10 @@ export function MatrixField({
       const count = bands.length;
       if (count === 0) return 0;
       if (count === 1) return clampValue(bands[0] ?? 0);
+      if (matrix.interpolation === '阶跃') {
+        const index = Math.min(count - 1, Math.floor(clamp(t, 0, 1) * count));
+        return clampValue(bands[index] ?? 0);
+      }
       if (matrix.loop) {
         const scaled = clamp(t, 0, 1) * count;
         const i0 = Math.floor(scaled) % count;
@@ -947,6 +952,28 @@ export function MatrixField({
       const a = bands[i0] ?? 0;
       const b = bands[i1] ?? 0;
       return clampValue(a + (b - a) * u);
+    }
+
+    /** 阶跃曲线路径：n 个等宽平台 + 垂直跳变。 */
+    function traceStepPath(
+      values: readonly number[],
+      xStart: number,
+      xEnd: number,
+      yForValue: (value: number) => number,
+    ): void {
+      const count = values.length;
+      if (count === 0) return;
+      const width = xEnd - xStart;
+      ctx.beginPath();
+      for (let i = 0; i < count; i += 1) {
+        const x0 = xStart + (i / count) * width;
+        const x1 = xStart + ((i + 1) / count) * width;
+        const y = yForValue(values[i] ?? 0);
+        if (i === 0) ctx.moveTo(x0, y);
+        else ctx.lineTo(x0, y);
+        ctx.lineTo(x1, y);
+        if (i < count - 1) ctx.lineTo(x1, yForValue(values[i + 1] ?? 0));
+      }
     }
 
     function selectedCurveInfo(matrix: MatrixView | null): MatrixCurveView | null {
@@ -2782,14 +2809,18 @@ export function MatrixField({
         ctx.lineWidth = 1;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.beginPath();
-        for (let step = 0; step <= CURVE_SPARK_SAMPLES; step += 1) {
-          const t = step / CURVE_SPARK_SAMPLES;
-          const sample = sampleCurveBands(matrix, curve.bands, t);
-          const x = lerp(x0, x1, t);
-          const y = lerp(y0, y1, sample);
-          if (step === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+        if (matrix.interpolation === '阶跃') {
+          traceStepPath(curve.bands, x0, x1, (bandValue) => lerp(y0, y1, bandValue));
+        } else {
+          ctx.beginPath();
+          for (let step = 0; step <= CURVE_SPARK_SAMPLES; step += 1) {
+            const t = step / CURVE_SPARK_SAMPLES;
+            const sample = sampleCurveBands(matrix, curve.bands, t);
+            const x = lerp(x0, x1, t);
+            const y = lerp(y0, y1, sample);
+            if (step === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
         }
         ctx.stroke();
         // 播放头：沿 sparkline 移动的小亮点。
@@ -2902,13 +2933,17 @@ export function MatrixField({
       ctx.lineWidth = 1;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.beginPath();
-      for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
-        const ratio = step / CURVE_EDITOR_SAMPLES;
-        const x = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, ratio);
-        const y = curveValueToY(sampleCurveBands(matrix, curveBands, ratio));
-        if (step === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      if (matrix.interpolation === '阶跃') {
+        traceStepPath(curveBands, CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, (value) => curveValueToY(value));
+      } else {
+        ctx.beginPath();
+        for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
+          const ratio = step / CURVE_EDITOR_SAMPLES;
+          const x = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, ratio);
+          const y = curveValueToY(sampleCurveBands(matrix, curveBands, ratio));
+          if (step === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
       }
       ctx.stroke();
 
@@ -2972,13 +3007,19 @@ export function MatrixField({
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.beginPath();
-        for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
-          const ratio = step / CURVE_EDITOR_SAMPLES;
-          const x = lerp(graph.left, graph.right, ratio);
-          const y = lerp(graph.bottom, graph.top, sampleCurveBands(matrix, focusCurveBands, ratio));
-          if (step === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+        if (matrix.interpolation === '阶跃') {
+          traceStepPath(focusCurveBands, graph.left, graph.right, (value) =>
+            lerp(graph.bottom, graph.top, value),
+          );
+        } else {
+          ctx.beginPath();
+          for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
+            const ratio = step / CURVE_EDITOR_SAMPLES;
+            const x = lerp(graph.left, graph.right, ratio);
+            const y = lerp(graph.bottom, graph.top, sampleCurveBands(matrix, focusCurveBands, ratio));
+            if (step === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
         }
         ctx.stroke();
         // 450ms 节点拖尾（大曲线下方）+ 播放头。
@@ -3404,6 +3445,7 @@ export function MatrixField({
         phase: matrixTimePhase(matrix),
         effectivePhase: matrix ? effectivePhaseOf(matrix, tickRef.current) : 0,
         phaseSource: Boolean(matrix?.phaseSource),
+        interpolation: matrix?.interpolation ?? '线性',
         tick: tickRef.current,
         curveKeyEdits: curveKeyEditsNow,
         curvePointAdds: curvePointAddsNow,

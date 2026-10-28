@@ -309,9 +309,9 @@ class Compiler {
     }
 
     let interpolation: IRSpectrum['interpolation'] = d.interpolation;
-    if (interpolation !== '线性' && interpolation !== '平滑') {
+    if (interpolation !== '线性' && interpolation !== '平滑' && interpolation !== '阶跃') {
       this.error('NRO2100', `谱「${d.name}」的插值方式「${String(interpolation)}」无效。`, d.span, {
-        hint: '可用：线性、平滑。',
+        hint: '可用：线性、平滑、阶跃。',
       });
       interpolation = '线性';
     }
