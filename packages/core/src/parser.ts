@@ -636,6 +636,7 @@ class Parser {
       cols: [],
       values: [],
       curves: [],
+      dynamics: [],
       interpolation: '线性',
       loop: false,
       span: this.spanFrom(start),
@@ -765,6 +766,14 @@ class Parser {
             } else {
               decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), ...(curveLoop !== undefined ? { loop: curveLoop } : {}), ...(curveSpeed !== undefined ? { speed: curveSpeed } : {}), ...(curvePhase !== undefined ? { phase: curvePhase } : {}), span });
             }
+            break;
+          }
+          case '动态': {
+            const row = this.readName('行标签');
+            const col = this.readName('列标签');
+            const expr = this.parseExpr();
+            decl.dynamics.push({ row, col, expr, span: this.spanFrom(fieldStart) });
+            this.finishLine();
             break;
           }
           case '插值': {

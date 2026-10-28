@@ -1,4 +1,4 @@
-import type { IRMatrix, IRSpectrum, IRString, WorldIR } from '@neurou/core';
+import type { IRMatrix, IRSpectrum, IRString, LExpr, WorldIR } from '@neurou/core';
 
 /**
  * 运行时状态。
@@ -64,6 +64,8 @@ export interface MatrixCurveState {
   /** v2.15：该格单独的时间速度/相位覆盖。 */
   speed?: number;
   phase?: number;
+  /** v2.19：动态标量表达式。 */
+  dynamics?: { row: string; col: string; expr: LExpr }[];
 }
 
 /**
@@ -81,6 +83,8 @@ export interface MatrixState {
   curves: MatrixCurveState[];
   interpolation: SpectrumInterpolation;
   loop: boolean;
+  /** v2.19：动态标量表达式；读取该格时优先于静态 values。 */
+  dynamics?: { row: string; col: string; expr: LExpr }[];
   /** v2.6：时间轴周期 / 速度 / 相位（随世界进入运行时）。 */
   period?: number;
   speed?: number;
@@ -104,6 +108,7 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
       ...(curve.speed !== undefined ? { speed: curve.speed } : {}),
       ...(curve.phase !== undefined ? { phase: curve.phase } : {}),
     })),
+    ...(ir.dynamics ? { dynamics: ir.dynamics.map((dynamic) => ({ row: dynamic.row, col: dynamic.col, expr: dynamic.expr })) } : {}),
     interpolation: ir.interpolation === '平滑' ? '平滑' : ir.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: ir.loop === true,
     ...(ir.period !== undefined ? { period: ir.period } : {}),
@@ -143,11 +148,17 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
   const period = typeof s.period === 'number' && Number.isFinite(s.period) && s.period > 0 ? s.period : undefined;
   const speed = typeof s.speed === 'number' && Number.isFinite(s.speed) && s.speed > 0 ? s.speed : 1;
   const rawPhase = typeof s.phase === 'number' && Number.isFinite(s.phase) ? s.phase : 0;
+  const dynamics = Array.isArray(s.dynamics)
+    ? s.dynamics
+        .filter((dynamic) => dynamic && typeof dynamic.row === 'string' && typeof dynamic.col === 'string' && dynamic.expr)
+        .map((dynamic) => ({ row: String(dynamic.row), col: String(dynamic.col), expr: dynamic.expr }))
+    : [];
   return {
     rows,
     cols,
     values,
     curves,
+    ...(dynamics.length > 0 ? { dynamics } : {}),
     interpolation: s.interpolation === '平滑' ? '平滑' : s.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: s.loop === true,
     ...(period !== undefined ? { period } : {}),

@@ -216,6 +216,9 @@ export function setMatrixCell(ir: WorldIR, id: string, row: number, col: number,
   if (!Number.isInteger(row) || row < 0 || row >= matrix.rows.length) return fail(`关系谱「${id}」没有第 ${row} 行`);
   if (!Number.isInteger(col) || col < 0 || col >= matrix.cols.length) return fail(`关系谱「${id}」没有第 ${col} 列`);
   if (!Number.isFinite(value)) return fail('关系值必须是有限数字');
+  if (matrix.dynamics?.some((dynamic) => dynamic.row === matrix.rows[row] && dynamic.col === matrix.cols[col])) {
+    return fail('这个格子是动态值格，不能直接手改；请改「动态」表达式或先删除它');
+  }
   const values = matrix.values.map((line, r) => (r === row ? line.map((v, c) => (c === col ? round(value) : v)) : line));
   return { ok: true, ir: { ...ir, matrices: ir.matrices.map((m) => (m.id === id ? { ...m, values } : m)) } };
 }

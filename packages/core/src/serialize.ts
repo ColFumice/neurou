@@ -235,6 +235,9 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
     const phase = curve.phase !== undefined ? `相位 ${numberText(curve.phase)} ` : '';
     w.line(1, `曲线 ${curve.row} ${curve.col} ${interpolation}${loop}${speed}${phase}${bands}`);
   }
+  for (const dynamic of matrix.dynamics ?? []) {
+    w.line(1, `动态 ${dynamic.row} ${dynamic.col} ${exprText(dynamic.expr)}`);
+  }
   if ((matrix.interpolation ?? '线性') !== '线性') w.line(1, `插值 ${matrix.interpolation}`);
   if (matrix.loop) w.line(1, '循环 是');
   if (matrix.period !== undefined) w.line(1, `周期 ${numberText(matrix.period)}`);

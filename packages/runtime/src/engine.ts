@@ -10,7 +10,7 @@ import type {
   IRString,
   WorldIR,
 } from '@neurou/core';
-import { evalExpr, asNumber, truthy } from './eval.js';
+import { evalExpr, asNumber, truthy, matrixCellValue } from './eval.js';
 import {
   type RuntimeValue,
   type SpectrumMode,
@@ -266,8 +266,7 @@ export class Universe {
     const rowIndex = st.rows.indexOf(row);
     const colIndex = st.cols.indexOf(col);
     if (rowIndex < 0 || colIndex < 0) return undefined;
-    const cell = st.values[rowIndex]?.[colIndex];
-    const scalar = typeof cell === 'number' && Number.isFinite(cell) ? cell : 0;
+    const scalar = matrixCellValue(st, row, col, this.state);
     if (position === undefined) return scalar;
     const curve = st.curves.find((c) => c.row === row && c.col === col);
     if (!curve) return scalar;
@@ -771,6 +770,7 @@ export class Universe {
         const r = matrix.rows.indexOf(e.row);
         const c = matrix.cols.indexOf(e.col);
         if (r < 0 || c < 0) continue;
+        if (matrix.dynamics?.some((dynamic) => dynamic.row === e.row && dynamic.col === e.col)) continue;
         const raw = evalExpr(e.value, this.state);
         const n = typeof raw === 'number' ? raw : asNumber(raw);
         const current = matrix.values[r]?.[c] ?? 0;

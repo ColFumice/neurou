@@ -195,6 +195,12 @@ export interface IRMatrixCurve {
   phase?: number;
 }
 
+export interface IRMatrixDynamic {
+  row: string;
+  col: string;
+  expr: LExpr;
+}
+
 /**
  * 关系谱：一张「行 × 列」数值矩阵（v2.1c），v2.3a 起格子可以带时间曲线。
  *
@@ -210,6 +216,8 @@ export interface IRMatrix {
   cols: string[];
   values: number[][];
   curves: IRMatrixCurve[];
+  /** v2.19：动态标量格；有曲线的格子不能再有动态值。 */
+  dynamics?: IRMatrixDynamic[];
   interpolation: '线性' | '平滑' | '阶跃';
   loop: boolean;
   /** v2.4：曲线的世界时间周期（拍）；有它时 GUI 播放头可跟随运行时 tick。 */

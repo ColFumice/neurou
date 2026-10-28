@@ -111,6 +111,7 @@ class Compiler {
   private readonly readBy = new Map<string, Set<string>>();
   private readonly writtenBy = new Map<string, Set<string>>();
   private readonly matrixWrites = new Set<string>();
+  private readonly matrixDynamics = new Set<string>();
   private couplingSeq = 0;
 
   constructor(private readonly source: SourceFile) {}
@@ -531,6 +532,39 @@ class Compiler {
     }
     phase = ((phase % 1) + 1) % 1;
 
+    // v2.19：动态标量格。
+    const dynamicCells: { row: string; col: string; expr: LExpr }[] = [];
+    const seenDynamic = new Set<string>();
+    for (const dynamic of d.dynamics) {
+      if (!d.rows.includes(dynamic.row)) {
+        this.error('NRO2101', `关系谱「${d.name}」的「动态」引用了不存在的行标签「${dynamic.row}」。`, dynamic.span ?? d.span);
+        continue;
+      }
+      if (!d.cols.includes(dynamic.col)) {
+        this.error('NRO2101', `关系谱「${d.name}」的「动态」引用了不存在的列标签「${dynamic.col}」。`, dynamic.span ?? d.span);
+        continue;
+      }
+      const key = `${dynamic.row}\u0000${dynamic.col}`;
+      if (seenDynamic.has(key)) {
+        this.error('NRO2100', `关系谱「${d.name}」的格子「${dynamic.row} × ${dynamic.col}」声明了多条动态值。`, dynamic.span ?? d.span);
+        continue;
+      }
+      if (d.curves.some((curve) => curve.row === dynamic.row && curve.col === dynamic.col)) {
+        this.error('NRO2100', `关系谱「${d.name}」的格子「${dynamic.row} × ${dynamic.col}」不能同时有曲线和动态值。`, dynamic.span ?? d.span, {
+          hint: '二选一：要随时间变化就用曲线，要用表达式就用动态值。',
+        });
+        continue;
+      }
+      seenDynamic.add(key);
+      const lowered = this.lower(dynamic.expr, {});
+      if (lowered.type !== 'number' && lowered.type !== 'any') {
+        this.error('NRO2003', `关系谱「${d.name}」的动态格「${dynamic.row} × ${dynamic.col}」必须是数字表达式。`, dynamic.expr.span);
+        continue;
+      }
+      dynamicCells.push({ row: dynamic.row, col: dynamic.col, expr: lowered.expr });
+    }
+    if (dynamicCells.length > 0) this.matrixDynamics.add(d.name);
+
     const matrix: IRMatrix = {
       id: d.name,
       name: d.name,
@@ -546,6 +580,7 @@ class Compiler {
         ...(curve.speed !== undefined ? { speed: curve.speed } : {}),
         ...(curve.phase !== undefined ? { phase: ((curve.phase % 1) + 1) % 1 } : {}),
       })),
+      ...(dynamicCells.length > 0 ? { dynamics: dynamicCells } : {}),
       interpolation: d.interpolation,
       loop: d.loop,
       ...(period !== undefined ? { period } : {}),
@@ -987,7 +1022,7 @@ class Compiler {
             // 数据，直接折叠成常量；四参数的位置表达式没有可采样的曲线，
             // 因此被忽略（文档语义：无曲线的格子回退到标量值）。
             // v2.17：如果这张矩阵会被规则改动，不能折叠，运行时再读。
-            if (this.matrixWrites.has(matrix.name)) {
+            if (this.matrixWrites.has(matrix.name) || this.matrixDynamics.has(matrix.name)) {
               return {
                 expr: {
                   k: 'call',
@@ -1342,6 +1377,12 @@ class Compiler {
         }
         if (!matrix.cols.includes(e.matrix.col)) {
           this.error('NRO2101', `关系谱「${matrix.name}」没有列标签「${e.matrix.col}」。`, e.span);
+          continue;
+        }
+        if (matrix.dynamics?.some((dynamic) => dynamic.row === e.matrix!.row && dynamic.col === e.matrix!.col)) {
+          this.error('NRO2100', `关系谱「${matrix.name}」的「${e.matrix.row} × ${e.matrix.col}」是动态格，不能被效果写入。`, e.span, {
+            hint: '动态格由「动态 行 列 表达式」计算；要可写请改成普通「段」格。',
+          });
           continue;
         }
         const lowered = e.value ? this.lower(e.value, scope) : { expr: { k: 'const', v: 0 } as LExpr, type: 'any' as TypeName };

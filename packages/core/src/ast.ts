@@ -224,6 +224,14 @@ export interface MatrixCurveAst {
   span?: Span;
 }
 
+/** v2.19：关系谱格子的动态标量表达式（运行期求值）。 */
+export interface MatrixDynamicAst {
+  row: string;
+  col: string;
+  expr: Expr;
+  span?: Span;
+}
+
 /**
  * 关系谱：一张「行 × 列」数值矩阵（v2.1c），v2.3a 起每个格子可以再带一条
  * 时间曲线。
@@ -239,6 +247,8 @@ export interface MatrixDecl extends DeclBase {
   cols: string[];
   values: number[][];
   curves: MatrixCurveAst[];
+  /** v2.19：动态标量格表达式；同一格不能既有曲线又有动态值。 */
+  dynamics: MatrixDynamicAst[];
   /** 矩阵级插值方式，默认「线性」。 */
   interpolation: '线性' | '平滑' | '阶跃';
   /** 矩阵级循环开关，默认 false。 */

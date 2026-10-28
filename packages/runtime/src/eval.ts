@@ -20,7 +20,7 @@ function matrixTimePosition(name: string, state: WorldState, depth = 0): number 
             curve.interpolation ?? source.interpolation,
             curve.loop ?? source.loop,
           )
-        : matrixScalar(source, matrix.phaseSource.row, matrix.phaseSource.col);
+        : matrixCellValue(source, matrix.phaseSource.row, matrix.phaseSource.col, state);
       if (sampled !== undefined && Number.isFinite(sampled)) phase = sampled;
     }
   }
@@ -99,14 +99,14 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           const matrix = state.matrices?.[name];
           if (!matrix || matrix.period === undefined) return 0;
           const curve = matrix.curves.find((candidate) => candidate.row === row && candidate.col === col);
-          if (!curve) return matrixScalar(matrix, row, col);
+          if (!curve) return matrixCellValue(matrix, row, col, state);
           const sampled = sampleMatrixCurve(
             curve,
             matrixTimePosition(name, state),
             curve.interpolation ?? matrix.interpolation,
             curve.loop ?? matrix.loop,
           );
-          return sampled === undefined ? matrixScalar(matrix, row, col) : sampled;
+          return sampled === undefined ? matrixCellValue(matrix, row, col, state) : sampled;
         }
         case '查关系谱': {
           // 三参数读取「段」的标量值；四参数在有曲线时按位置采样。
@@ -119,7 +119,7 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           if (typeof name !== 'string' || typeof row !== 'string' || typeof col !== 'string') return 0;
           const matrix = state.matrices?.[name];
           if (!matrix) return 0;
-          const scalar = matrixScalar(matrix, row, col);
+          const scalar = matrixCellValue(matrix, row, col, state);
           if (args.length < 4) return scalar;
           const curve = matrix.curves.find((c) => c.row === row && c.col === col);
           if (!curve) return scalar;
@@ -137,12 +137,31 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
 }
 
 /** 关系谱某个格子的静态标量值（`段`）；标签不存在或值非有限时为 0。 */
-function matrixScalar(matrix: MatrixState, row: string, col: string): number {
+let matrixEvalDepth = 0;
+
+/** v2.19：读取矩阵格；动态格优先求值表达式，再回退静态标量。 */
+export function matrixCellValue(matrix: MatrixState, row: string, col: string, state: WorldState): number {
+  const dynamic = matrix.dynamics?.find((item) => item.row === row && item.col === col);
+  if (dynamic) {
+    if (matrixEvalDepth >= 8) return 0;
+    matrixEvalDepth += 1;
+    try {
+      const value = evalExpr(dynamic.expr, state);
+      return typeof value === 'number' && Number.isFinite(value) ? value : asNumber(value);
+    } finally {
+      matrixEvalDepth -= 1;
+    }
+  }
   const r = matrix.rows.indexOf(row);
   const c = matrix.cols.indexOf(col);
   if (r < 0 || c < 0) return 0;
   const value = matrix.values[r]?.[c];
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** v2.19：动态格不能被效果写入；这里只是给错误信息用的判断。 */
+export function isDynamicMatrixCell(matrix: MatrixState, row: string, col: string): boolean {
+  return matrix.dynamics?.some((item) => item.row === row && item.col === col) === true;
 }
 
 export function binary(op: string, l: RuntimeValue, r: RuntimeValue): RuntimeValue {
