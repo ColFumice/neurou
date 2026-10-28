@@ -698,14 +698,31 @@ class Parser {
             const rowLabel = this.readName('行标签');
             const colLabel = this.readName('列标签');
             let curveInterpolation: MatrixCurveAst['interpolation'];
-            if (this.atIdent('插值')) {
-              this.advance();
-              const valueStart = this.peek();
-              const value = this.readName('插值方式');
-              if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
-                this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑、阶跃。');
+            let curveLoop: boolean | undefined;
+            while (this.atIdent('插值') || this.atIdent('循环')) {
+              if (this.atIdent('插值')) {
+                this.advance();
+                const valueStart = this.peek();
+                const value = this.readName('插值方式');
+                if (!SPECTRUM_INTERPOLATIONS.includes(value)) {
+                  this.fail(`不认识的插值方式「${value}」。`, valueStart.span, '可用：线性、平滑、阶跃。');
+                } else {
+                  curveInterpolation = value as NonNullable<MatrixCurveAst['interpolation']>;
+                }
               } else {
-                curveInterpolation = value as NonNullable<MatrixCurveAst['interpolation']>;
+                this.advance();
+                if (this.atIdent('是') || this.atIdent('真')) {
+                  this.advance();
+                  curveLoop = true;
+                } else if (this.atIdent('否') || this.atIdent('假')) {
+                  this.advance();
+                  curveLoop = false;
+                } else {
+                  const t = this.peek();
+                  this.fail(`「循环」只能写「是」或「否」，但读到了「${t.text}」。`, t.span);
+                  this.skipToLineEnd();
+                  break;
+                }
               }
             }
             const bands: number[] = [];
@@ -737,7 +754,7 @@ class Parser {
                 '例如「曲线 信任 色温 0.1 0.5 0.9」。',
               );
             } else {
-              decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), span });
+              decl.curves.push({ row: rowLabel, col: colLabel, bands, ...(curveInterpolation ? { interpolation: curveInterpolation } : {}), ...(curveLoop !== undefined ? { loop: curveLoop } : {}), span });
             }
             break;
           }

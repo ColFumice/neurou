@@ -186,6 +186,8 @@ export interface IRMatrixCurve {
   bands: number[];
   /** v2.12：该格插值覆盖；未设时沿用矩阵级插值。 */
   interpolation?: '线性' | '平滑' | '阶跃';
+  /** v2.14：该格循环覆盖；未设时沿用矩阵级循环。 */
+  loop?: boolean;
 }
 
 /**

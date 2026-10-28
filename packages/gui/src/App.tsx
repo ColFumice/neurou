@@ -585,6 +585,7 @@ export function App() {
       col: c.col,
       bands: [...c.bands],
       ...(c.interpolation ? { interpolation: c.interpolation } : {}),
+      ...(c.loop !== undefined ? { loop: c.loop } : {}),
     })),
     interpolation: m.interpolation,
     loop: m.loop,

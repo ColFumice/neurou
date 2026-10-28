@@ -539,6 +539,7 @@ class Compiler {
         col: curve.col,
         bands: [...curve.bands],
         ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
+        ...(curve.loop !== undefined ? { loop: curve.loop } : {}),
       })),
       interpolation: d.interpolation,
       loop: d.loop,

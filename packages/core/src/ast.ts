@@ -213,6 +213,8 @@ export interface MatrixCurveAst {
   bands: number[];
   /** v2.12：该格单独覆盖矩阵级插值；未设时沿用矩阵的插值。 */
   interpolation?: '线性' | '平滑' | '阶跃';
+  /** v2.14：该格单独覆盖矩阵级循环；未设时沿用矩阵的循环。 */
+  loop?: boolean;
   span?: Span;
 }
 

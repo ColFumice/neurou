@@ -22,6 +22,8 @@ export interface MatrixCurveView {
   bands: number[];
   /** v2.10：单条曲线的插值覆盖（缺省跟随矩阵）。 */
   interpolation?: '线性' | '平滑' | '阶跃';
+  /** v2.11：单条曲线的循环覆盖（缺省跟随矩阵）。 */
+  loop?: boolean;
 }
 
 export interface MatrixView {
@@ -148,6 +150,8 @@ interface MatrixDebugState {
   interpolation: '线性' | '平滑' | '阶跃';
   selectedCurveInterpolation: '线性' | '平滑' | '阶跃';
   focusCurveInterpolation: '线性' | '平滑' | '阶跃';
+  selectedCurveLoop: boolean;
+  focusCurveLoop: boolean;
   tick: number;
   curveKeyEdits: number;
   curvePointAdds: number;
@@ -820,7 +824,13 @@ export function MatrixField({
       );
       if (!curve || curve.bands.length < 2) return matrixTimePhase(matrix);
       return clamp(
-        sampleCurveBands(sourceMatrix, curve.bands, position, curveInterpolation(sourceMatrix, curve)),
+        sampleCurveBands(
+          sourceMatrix,
+          curve.bands,
+          position,
+          curveInterpolation(sourceMatrix, curve),
+          curveLoopOf(sourceMatrix, curve),
+        ),
         0,
         1,
       );
@@ -940,6 +950,7 @@ export function MatrixField({
       bands: readonly number[],
       t: number,
       interpolation: '线性' | '平滑' | '阶跃' = matrix.interpolation,
+      loop: boolean = matrix.loop,
     ): number {
       const count = bands.length;
       if (count === 0) return 0;
@@ -948,7 +959,7 @@ export function MatrixField({
         const index = Math.min(count - 1, Math.floor(clamp(t, 0, 1) * count));
         return clampValue(bands[index] ?? 0);
       }
-      if (matrix.loop) {
+      if (loop) {
         const scaled = clamp(t, 0, 1) * count;
         const i0 = Math.floor(scaled) % count;
         const i1 = (i0 + 1) % count;
@@ -1009,13 +1020,27 @@ export function MatrixField({
       return curveInterpolation(matrix, curve);
     }
 
+    function curveLoopOf(matrix: MatrixView, curve: MatrixCurveView | null | undefined): boolean {
+      return curve?.loop ?? matrix.loop;
+    }
+
+    function focusCurveLoop(matrix: MatrixView): boolean {
+      const curve = matrix.curves?.find((candidate) => candidate.row === focusRow && candidate.col === focusCol);
+      return curveLoopOf(matrix, curve);
+    }
+
     function curveForCell(matrix: MatrixView, row: string, col: string): MatrixCurveView | null {
       return matrix.curves?.find((curve) => curve.row === row && curve.col === col) ?? null;
     }
 
-    function curvePointX(matrix: MatrixView, index: number, count: number): number {
+    function curvePointX(
+      matrix: MatrixView,
+      index: number,
+      count: number,
+      loop: boolean = curveLoopOf(matrix, selectedCurveInfo(matrix)),
+    ): number {
       if (count <= 1) return (CURVE_EDITOR_LEFT + CURVE_EDITOR_RIGHT) / 2;
-      const ratio = matrix.loop ? index / count : index / (count - 1);
+      const ratio = loop ? index / count : index / (count - 1);
       return lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, clamp(ratio, 0, 1));
     }
 
@@ -1150,10 +1175,15 @@ export function MatrixField({
       };
     }
 
-    function focusCurvePointX(matrix: MatrixView, index: number, count: number): number {
+    function focusCurvePointX(
+      matrix: MatrixView,
+      index: number,
+      count: number,
+      loop: boolean = focusCurveLoop(matrix),
+    ): number {
       const graph = focusGraphRect(focusSpring.value);
       if (count <= 1) return (graph.left + graph.right) / 2;
-      const ratio = matrix.loop ? index / count : index / (count - 1);
+      const ratio = loop ? index / count : index / (count - 1);
       return lerp(graph.left, graph.right, clamp(ratio, 0, 1));
     }
 
@@ -1261,7 +1291,7 @@ export function MatrixField({
           targets: focusCurveTargets,
           bands: focusCurveBands,
           smooth: focusCurveInterpolation(matrix) === '平滑',
-          loop: matrix.loop,
+          loop: focusCurveLoop(matrix),
         };
       }
       const curve = selectedCurveInfo(matrix);
@@ -1275,7 +1305,7 @@ export function MatrixField({
           targets: curveTargets,
           bands: curveBands,
           smooth: curveInterpolation(matrix, curve) === '平滑',
-          loop: matrix.loop,
+          loop: curveLoopOf(matrix, curve),
         };
       }
       return null;
@@ -1534,12 +1564,13 @@ export function MatrixField({
           ? focusCurveInterpolation(matrix)
           : curveInterpolation(matrix, selectedCurveInfo(matrix));
       void audio.ensureStarted();
+      const loop = context === 'focus' ? focusCurveLoop(matrix) : curveLoopOf(matrix, selectedCurveInfo(matrix));
       return audio.startSustainedSpectrum(
         bands,
         curveVoiceXNorm(index, bands.length),
         clampValue(value),
         mode === '平滑',
-        matrix.loop,
+        loop,
       );
     }
 
@@ -1552,7 +1583,8 @@ export function MatrixField({
         context === 'focus'
           ? focusCurveInterpolation(matrix)
           : curveInterpolation(matrix, selectedCurveInfo(matrix));
-      audio.updateSustainedSpectrum(id, bands, mode === '平滑', matrix.loop);
+      const loop = context === 'focus' ? focusCurveLoop(matrix) : curveLoopOf(matrix, selectedCurveInfo(matrix));
+      audio.updateSustainedSpectrum(id, bands, mode === '平滑', loop);
       audio.updateSustainedTone(id, curveVoiceXNorm(index, bands.length), clampValue(value));
     }
 
@@ -1626,8 +1658,13 @@ export function MatrixField({
       return false;
     }
 
-    function curveInsertIndex(matrix: MatrixView, count: number, t: number): number {
-      return matrix.loop
+    function curveInsertIndex(
+      matrix: MatrixView,
+      count: number,
+      t: number,
+      loop: boolean = curveLoopOf(matrix, selectedCurveInfo(matrix)),
+    ): number {
+      return loop
         ? clamp(Math.round(t * count), 0, count)
         : clamp(Math.round(t * (count - 1)), 0, count);
     }
@@ -1665,7 +1702,7 @@ export function MatrixField({
       const graph = focusGraphRect(focusSpring.value);
       const count = focusCurveTargets.length;
       const t = clamp((point.x - graph.left) / (graph.right - graph.left), 0, 1);
-      const index = curveInsertIndex(matrix, count, t);
+      const index = curveInsertIndex(matrix, count, t, focusCurveLoop(matrix));
       const value = clampValue((graph.bottom - point.y) / (graph.bottom - graph.top));
       const next = focusCurveTargets.slice();
       next.splice(index, 0, value);
@@ -2850,7 +2887,7 @@ export function MatrixField({
           ctx.beginPath();
           for (let step = 0; step <= CURVE_SPARK_SAMPLES; step += 1) {
             const t = step / CURVE_SPARK_SAMPLES;
-            const sample = sampleCurveBands(matrix, curve.bands, t, curveMode);
+            const sample = sampleCurveBands(matrix, curve.bands, t, curveMode, curveLoopOf(matrix, curve));
             const x = lerp(x0, x1, t);
             const y = lerp(y0, y1, sample);
             if (step === 0) ctx.moveTo(x, y);
@@ -2859,7 +2896,7 @@ export function MatrixField({
         }
         ctx.stroke();
         // 播放头：沿 sparkline 移动的小亮点。
-        const playSample = sampleCurveBands(matrix, curve.bands, playhead, curveMode);
+        const playSample = sampleCurveBands(matrix, curve.bands, playhead, curveMode, curveLoopOf(matrix, curve));
         const playX = lerp(x0, x1, playhead);
         const playY = lerp(y0, y1, playSample);
         ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA * curveAlpha);
@@ -2976,7 +3013,9 @@ export function MatrixField({
         for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
           const ratio = step / CURVE_EDITOR_SAMPLES;
           const x = lerp(CURVE_EDITOR_LEFT, CURVE_EDITOR_RIGHT, ratio);
-          const y = curveValueToY(sampleCurveBands(matrix, curveBands, ratio, curveMode));
+          const y = curveValueToY(
+            sampleCurveBands(matrix, curveBands, ratio, curveMode, curveLoopOf(matrix, selectedCurveInfo(matrix))),
+          );
           if (step === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -3007,7 +3046,13 @@ export function MatrixField({
         ctx.fill();
       }
       // 播放头亮点画在段点之上，保证可见。
-      const playSample = sampleCurveBands(matrix, curveBands, playhead, curveMode);
+      const playSample = sampleCurveBands(
+        matrix,
+        curveBands,
+        playhead,
+        curveMode,
+        curveLoopOf(matrix, selectedCurveInfo(matrix)),
+      );
       ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
       ctx.beginPath();
       ctx.arc(playX, curveValueToY(playSample), PLAYHEAD_DOT_RADIUS, 0, Math.PI * 2);
@@ -3053,7 +3098,11 @@ export function MatrixField({
           for (let step = 0; step <= CURVE_EDITOR_SAMPLES; step += 1) {
             const ratio = step / CURVE_EDITOR_SAMPLES;
             const x = lerp(graph.left, graph.right, ratio);
-            const y = lerp(graph.bottom, graph.top, sampleCurveBands(matrix, focusCurveBands, ratio, focusMode));
+            const y = lerp(
+              graph.bottom,
+              graph.top,
+              sampleCurveBands(matrix, focusCurveBands, ratio, focusMode, focusCurveLoop(matrix)),
+            );
             if (step === 0) ctx.moveTo(x, y);
             else ctx.lineTo(x, y);
           }
@@ -3082,7 +3131,13 @@ export function MatrixField({
           ctx.fill();
         }
         // 聚焦播放头亮点（大曲线继续播放）。
-        const focusPlaySample = sampleCurveBands(matrix, focusCurveBands, playhead, focusMode);
+        const focusPlaySample = sampleCurveBands(
+          matrix,
+          focusCurveBands,
+          playhead,
+          focusMode,
+          focusCurveLoop(matrix),
+        );
         ctx.fillStyle = rgba(LABEL_RGB, PLAYHEAD_DOT_ALPHA);
         ctx.beginPath();
         ctx.arc(playX, lerp(graph.bottom, graph.top, focusPlaySample), PLAYHEAD_DOT_RADIUS + 0.6, 0, Math.PI * 2);
@@ -3487,6 +3542,8 @@ export function MatrixField({
           ? curveInterpolation(matrix, selectedCurveInfo(matrix))
           : '线性',
         focusCurveInterpolation: matrix ? focusCurveInterpolation(matrix) : '线性',
+        selectedCurveLoop: matrix ? curveLoopOf(matrix, selectedCurveInfo(matrix)) : true,
+        focusCurveLoop: matrix ? focusCurveLoop(matrix) : true,
         tick: tickRef.current,
         curveKeyEdits: curveKeyEditsNow,
         curvePointAdds: curvePointAddsNow,
@@ -3547,7 +3604,13 @@ export function MatrixField({
         const matrix = currentMatrix();
         const curve = selectedCurveInfo(matrix);
         if (!matrix || !curve) return 0;
-        return sampleCurveBands(matrix, curve.bands, t, curveInterpolation(matrix, curve));
+        return sampleCurveBands(
+          matrix,
+          curve.bands,
+          t,
+          curveInterpolation(matrix, curve),
+          curveLoopOf(matrix, curve),
+        );
       },
       labelPositions: () => {
         const matrix = currentMatrix();

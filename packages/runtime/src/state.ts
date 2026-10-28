@@ -59,6 +59,8 @@ export interface MatrixCurveState {
   bands: number[];
   /** v2.12：该格单独的插值覆盖。 */
   interpolation?: SpectrumInterpolation;
+  /** v2.14：该格单独的循环覆盖。 */
+  loop?: boolean;
 }
 
 /**
@@ -95,6 +97,7 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
       col: curve.col,
       bands: [...curve.bands],
       ...(curve.interpolation ? { interpolation: curve.interpolation } : {}),
+      ...(curve.loop !== undefined ? { loop: curve.loop } : {}),
     })),
     interpolation: ir.interpolation === '平滑' ? '平滑' : ir.interpolation === '阶跃' ? '阶跃' : '线性',
     loop: ir.loop === true,
@@ -123,6 +126,7 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
         ...(curve.interpolation === '平滑' || curve.interpolation === '阶跃' || curve.interpolation === '线性'
           ? { interpolation: curve.interpolation }
           : {}),
+        ...(typeof curve.loop === 'boolean' ? { loop: curve.loop } : {}),
       }))
     : [];
   const period = typeof s.period === 'number' && Number.isFinite(s.period) && s.period > 0 ? s.period : undefined;
