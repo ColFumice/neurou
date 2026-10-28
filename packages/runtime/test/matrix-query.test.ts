@@ -236,6 +236,8 @@ describe('查关系谱：快照 / 恢复 / 分叉携带矩阵数据', () => {
       ],
       interpolation: '平滑',
       loop: true,
+      speed: 1,
+      phase: 0,
     });
     expect(snapshot.matrices?.['折线网']).toMatchObject({
       interpolation: '线性',

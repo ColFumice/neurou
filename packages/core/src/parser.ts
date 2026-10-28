@@ -761,8 +761,18 @@ class Parser {
             this.finishLine();
             break;
           }
+          case '速度': {
+            decl.speed = this.readNumber('速度倍率');
+            this.finishLine();
+            break;
+          }
+          case '相位': {
+            decl.phase = this.readNumber('相位');
+            this.finishLine();
+            break;
+          }
           default:
-            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期。');
+            this.fail(`关系谱里不认识「${key}」这个字段。`, fieldStart.span, '可用字段：行、列、段、曲线、插值、循环、周期、速度、相位。');
             this.skipToLineEnd();
         }
       }

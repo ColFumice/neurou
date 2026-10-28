@@ -61,6 +61,13 @@ export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
           const sampled = sampleSpectrum(st, asNumber(args[1] ?? null));
           return sampled === undefined ? 0 : sampled;
         }
+        case '谱位': {
+          const name = args[0];
+          const matrix = typeof name === 'string' ? state.matrices?.[name] : undefined;
+          if (!matrix || matrix.period === undefined) return 0;
+          const raw = (state.tick / matrix.period) * (matrix.speed ?? 1) + (matrix.phase ?? 0);
+          return ((raw % 1) + 1) % 1;
+        }
         case '查关系谱': {
           // 三参数读取「段」的标量值；四参数在有曲线时按位置采样。
           // 编译期已经校验矩阵/标签并把无曲线格子折叠成常量；这里保留

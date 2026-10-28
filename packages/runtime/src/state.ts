@@ -74,6 +74,10 @@ export interface MatrixState {
   curves: MatrixCurveState[];
   interpolation: SpectrumInterpolation;
   loop: boolean;
+  /** v2.6：时间轴周期 / 速度 / 相位（随世界进入运行时）。 */
+  period?: number;
+  speed?: number;
+  phase?: number;
 }
 
 /** 从 IR 的作者数据生成一份初始矩阵状态（深拷贝，避免共享可变数组）。 */
@@ -85,6 +89,9 @@ export function createMatrixState(ir: IRMatrix): MatrixState {
     curves: (ir.curves ?? []).map((curve) => ({ row: curve.row, col: curve.col, bands: [...curve.bands] })),
     interpolation: ir.interpolation === '平滑' ? '平滑' : '线性',
     loop: ir.loop === true,
+    ...(ir.period !== undefined ? { period: ir.period } : {}),
+    speed: ir.speed ?? 1,
+    phase: ir.phase ?? 0,
   };
 }
 
@@ -105,6 +112,9 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
           : [],
       }))
     : [];
+  const period = typeof s.period === 'number' && Number.isFinite(s.period) && s.period > 0 ? s.period : undefined;
+  const speed = typeof s.speed === 'number' && Number.isFinite(s.speed) && s.speed > 0 ? s.speed : 1;
+  const rawPhase = typeof s.phase === 'number' && Number.isFinite(s.phase) ? s.phase : 0;
   return {
     rows,
     cols,
@@ -112,6 +122,9 @@ function normalizeMatrixState(s: MatrixState): MatrixState {
     curves,
     interpolation: s.interpolation === '平滑' ? '平滑' : '线性',
     loop: s.loop === true,
+    ...(period !== undefined ? { period } : {}),
+    speed,
+    phase: ((rawPhase % 1) + 1) % 1,
   };
 }
 

@@ -203,6 +203,10 @@ export interface IRMatrix {
   loop: boolean;
   /** v2.4：曲线的世界时间周期（拍）；有它时 GUI 播放头可跟随运行时 tick。 */
   period?: number;
+  /** v2.6：时间轴速度倍率，默认 1。 */
+  speed: number;
+  /** v2.6：时间轴相位 0..1，默认 0。 */
+  phase: number;
   span?: Span;
 }
 

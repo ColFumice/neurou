@@ -967,6 +967,7 @@ const matrixRoot = page.locator('[data-testid="matrix-field"]');
 check('F3 进入关系谱矩阵', (await appAttr('data-screen')) === 'matrix' && (await matrixRoot.getAttribute('data-matrix-name')) === '信任网', `${await appAttr('data-screen')}/${await matrixRoot.getAttribute('data-matrix-name')}`);
 const matrixBefore = JSON.parse(String((await matrixRoot.getAttribute('data-cell-values')) ?? '[]'));
 check('关系谱 3×3 初始值正确', matrixBefore.length === 3 && matrixBefore[0]?.length === 3 && Number(matrixBefore[1]?.[1]) === 1, JSON.stringify(matrixBefore));
+check('关系谱默认时间轴速度为 1、相位为 0', Number(await matrixRoot.getAttribute('data-time-speed')) === 1 && Number(await matrixRoot.getAttribute('data-time-phase')) === 0, `${await matrixRoot.getAttribute('data-time-speed')}/${await matrixRoot.getAttribute('data-time-phase')}`);
 // v2.3.2：曲线播放头 / Space 暂停
 const playheadStart = Number(await matrixRoot.getAttribute('data-playhead'));
 await page.waitForTimeout(520);
@@ -1198,6 +1199,24 @@ await page.keyboard.press('p');
 await page.waitForTimeout(900);
 const syncResumed = Number(await syncedRoot.getAttribute('data-playhead'));
 check('同步模式恢复后追上实时 tick', (await syncedRoot.getAttribute('data-playing')) === 'true' && Math.abs(syncResumed - syncPaused2) > 0.01, `${syncPaused2}→${syncResumed}`);
+await page.keyboard.press('F3');
+await page.waitForTimeout(500);
+
+// v2.6：关系谱速度/相位 —— moon-tide 的速度 1.4、相位 0.1
+await page.goto(`${URL}?world=${encodeURIComponent('examples/moon-tide.nro')}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+await page.keyboard.press('F3');
+await page.waitForTimeout(1200);
+const timeSpeed = Number(await matrixRoot.getAttribute('data-time-speed'));
+const timePhase = Number(await matrixRoot.getAttribute('data-time-phase'));
+check('moon-tide 关系谱速度/相位生效', (await matrixRoot.getAttribute('data-synced')) === 'true' && timeSpeed === 1.4 && Math.abs(timePhase - 0.1) < 1e-6, `${timeSpeed}/${timePhase}/${await matrixRoot.getAttribute('data-synced')}`);
+const moonTime = await page.evaluate(() => {
+  const state = window.__neurouMatrix?.state?.();
+  return state ? { tick: state.tick, playhead: state.playhead, speed: state.speed, phase: state.phase } : null;
+});
+const moonTarget = moonTime && moonTime.tick !== undefined ? (((moonTime.tick / 30) * timeSpeed + timePhase) % 1 + 1) % 1 : -1;
+check('moon-tide 播放头跟随速度/相位后的时间轴', moonTime !== null && Math.abs(Number(moonTime.playhead) - moonTarget) < 0.2, JSON.stringify(moonTime) + '/' + moonTarget.toFixed(3));
 await page.keyboard.press('F3');
 await page.waitForTimeout(500);
 

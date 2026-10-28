@@ -235,6 +235,10 @@ export interface MatrixDecl extends DeclBase {
   loop: boolean;
   /** v2.4：曲线的世界时间周期（拍），供 GUI 播放头与运行时同步；可选。 */
   period?: number;
+  /** v2.6：时间轴速度倍率（0.1..8），默认 1。 */
+  speed?: number;
+  /** v2.6：时间轴相位（0..1），默认 0。 */
+  phase?: number;
 }
 
 export type Decl =

@@ -581,6 +581,8 @@ export function App() {
     interpolation: m.interpolation,
     loop: m.loop,
     ...(m.period !== undefined ? { period: m.period } : {}),
+    speed: m.speed ?? 1,
+    phase: m.phase ?? 0,
   }));
 
   const onInject = (kind: StringKind, value: number, persist = false): void => {

@@ -460,6 +460,20 @@ class Compiler {
       period = undefined;
     }
 
+    let speed = d.speed ?? 1;
+    if (!Number.isFinite(speed) || speed <= 0 || speed > 8) {
+      this.error('NRO2100', `关系谱「${d.name}」的速度「${String(d.speed)}」无效：必须是 0..8 之间的正数。`, d.span, {
+        hint: '速度是时间轴倍率，例如「速度 2」表示两倍快。',
+      });
+      speed = 1;
+    }
+    let phase = d.phase ?? 0;
+    if (!Number.isFinite(phase)) {
+      this.error('NRO2100', `关系谱「${d.name}」的相位无效。`, d.span);
+      phase = 0;
+    }
+    phase = ((phase % 1) + 1) % 1;
+
     const matrix: IRMatrix = {
       id: d.name,
       name: d.name,
@@ -470,6 +484,8 @@ class Compiler {
       interpolation: d.interpolation,
       loop: d.loop,
       ...(period !== undefined ? { period } : {}),
+      speed,
+      phase,
       span: d.span,
     };
     this.matrices.push(matrix);
@@ -910,8 +926,34 @@ class Compiler {
               type: 'number',
             };
           }
+          case '谱位': {
+            if (e.args.length !== 1) {
+              this.error('NRO2003', `「谱位」需要一个参数：矩阵名（字符串），现在给了 ${e.args.length} 个。`, e.span, {
+                hint: '例如：谱位("潮汐")。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const nameArg = e.args[0]!;
+            if (nameArg.k !== 'str') {
+              this.error('NRO2003', '「谱位」的参数必须是直接写出的矩阵名字符串。', nameArg.span);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            const matrix = this.matrixByName.get(nameArg.v);
+            if (!matrix) {
+              const hint = suggestName(nameArg.v, [...this.matrixByName.keys()]);
+              this.error('NRO2101', `「谱位」引用了不存在的关系谱「${nameArg.v}」。`, nameArg.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            if (matrix.period === undefined) {
+              this.error('NRO2100', `关系谱「${nameArg.v}」没有「周期」，无法计算时间轴位置。`, nameArg.span, {
+                hint: '先给它加一句「周期 40」。',
+              });
+              return { expr: { k: 'const', v: 0 }, type: 'number' };
+            }
+            return { expr: { k: 'call', fn: '谱位', args: [{ k: 'const', v: matrix.name }] }, type: 'number' };
+          }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱']);
+            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱', '谱位']);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }

@@ -234,6 +234,8 @@ function matrixBlock(w: Writer, matrix: IRMatrix): void {
   if ((matrix.interpolation ?? '线性') !== '线性') w.line(1, `插值 ${matrix.interpolation}`);
   if (matrix.loop) w.line(1, '循环 是');
   if (matrix.period !== undefined) w.line(1, `周期 ${numberText(matrix.period)}`);
+  if ((matrix.speed ?? 1) !== 1) w.line(1, `速度 ${numberText(matrix.speed)}`);
+  if ((matrix.phase ?? 0) !== 0) w.line(1, `相位 ${numberText(matrix.phase)}`);
   w.blank();
 }
 

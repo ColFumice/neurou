@@ -36,4 +36,27 @@ describe('关系谱：周期（v2.4）', () => {
     if (r.ok) return;
     expect(r.diagnostics.errors.some((e) => e.code === 'NRO2100')).toBe(true);
   });
+
+  it('速度/相位可解析、序列化并参与 谱位 表达式（v2.6）', () => {
+    const source = WORLD.replace('周期 40', '周期 40\n  速度 2\n  相位 0.25');
+    const r = compileText(source + '结局 时: 当 谱位("潮汐") > 0.4\n', 'time-axis.nro');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ir.matrices[0]?.speed).toBe(2);
+    expect(r.ir.matrices[0]?.phase).toBe(0.25);
+    const text = serialize(r.ir);
+    expect(text).toContain('速度 2');
+    expect(text).toContain('相位 0.25');
+    expect(text).toContain('谱位("潮汐")');
+  });
+
+  it('谱位 引用无周期矩阵报 NRO2100', () => {
+    const r = compileText(
+      WORLD.replace('  周期 40\n', '') + '结局 时: 当 谱位("潮汐") > 0.4\n',
+      'time-axis-bad.nro',
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.diagnostics.errors.some((e) => e.code === 'NRO2100')).toBe(true);
+  });
 });
