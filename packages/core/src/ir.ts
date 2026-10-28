@@ -72,7 +72,10 @@ export interface IRCoupling {
   to: string;
   /** +1 同向，-1 反向 */
   polarity: 1 | -1;
+  /** 静态强度（无 strengthExpr 时使用）。 */
   strength: number;
+  /** v2.5：运行期求值的强度表达式（例如查关系谱 + 此刻）。 */
+  strengthExpr?: LExpr;
   /** 延迟的拍数 */
   delay: number;
   curve: ResponseCurve;

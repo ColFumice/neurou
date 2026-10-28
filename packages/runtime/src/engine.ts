@@ -425,7 +425,8 @@ export class Universe {
       const targetRange = rangeOf(target, 100);
       const normalized = delta / fromRange;
       const factor = curveFactor(c.curve, Math.abs(normalized));
-      const applied = normalized * c.strength * c.polarity * factor * targetRange;
+      const strength = c.strengthExpr ? asNumber(evalExpr(c.strengthExpr, this.state)) : c.strength;
+      const applied = normalized * strength * c.polarity * factor * targetRange;
       // 下一拍抵达：state.tick 已经指向下一拍。
       this.state.pending.push({ due: this.state.tick + c.delay, id: c.to, delta: applied });
       this.stats.couplingFired.add(c.id);
@@ -831,7 +832,8 @@ export class Universe {
         // 强度 = 源弦归一化变化的多少比例会传到目标弦（再换算到目标弦的量程）。
         const normalized = delta / fromRange;
         const factor = curveFactor(c.curve, Math.abs(normalized));
-        const applied = normalized * c.strength * c.polarity * factor * targetRange;
+        const strength = c.strengthExpr ? asNumber(evalExpr(c.strengthExpr, this.state)) : c.strength;
+        const applied = normalized * strength * c.polarity * factor * targetRange;
         this.state.pending.push({ due: t + 1 + c.delay, id: c.to, delta: applied });
         this.stats.couplingFired.add(c.id);
         this.log({ tick: t, kind: 'coupling', id: `${c.from}→${c.to}`, detail: String(applied) });

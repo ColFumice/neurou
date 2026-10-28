@@ -944,7 +944,18 @@ class Compiler {
         this.error('NRO2107', `「${from}」不能耦合到自己。`, d.span, { hint: '自我的变化请用「回路」表达，回路至少要两根弦。' });
         continue;
       }
-      const strength = d.strength ? this.constNumber(d.strength, '耦合强度', d.span) : 0.2;
+      let staticStrength = 0.2;
+      let strengthExpr: LExpr | undefined;
+      if (d.strength) {
+        const lowered = this.lower(d.strength, {});
+        if (lowered.type !== 'number' && lowered.type !== 'any') {
+          this.error('NRO2003', '耦合强度必须是数字表达式。', d.strength.span);
+        } else {
+          const constant = evalConst(lowered.expr);
+          if (typeof constant === 'number') staticStrength = constant;
+          else strengthExpr = lowered.expr;
+        }
+      }
       const delay = d.delay ? this.constNumber(d.delay, '耦合延迟', d.span) : 0;
       if (delay !== undefined && delay < 0) this.error('NRO2107', '耦合延迟不能是负数。', d.span);
       const guard = this.lowerGuard(d.guard, {}, '耦合');
@@ -953,11 +964,12 @@ class Compiler {
         from,
         to,
         polarity: d.polarity,
-        strength: strength ?? 0.2,
+        strength: staticStrength,
         delay: Math.max(0, delay ?? 0),
         curve: d.curve ?? '线性',
         span: d.span,
       };
+      if (strengthExpr) c.strengthExpr = strengthExpr;
       if (guard) c.guard = guard;
       this.couplings.push(c);
       this.markWritten(to, `耦合 ${from}→${to}`);

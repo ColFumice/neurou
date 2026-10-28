@@ -237,6 +237,7 @@ function couplingStructure(coupling: IRCoupling): string {
     delay: coupling.delay,
     curve: coupling.curve,
     guard: coupling.guard,
+    strengthExpr: coupling.strengthExpr,
     loop: coupling.loop,
   });
 }
@@ -508,6 +509,9 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
     if (couplingStructure(base) !== couplingStructure(edited)) {
       return { ok: false, reason: `耦合「${base.from} → ${base.to}」的极性/延迟/曲线/回路发生变化，需要回退规范序列化` };
     }
+    if (base.strengthExpr) {
+      return { ok: false, reason: `耦合「${base.from} → ${base.to}」的强度是表达式，需要回退规范序列化` };
+    }
     if (Math.abs(base.strength - edited.strength) < 1e-9) continue;
     const result = couplingStrengthEdit(normalized, base, edited.strength);
     if ('error' in result) return { ok: false, reason: result.error };
@@ -518,6 +522,7 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   for (const [key, edited] of editedCouplings) {
     if (baseCouplings.has(key)) continue;
     if (edited.loop) return { ok: false, reason: '还不能把新耦合直接加进回路' };
+    if (edited.strengthExpr) return { ok: false, reason: '表达式强度的新耦合需要回退规范序列化' };
     added.push({ from: edited.from, to: edited.to, polarity: edited.polarity, strength: edited.strength });
     changed.push(`${edited.from}→${edited.to}.added`);
   }
