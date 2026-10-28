@@ -279,6 +279,10 @@ function effectLine(e: IREffect): string {
     const name = e.chord.startsWith('chord:') ? e.chord.slice('chord:'.length) : e.chord;
     return `施加 ${name}`;
   }
+  if ('matrix' in e) {
+    const op = e.k === 'matrixSet' ? '=' : e.k === 'matrixAdd' ? '+=' : '-=';
+    return `关系谱 ${e.matrix} ${e.row} ${e.col} ${op} ${exprText(e.value)}`;
+  }
   const op = e.k === 'set' ? '=' : e.k === 'add' ? '+=' : '-=';
   return `${e.id} ${op} ${exprText(e.value)}`;
 }

@@ -171,6 +171,7 @@ export function scoreEffects(u: Universe, effects: readonly IREffect[], depth = 
       if (chord) score += scoreEffects(u, chord.effects, depth + 1);
       continue;
     }
+    if ('matrix' in e) continue;
     const s = u.strings.get(e.id);
     if (!s) continue;
     if (s.domain.type === 'number') {

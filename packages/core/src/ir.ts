@@ -36,6 +36,7 @@ export type LExpr =
 
 export type IREffect =
   | { k: 'set' | 'add' | 'sub'; id: string; value: LExpr }
+  | { k: 'matrixSet' | 'matrixAdd' | 'matrixSub'; matrix: string; row: string; col: string; value: LExpr }
   | { k: 'apply'; chord: string };
 
 export interface IREntity {

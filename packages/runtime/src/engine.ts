@@ -765,6 +765,20 @@ export class Universe {
         this.log({ tick: this.state.tick, kind: 'chord', id: chord.name, detail: `由 ${source} 施加` });
         continue;
       }
+      if ('matrix' in e) {
+        const matrix = this.state.matrices?.[e.matrix];
+        if (!matrix) continue;
+        const r = matrix.rows.indexOf(e.row);
+        const c = matrix.cols.indexOf(e.col);
+        if (r < 0 || c < 0) continue;
+        const raw = evalExpr(e.value, this.state);
+        const n = typeof raw === 'number' ? raw : asNumber(raw);
+        const current = matrix.values[r]?.[c] ?? 0;
+        const next = e.k === 'matrixSet' ? n : e.k === 'matrixAdd' ? current + n : current - n;
+        matrix.values[r]![c] = next;
+        this.log({ tick: this.state.tick, kind: 'action', id: `${e.matrix} ${e.row}×${e.col}`, detail: `${current} → ${next}` });
+        continue;
+      }
       const s = this.strings.get(e.id);
       if (!s) continue;
       const raw = evalExpr(e.value, this.state);

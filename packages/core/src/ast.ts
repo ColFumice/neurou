@@ -53,6 +53,8 @@ export interface EffectAst {
   target?: string[];
   value?: Expr;
   chord?: string;
+  /** v2.17：直接改关系谱标量格；target 为空。 */
+  matrix?: { name: string; row: string; col: string };
   span: Span;
 }
 

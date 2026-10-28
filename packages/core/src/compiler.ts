@@ -108,6 +108,7 @@ class Compiler {
 
   private readonly readBy = new Map<string, Set<string>>();
   private readonly writtenBy = new Map<string, Set<string>>();
+  private readonly matrixWrites = new Set<string>();
   private couplingSeq = 0;
 
   constructor(private readonly source: SourceFile) {}
@@ -115,6 +116,7 @@ class Compiler {
   compile(): CompileResult {
     this.program = parse(this.source, this.diagnostics);
     this.collect(this.program.decls);
+    this.scanMatrixWrites();
     this.buildCouplings();
     this.buildLoops();
     this.buildRules();
@@ -982,6 +984,21 @@ class Compiler {
             // 三参数，或四参数但该格子没有曲线：矩阵的「段」是静态作者
             // 数据，直接折叠成常量；四参数的位置表达式没有可采样的曲线，
             // 因此被忽略（文档语义：无曲线的格子回退到标量值）。
+            // v2.17：如果这张矩阵会被规则改动，不能折叠，运行时再读。
+            if (this.matrixWrites.has(matrix.name)) {
+              return {
+                expr: {
+                  k: 'call',
+                  fn: '查关系谱',
+                  args: [
+                    { k: 'const', v: matrix.name },
+                    { k: 'const', v: rowArg.v },
+                    { k: 'const', v: colArg.v },
+                  ],
+                },
+                type: 'number',
+              };
+            }
             const cell = matrix.values[rowIndex]?.[colIndex];
             return {
               expr: { k: 'const', v: typeof cell === 'number' && Number.isFinite(cell) ? cell : 0 },
@@ -1275,6 +1292,28 @@ class Compiler {
     this.checkPrecedence();
   }
 
+  /** v2.17：规则/和弦/动作的效果可能改矩阵，先收集，禁止把这些格折叠成常量。 */
+  private scanMatrixWrites(): void {
+    const visit = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      const node = value as Record<string, unknown>;
+      const matrix = node.matrix;
+      if (matrix && typeof matrix === 'object' && !Array.isArray(matrix)) {
+        const name = (matrix as Record<string, unknown>).name;
+        if (typeof name === 'string') this.matrixWrites.add(name);
+      }
+      for (const key of Object.keys(node)) {
+        if (key === 'span') continue;
+        visit(node[key]);
+      }
+    };
+    visit(this.program.decls);
+  }
+
   private lowerEffects(effects: EffectAst[], scope: Scope): IREffect[] {
     const out: IREffect[] = [];
     for (const e of effects) {
@@ -1286,6 +1325,35 @@ class Compiler {
           continue;
         }
         out.push({ k: 'apply', chord: `chord:${e.chord}` });
+        continue;
+      }
+      if (e.matrix) {
+        const matrix = this.matrixByName.get(e.matrix.name);
+        if (!matrix) {
+          const hint = suggestName(e.matrix.name, [...this.matrixByName.keys()]);
+          this.error('NRO2101', `找不到关系谱「${e.matrix.name}」。`, e.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+          continue;
+        }
+        if (!matrix.rows.includes(e.matrix.row)) {
+          this.error('NRO2101', `关系谱「${matrix.name}」没有行标签「${e.matrix.row}」。`, e.span);
+          continue;
+        }
+        if (!matrix.cols.includes(e.matrix.col)) {
+          this.error('NRO2101', `关系谱「${matrix.name}」没有列标签「${e.matrix.col}」。`, e.span);
+          continue;
+        }
+        const lowered = e.value ? this.lower(e.value, scope) : { expr: { k: 'const', v: 0 } as LExpr, type: 'any' as TypeName };
+        if (lowered.type !== 'number' && lowered.type !== 'any') {
+          this.error('NRO2003', `关系谱格「${matrix.name} ${e.matrix.row} ${e.matrix.col}」只能写数字。`, e.span);
+        }
+        out.push({
+          k: e.k === 'set' ? 'matrixSet' : e.k === 'add' ? 'matrixAdd' : 'matrixSub',
+          matrix: matrix.name,
+          row: e.matrix.row,
+          col: e.matrix.col,
+          value: lowered.expr,
+        });
+        this.matrixWrites.add(matrix.name);
         continue;
       }
       if (!e.target) continue;

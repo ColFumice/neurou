@@ -1300,6 +1300,21 @@ class Parser {
       const chord = this.readName('和弦名');
       return { k: 'apply', chord, span: this.spanFrom(start) };
     }
+    if (this.atIdent('关系谱')) {
+      this.advance();
+      const name = this.readName('关系谱名');
+      const row = this.readName('行标签');
+      const col = this.readName('列标签');
+      const op = this.peek();
+      if (op.kind === 'op' && (op.text === '=' || op.text === '+=' || op.text === '-=')) {
+        this.advance();
+        const value = this.parseExpr();
+        const k = op.text === '=' ? 'set' : op.text === '+=' ? 'add' : 'sub';
+        return { k, matrix: { name, row, col }, value, span: this.spanFrom(start) };
+      }
+      this.fail(`关系谱格「${name} ${row} ${col}」需要一个运算符：=、+= 或 -=。`, op.span, '例如「关系谱 势力网 信任 色温 += 0.1」。');
+      throw new ParseError('unreachable');
+    }
     const target = this.readPath('要改的弦');
     const op = this.peek();
     if (op.kind === 'op' && (op.text === '=' || op.text === '+=' || op.text === '-=')) {
