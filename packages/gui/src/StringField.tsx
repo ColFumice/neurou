@@ -118,11 +118,12 @@ const DUAL_LOW = 0.02;
 const DUAL_HIGH = 0.98;
 
 /** trail（只焦点弦画）。 */
-const TRAIL_DECAY = 0.12;
+const TRAIL_FEED_MS = 180;
+const TRAIL_FADE_TAU_SECONDS = 0.12;
 const TRAIL_ALPHA = 0.5;
 const TRAIL_BLUR_PX = 6;
 const TRAIL_FRAME_BLUR_PX = 1.5;
-const TRAIL_SETTLE_SECONDS = 0.55;
+const TRAIL_SETTLE_SECONDS = 0.6;
 
 /** 总览。 */
 const OVERVIEW_TOP = 90;
@@ -402,6 +403,14 @@ declare global {
         heldMs: number;
       }>;
       rms: () => number;
+      /** v2.17：拖尾层状态（验收/诊断用）。 */
+      trail: () => {
+        active: boolean;
+        settle: number;
+        alphaPixels: number;
+        maxAlpha: number;
+        simResting: boolean;
+      };
     };
   }
 }
@@ -542,6 +551,8 @@ export function StringField({
     let chartTarget = 0;
     let trailActive = false;
     let trailSettle = 0;
+    /** 最近一次用户拨/拖弦的 trail 续画截止时间（此后只衰减不重画）。 */
+    let trailFeedUntil = 0;
     let lastFrame = 0;
     let requestId = 0;
 
@@ -800,6 +811,8 @@ export function StringField({
       trailCanvas.height = pixelHeight;
       scaleX = pixelWidth / LOGICAL_W;
       scaleY = pixelHeight / LOGICAL_H;
+      // DPR/resize 后拖尾画布被重置：同步清空状态，避免旧 feed 继续画。
+      clearTrail();
     }
 
     function pointToLogical(clientX: number, clientY: number): { x: number; y: number } {
@@ -869,10 +882,7 @@ export function StringField({
         const direction: 1 | -1 = delta > 0 ? -1 : 1;
         const geom = i === focusIdx ? focusGeom() : { xL: 0, width: LOGICAL_W };
         sim.pluck({ x: geom.width / 2, y: 0, amplitude, direction, key: null }, profile);
-        if (i === focusIdx) {
-          trailSettle = 0;
-          setRestingUi(false);
-        }
+        if (i === focusIdx) setRestingUi(false);
       }
       lastWorldTick = current.tick;
       prevNorms = current.lanes.map((lane) => lane.norm);
@@ -907,16 +917,22 @@ export function StringField({
       trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
       trailActive = false;
       trailSettle = 0;
+      trailFeedUntil = 0;
     }
 
-    function updateTrail(): void {
+    /** 只衰减：用 destination-out 按帧时间把拖尾擦到透明。 */
+    function fadeTrail(dt: number): void {
       trailCtx.setTransform(1, 0, 0, 1, 0, 0);
       trailCtx.globalCompositeOperation = 'destination-out';
-      trailCtx.globalAlpha = TRAIL_DECAY;
+      trailCtx.globalAlpha = 1 - Math.exp(-Math.max(0, dt) / TRAIL_FADE_TAU_SECONDS);
       trailCtx.fillStyle = '#000000';
       trailCtx.fillRect(0, 0, trailCanvas.width, trailCanvas.height);
       trailCtx.globalAlpha = 1;
       trailCtx.globalCompositeOperation = 'source-over';
+    }
+
+    /** 仅在用户拨/拖弦后的短窗口内续画当前波形；不因世界 tick 无限续命。 */
+    function drawTrail(): void {
       trailCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       const sim = sims[focusIdx];
       if (!sim) return;
@@ -928,6 +944,11 @@ export function StringField({
       strokeFocus(trailCtx, trailDispBuf, TRAIL_ALPHA * 0.38, false);
       trailCtx.filter = 'none';
       trailCtx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+
+    function feedTrail(ms = TRAIL_FEED_MS): void {
+      trailFeedUntil = Math.max(trailFeedUntil, performance.now() + ms);
+      trailSettle = 0;
     }
 
     /* —— 绘制基础 —— */
@@ -1697,7 +1718,7 @@ export function StringField({
         );
       }
       if (resonantNow) chordOnPluck(center01, amplitude);
-      trailSettle = 0;
+      feedTrail();
       setRestingUi(false);
     }
 
@@ -1715,7 +1736,7 @@ export function StringField({
       );
       bumpPlucks();
       audioBegin(lane.kind, 0.5, 0.5, 0.5, 1 / spanNow, lane.timbre);
-      trailSettle = 0;
+      feedTrail();
       setRestingUi(false);
     }
 
@@ -2058,17 +2079,18 @@ export function StringField({
       }
     }
 
-    function updateTrailState(dt: number): void {
-      const sim = sims[focusIdx];
-      if (!sim) return;
-      if (!sim.resting()) {
-        updateTrail();
+    function updateTrailState(dt: number, now: number): void {
+      // 只有用户拨/拖弦后的短窗口续画；释手后只衰减，不因世界 tick / 弦继续振动无限续命。
+      const feeding = now < trailFeedUntil || drag !== null || mouseHold !== null;
+      if (feeding) {
         trailActive = true;
         trailSettle = 0;
+        fadeTrail(dt);
+        drawTrail();
         return;
       }
       if (!trailActive) return;
-      updateTrail();
+      fadeTrail(dt);
       trailSettle += dt;
       if (trailSettle >= TRAIL_SETTLE_SECONDS) clearTrail();
     }
@@ -2187,7 +2209,7 @@ export function StringField({
 
       if (modeNow === 'strings') {
         stepSims(dt);
-        updateTrailState(dt);
+        updateTrailState(dt, now);
       }
 
       if (modeNow === 'strings' && chartAlpha <= 0) {
@@ -2416,6 +2438,28 @@ export function StringField({
           };
         }),
       linkTarget: () => linkTargetInfo(),
+      trail: () => {
+        const sim = sims[focusIdx];
+        let alphaPixels = 0;
+        let maxAlpha = 0;
+        try {
+          const data = trailCtx.getImageData(0, 0, trailCanvas.width, trailCanvas.height).data;
+          for (let i = 3; i < data.length; i += 4) {
+            const alpha = data[i] ?? 0;
+            if (alpha > 2) alphaPixels += 1;
+            if (alpha > maxAlpha) maxAlpha = alpha;
+          }
+        } catch {
+          /* 调试采样失败不影响画面 */
+        }
+        return {
+          active: trailActive,
+          settle: Math.round(trailSettle * 1000) / 1000,
+          alphaPixels,
+          maxAlpha,
+          simResting: sim ? sim.resting() : true,
+        };
+      },
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
