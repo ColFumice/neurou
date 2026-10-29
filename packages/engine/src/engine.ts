@@ -178,7 +178,13 @@ export class Engine {
     for (const port of this.ir.ports ?? []) {
       const params: Record<string, RuntimeValue> = {};
       for (const param of port.params) params[param.name] = state.values[param.string] ?? null;
-      ports[port.id] = { id: port.id, name: port.name, kind: port.kind, params };
+      ports[port.id] = {
+        id: port.id,
+        name: port.name,
+        kind: port.kind,
+        params,
+        ...(port.texture ? { texture: port.texture } : {}),
+      };
     }
     return {
       scene: this.sceneName,

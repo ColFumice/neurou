@@ -209,6 +209,8 @@ export interface PortDecl extends DeclBase {
   kind: '视觉' | '音频';
   name: string;
   params: PortParam[];
+  /** v5.29：视觉端口的程序化纹理。 */
+  texture?: { pattern: string; scale: number; span: Span };
 }
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */

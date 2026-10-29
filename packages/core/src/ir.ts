@@ -287,6 +287,8 @@ export interface IRPort {
   name: string;
   kind: '视觉' | '音频';
   params: IRPortParam[];
+  /** v5.29：视觉端口的程序化纹理；音频端口没有。 */
+  texture?: { pattern: string; scale: number };
 }
 
 export interface IRScene {

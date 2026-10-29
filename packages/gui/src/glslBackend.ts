@@ -19,6 +19,8 @@ export interface GlslArtifact {
   bindings: GlslBinding[];
   timeUniform: string;
   textureUniform: string;
+  texturePattern: string;
+  textureScale: number;
 }
 
 const VERTEX_SOURCE = `#version 300 es
@@ -61,6 +63,8 @@ export function buildGlslArtifact(port: BackendPortFrame): GlslArtifact {
     })),
     timeUniform: 'uTime',
     textureUniform: 'uTexture',
+    texturePattern: port.texture?.pattern ?? '棋盘',
+    textureScale: port.texture?.scale ?? 8,
   };
 }
 

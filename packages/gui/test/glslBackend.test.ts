@@ -8,6 +8,7 @@ describe('GLSL 后端（v5.7）', () => {
       name: '雨幕',
       kind: '视觉',
       params: { 强度: 40, 色温: 20, 名字: 'x' },
+      texture: { pattern: '条纹', scale: 6 },
     });
     expect(artifact.fragmentSource).toContain('uniform float u0;');
     expect(artifact.fragmentSource).toContain('uniform float u1;');
@@ -22,5 +23,7 @@ describe('GLSL 后端（v5.7）', () => {
     expect(artifact.fragmentSource).toContain('uniform sampler2D uTexture;');
     expect(artifact.fragmentSource).toContain('texture(uTexture');
     expect(artifact.vertexSource).toContain('out vec2 vUv;');
+    expect(artifact.texturePattern).toBe('条纹');
+    expect(artifact.textureScale).toBe(6);
   });
 });

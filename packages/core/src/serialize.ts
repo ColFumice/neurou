@@ -315,6 +315,7 @@ function sceneBlock(w: Writer, scene: IRScene): void {
 function portBlock(w: Writer, port: IRPort): void {
   w.line(0, `${port.kind}端口 ${port.name}`);
   for (const param of port.params) w.line(1, `参数 ${param.name} ${param.string}`);
+  if (port.texture) w.line(1, `纹理 ${port.texture.pattern} ${numberText(port.texture.scale)}`);
   w.blank();
 }
 

@@ -426,8 +426,15 @@ class Parser {
           };
           decl.params.push(param);
           this.finishLine();
+        } else if (key === '纹理') {
+          const textureStart = this.peek();
+          const pattern = this.readName('纹理图案');
+          let scale = 8;
+          if (!this.atLineEnd()) scale = this.readNumber('纹理尺度');
+          decl.texture = { pattern, scale, span: this.spanFrom(textureStart) };
+          this.finishLine();
         } else {
-          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>。');
+          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>。');
           this.skipToLineEnd();
         }
       }

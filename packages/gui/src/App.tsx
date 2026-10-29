@@ -712,7 +712,13 @@ export function App() {
     for (const port of visualPorts) {
       const params: Record<string, ReturnType<typeof universe.get>> = {};
       for (const param of port.params) params[param.name] = universe.get(param.string);
-      const compiled = compileGlsl({ id: port.id, name: port.name, kind: port.kind, params });
+      const compiled = compileGlsl({
+        id: port.id,
+        name: port.name,
+        kind: port.kind,
+        params,
+        ...(port.texture ? { texture: port.texture } : {}),
+      });
       if (compiled.artifact) artifacts.push(compiled.artifact);
       if (!compiled.result.ok) errors.push(`${port.name}: ${compiled.result.error}`);
     }
@@ -1126,6 +1132,10 @@ export function App() {
       data-glsl-error={glslError}
       data-faust-audio={faustAudioState}
       data-faust-runtime="webaudio-fallback"
+      data-glsl-textures={(worldIR?.ports ?? [])
+        .filter((port) => port.kind === '视觉')
+        .map((port) => port.texture?.pattern ?? '棋盘')
+        .join(',')}
       data-faust-status={faustStatus}
       data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}
       data-faust-error={faustError}

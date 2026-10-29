@@ -52,9 +52,20 @@ export function GlslCanvas({
     const texture = gl.createTexture();
     if (texture) {
       const pixels = new Uint8Array(64 * 64);
+      const scale = Math.max(1, Math.min(64, Math.round(artifact.textureScale)));
       for (let y = 0; y < 64; y++) {
         for (let x = 0; x < 64; x++) {
-          pixels[y * 64 + x] = ((x >> 3) + (y >> 3)) % 2 === 0 ? 40 : 180;
+          let value = 0;
+          if (artifact.texturePattern === '条纹') {
+            value = Math.floor((x * scale) / 64) % 2 === 0 ? 60 : 200;
+          } else if (artifact.texturePattern === '渐变') {
+            value = Math.round((x / 63) * 255);
+          } else if (artifact.texturePattern === '噪点') {
+            value = ((x * 73 + y * 151 + x * y * 17) >>> 0) % 256;
+          } else {
+            value = (Math.floor((x * scale) / 64) + Math.floor((y * scale) / 64)) % 2 === 0 ? 40 : 180;
+          }
+          pixels[y * 64 + x] = value;
         }
       }
       gl.bindTexture(gl.TEXTURE_2D, texture);

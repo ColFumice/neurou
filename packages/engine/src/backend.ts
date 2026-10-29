@@ -13,6 +13,8 @@ export interface BackendPortFrame {
   kind: IRPort['kind'];
   /** 参数名 → 当拍弦值；由 Engine.observe() 投影。 */
   params: Record<string, RuntimeValue>;
+  /** v5.29：视觉端口的程序化纹理规格。 */
+  texture?: IRPort['texture'];
 }
 
 export type BackendCompileResult =
