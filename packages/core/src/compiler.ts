@@ -40,6 +40,7 @@ import type {
   IRLoop,
   IRMatrix,
   IRPhase,
+  IRNamespace,
   IRPort,
   IRRule,
   IRScene,
@@ -125,6 +126,9 @@ class Compiler {
   private readonly systems: IRSystem[] = [];
   private readonly scenes: IRScene[] = [];
   private readonly portDecls: PortDecl[] = [];
+  private readonly namespaceDecls: NamespaceDecl[] = [];
+  private readonly namespaces: IRNamespace[] = [];
+  private readonly exportedQualified = new Set<string>();
   private readonly ports: IRPort[] = [];
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
@@ -140,6 +144,7 @@ class Compiler {
   compile(): CompileResult {
     this.program = parse(this.source, this.diagnostics);
     this.collect(this.program.decls);
+    this.validateNamespaceExports();
     this.scanMatrixWrites();
     this.buildCouplings();
     this.buildLoops();
@@ -164,6 +169,19 @@ class Compiler {
   }
 
   // ---------- 收集 ----------
+
+  /** v5.14：导出清单只能指向命名空间里的弦；短名引用只对导出项生效。 */
+  private validateNamespaceExports(): void {
+    for (const namespace of this.namespaceDecls) {
+      for (const exported of namespace.exports) {
+        if (!this.strings.has(`${namespace.name}.${exported}`)) {
+          this.error('NRO2001', `命名空间「${namespace.name}」导出了不存在的弦「${exported}」。`, namespace.span, {
+            hint: '第一版只允许导出七类弦；系统/场景的导出后置。',
+          });
+        }
+      }
+    }
+  }
 
   /** v5.12：把命名空间内的声明改写为限定名字；引用仍由作者显式限定。 */
   private prefixNamespaceDecl(d: Decl, namespace: string): Decl {
@@ -236,6 +254,9 @@ class Compiler {
           this.declareString(d, undefined);
           break;
         case 'namespace': {
+          this.namespaceDecls.push(d);
+          this.namespaces.push({ name: d.name, exports: [...d.exports] });
+          for (const exported of d.exports) this.exportedQualified.add(`${d.name}.${exported}`);
           for (const child of d.decls) this.collect([this.prefixNamespaceDecl(child, d.name)]);
           break;
         }
@@ -890,6 +911,14 @@ class Compiler {
 
   // ---------- 名字解析 ----------
 
+  private shortNameVisible(id: string, short: string, span: Span): boolean {
+    const string = this.strings.get(id);
+    const namespace = string?.namespace;
+    if (!namespace || this.exportedQualified.has(id)) return true;
+    this.error('NRO2001', `短名「${short}」在命名空间「${namespace}」里未导出；请写全「${id}」或加「导出 ${short}」。`, span);
+    return false;
+  }
+
   private resolve(parts: string[], span: Span, scope: Scope): string | undefined {
     const joined = parts.join('.');
     if (this.strings.has(joined)) {
@@ -901,11 +930,14 @@ class Compiler {
       const cands = this.shortNames.get(short);
       if (cands && cands.length > 0) {
         if (cands.length === 1) {
-          this.markRead(cands[0]!, 'reference');
-          return cands[0]!;
+          const id = cands[0]!;
+          if (!this.shortNameVisible(id, short, span)) return undefined;
+          this.markRead(id, 'reference');
+          return id;
         }
         const ownerCand = scope.owner ? `${scope.owner}.${short}` : undefined;
         if (ownerCand && this.strings.has(ownerCand)) {
+          if (!this.shortNameVisible(ownerCand, short, span)) return undefined;
           this.markRead(ownerCand, 'reference');
           return ownerCand;
         }
@@ -2015,6 +2047,7 @@ class Compiler {
       ...(this.systems.length > 0 ? { systems: this.systems } : {}),
       ...(this.scenes.length > 0 ? { scenes: this.scenes } : {}),
       ...(this.ports.length > 0 ? { ports: this.ports } : {}),
+      ...(this.namespaces.length > 0 ? { namespaces: this.namespaces } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,

@@ -452,6 +452,8 @@ export function serialize(ir: WorldIR): string {
   for (const leftovers of stringsByOwner.values()) globals.push(...leftovers);
   for (const [namespace, strings] of stringsByNamespace) {
     w.line(0, `命名空间 ${namespace}`);
+    const namespaceIR = ir.namespaces?.find((item) => item.name === namespace);
+    for (const exported of namespaceIR?.exports ?? []) w.line(1, `导出 ${exported}`);
     for (const s of strings) stringBlock(w, s, 1);
     w.blank();
   }

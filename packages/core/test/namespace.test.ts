@@ -89,4 +89,29 @@ describe('字符串命名空间（v5.11）', () => {
 `;
     expect(compileText(bad, 'namespace-world.nro').ok).toBe(false);
   });
+
+  it('导出表让短名可见，未导出短名报错', () => {
+    const exported = `世界 导出测试
+  版本 0.1
+
+命名空间 天气
+  导出 雨量
+  叙事弦 雨量
+    类型 数值 0..100
+    基线 40
+
+结局 停: 当 雨量 >= 100
+`;
+    const result = compileText(exported, 'namespace-export.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.namespaces?.[0]).toEqual({ name: '天气', exports: ['雨量'] });
+    const text = serialize(result.ir);
+    expect(text).toContain('导出 雨量');
+    expect(compileText(text, 'namespace-export-roundtrip.nro').ok).toBe(true);
+
+    const privateWorld = exported.replace('  导出 雨量\n', '');
+    const denied = compileText(privateWorld, 'namespace-private.nro');
+    expect(denied.ok).toBe(false);
+  });
 });

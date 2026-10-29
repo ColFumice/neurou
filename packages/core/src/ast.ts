@@ -214,6 +214,7 @@ export interface PortDecl extends DeclBase {
 export interface NamespaceDecl extends DeclBase {
   k: 'namespace';
   name: string;
+  exports: string[];
   decls: Decl[];
 }
 

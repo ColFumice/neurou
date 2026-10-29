@@ -441,6 +441,7 @@ class Parser {
     const start = this.advance();
     const name = this.readName('命名空间名');
     const decls: Decl[] = [];
+    const exports: string[] = [];
     this.finishLine();
     if (this.enterBlock('命名空间')) {
       while (!this.at('dedent') && !this.at('eof')) {
@@ -451,6 +452,15 @@ class Parser {
           this.fail('命名空间里多了一层缩进。', token.span);
           this.skipBlock();
           this.skipNewlines();
+          continue;
+        }
+        if (this.atIdent('导出')) {
+          this.advance();
+          while (!this.atLineEnd()) {
+            exports.push(this.readQualifiedName('导出名'));
+            if (this.at('punct', ',')) this.advance();
+          }
+          this.finishLine();
           continue;
         }
         try {
@@ -472,7 +482,7 @@ class Parser {
     if (decls.length === 0) {
       this.fail(`命名空间「${name}」里没有声明。`, start.span);
     }
-    return { k: 'namespace', name, decls, span: this.spanFrom(start) };
+    return { k: 'namespace', name, exports, decls, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */

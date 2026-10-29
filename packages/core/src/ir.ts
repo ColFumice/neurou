@@ -290,6 +290,12 @@ export interface IRScene {
   span?: Span;
 }
 
+/** v5.14：命名空间导出清单；短名引用只对导出项生效。 */
+export interface IRNamespace {
+  name: string;
+  exports: string[];
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -308,6 +314,8 @@ export interface WorldIR {
   scenes?: IRScene[];
   /** v5.6：视觉/音频后端端口；不是弦网络本体。 */
   ports?: IRPort[];
+  /** v5.14：命名空间导出清单。 */
+  namespaces?: IRNamespace[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];
