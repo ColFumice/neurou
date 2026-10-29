@@ -136,3 +136,37 @@ body {
   letter-spacing: 0.16em;
   font-size: 15px;
 }
+
+/* v4.6：F9 章节路线图（极淡文字，不遮挡操作）。 */
+.chapter-graph {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  max-height: 72vh;
+  overflow: hidden;
+  font-family: var(--serif);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.chapter-graph-node {
+  opacity: 0.24;
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.chapter-graph-node--current {
+  opacity: 0.9;
+}
+
+.chapter-graph-next {
+  opacity: 0.75;
+}

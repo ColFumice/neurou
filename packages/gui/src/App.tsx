@@ -35,6 +35,7 @@ import type { MatrixView } from './MatrixField.js';
 import type { Lane, TimbreCurve, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import { getStringAudio } from './stringAudio.js';
+import { buildChapterGraph, type ChapterGraphNode } from './chapterGraph.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -147,6 +148,12 @@ const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
     text,
   ]),
 );
+const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
+
+function chapterLabel(file: string): string {
+  const node = CHAPTER_GRAPH.find((item) => item.file === file);
+  return node?.title || node?.name || file.replace(/^examples\//, '').replace(/\.nro$/, '');
+}
 
 function bundledSourceFor(file: string): string {
   return BUNDLED_WORLDS[file] ?? bundledSource;
@@ -319,6 +326,8 @@ export function App() {
   const [slotInfos, setSlotInfos] = useState<SlotInfo[]>([]);
   /** v4.5：结局多出口选择。 */
   const [choiceSelected, setChoiceSelected] = useState(0);
+  /** v4.6：F9 章节路线图。 */
+  const [chapterGraphOpen, setChapterGraphOpen] = useState(false);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -618,6 +627,25 @@ export function App() {
     return () => window.removeEventListener('keydown', onSlotKey, true);
   }, [slotMenuOpen, slotSelected]);
 
+  // v4.6：F9 显示章节路线图；Esc/F9 关闭。
+  useEffect(() => {
+    const onGraphKey = (event: KeyboardEvent): void => {
+      if (event.code === 'F9' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        if (!chapterGraphOpen && screenRef.current !== 'strings') return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setChapterGraphOpen((open) => !open);
+        return;
+      }
+      if (!chapterGraphOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.code === 'Escape') setChapterGraphOpen(false);
+    };
+    window.addEventListener('keydown', onGraphKey, true);
+    return () => window.removeEventListener('keydown', onGraphKey, true);
+  }, [chapterGraphOpen]);
+
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
     const audio = getStringAudio();
@@ -910,6 +938,8 @@ export function App() {
       data-prev-chapter={prevChapter}
       data-chapter-choices={chapterChoices.length}
       data-chapter-choice-selected={chapterChoices.length > 1 ? choiceSelected : ''}
+      data-chapter-graph-open={chapterGraphOpen ? 'true' : 'false'}
+      data-chapter-graph-nodes={CHAPTER_GRAPH.length}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
@@ -968,6 +998,22 @@ export function App() {
             >
               {path.replace(/^examples\//, '').replace(/\.nro$/, '')}
             </span>
+          ))}
+        </div>
+      ) : null}
+      {chapterGraphOpen ? (
+        <div className="chapter-graph" data-testid="chapter-graph">
+          {CHAPTER_GRAPH.map((node) => (
+            <div
+              key={node.file}
+              className={`chapter-graph-node${node.file === WORLD_FILE ? ' chapter-graph-node--current' : ''}`}
+              data-chapter-file={node.file}
+            >
+              <span>{chapterLabel(node.file)}</span>
+              {node.next.length > 0 ? (
+                <span className="chapter-graph-next">→ {node.next.map((file) => chapterLabel(file)).join(' / ')}</span>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : null}

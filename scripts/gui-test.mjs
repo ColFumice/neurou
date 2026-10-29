@@ -1590,6 +1590,21 @@ await choicesPage.waitForTimeout(1200);
 check('多出口 Enter 去第二个世界', (await choicesApp.getAttribute('data-world-file')) === 'examples/garden.nro', String(await choicesApp.getAttribute('data-world-file')));
 await choicesPage.close();
 
+// v4.6：F9 章节路线图
+const graphPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await graphPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await graphPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await graphPage.waitForTimeout(700);
+const graphApp = graphPage.locator('[data-testid="ink-app"]');
+await graphPage.keyboard.press('F9');
+await graphPage.waitForTimeout(300);
+check('F9 打开章节路线图', (await graphApp.getAttribute('data-chapter-graph-open')) === 'true' && (await graphPage.locator('[data-testid="chapter-graph"] .chapter-graph-node').count()) >= 13, `${await graphApp.getAttribute('data-chapter-graph-open')}/${await graphPage.locator('[data-testid="chapter-graph"] .chapter-graph-node').count()}`);
+check('章节图高亮当前章节', (await graphPage.locator('[data-chapter-file="examples/garden.nro"]').getAttribute('class'))?.includes('chapter-graph-node--current') === true, '');
+await graphPage.keyboard.press('Escape');
+await graphPage.waitForTimeout(250);
+check('Esc 关闭章节路线图', (await graphApp.getAttribute('data-chapter-graph-open')) === 'false', String(await graphApp.getAttribute('data-chapter-graph-open')));
+await graphPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
