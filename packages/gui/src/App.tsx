@@ -1244,12 +1244,8 @@ export function App() {
 
   /** 弦结构变化后重建 Universe（保留仍在的弦的当前值；新弦从基线开始）。 */
   const rebuildUniverse = (ir: WorldIR): void => {
-    const next = createEngine(ir, { seed: INITIAL_SEED });
-    for (const string of ir.strings) {
-      const value = universe.get(string.id);
-      if (typeof value === 'number') next.inject(string.id, value);
-    }
-    setUniverse(next);
+    if (!universe) return;
+    universe.replaceWorld(ir);
   };
 
   /** Alt+Enter：新增一根同类弦（继承焦点弦的类型/阈值/基线）。 */

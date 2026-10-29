@@ -57,4 +57,25 @@ describe('Engine facade（v5.2）', () => {
     expect(engine.sceneName).toBe('夜');
     expect(engine.get('能量')).toBe(5);
   });
+
+  it('replaceWorld 保留 tick/值并补新弦基线', () => {
+    const result = compileText(WORLD, 'engine-facade-hot.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    engine.step();
+    expect(engine.tick).toBe(1);
+    expect(engine.get('能量')).toBe(7);
+
+    const updated = WORLD.replace('  基线 0', '  基线 10').replace(
+      '系统 潮汐',
+      '叙事弦 新弦\n  类型 数值 0..10\n  基线 7\n\n系统 潮汐',
+    );
+    const next = compileText(updated, 'engine-facade-hot-v2.nro');
+    if (!next.ok) throw new Error('compile v2 failed');
+    engine.replaceWorld(next.ir);
+    expect(engine.tick).toBe(1);
+    expect(engine.get('能量')).toBe(7);
+    expect(engine.get('新弦')).toBe(7);
+    expect(engine.sceneName).toBe('夜');
+  });
 });

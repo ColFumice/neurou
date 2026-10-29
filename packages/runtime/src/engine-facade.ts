@@ -6,7 +6,7 @@
  */
 import type { IRRule, WorldIR } from '@neurou/core';
 import { Universe, type EmittedCue, type TickResult, type UniverseOptions } from './engine.js';
-import type { RuntimeValue, WorldState } from './state.js';
+import { cloneState, initialValues, type RuntimeValue, type WorldState } from './state.js';
 
 export interface SceneFrame {
   scene?: string;
@@ -21,13 +21,15 @@ export interface SceneFrame {
 export type EngineListener = (frame: SceneFrame) => void;
 
 export class Engine {
-  readonly ir: WorldIR;
-  private readonly universe: Universe;
+  ir: WorldIR;
+  private universe: Universe;
+  private readonly options: UniverseOptions;
   private readonly listeners = new Set<EngineListener>();
   private lastCues: EmittedCue[] = [];
 
   constructor(ir: WorldIR, options: UniverseOptions = {}) {
     this.ir = ir;
+    this.options = { ...options };
     this.universe = new Universe(ir, options);
   }
 
@@ -109,6 +111,45 @@ export class Engine {
 
   restore(state: WorldState): void {
     this.universe.restore(state);
+    this.emit();
+  }
+
+  /**
+   * v5.5：保 tick 的热替换。值、tick、pending 都保留；
+   * 新弦取基线，消失的弦/规则状态被裁掉。结构编辑不再重建 Engine。
+   */
+  replaceWorld(ir: WorldIR): void {
+    const previous = this.universe.snapshot();
+    const stringIds = new Set(ir.strings.map((item) => item.id));
+    const values = initialValues(ir);
+    for (const [id, value] of Object.entries(previous.values)) {
+      if (stringIds.has(id)) values[id] = value;
+    }
+    const state = cloneState(previous);
+    state.values = values;
+    state.pending = previous.pending.filter((entry) => stringIds.has(entry.id));
+    if (state.ended) {
+      const endingIds = new Set(ir.endings.map((ending) => ending.id));
+      if (!endingIds.has(state.ended.id)) state.ended = null;
+    }
+    const scenes = ir.scenes ?? [];
+    if (scenes.length > 0 && (!state.sceneId || !scenes.some((scene) => scene.id === state.sceneId))) {
+      state.sceneId = scenes[0]!.id;
+    }
+    if (state.spectra) {
+      for (const id of Object.keys(state.spectra)) {
+        if (!ir.spectra.some((spectrum) => spectrum.id === id)) delete state.spectra[id];
+      }
+    }
+    if (state.matrices) {
+      for (const id of Object.keys(state.matrices)) {
+        if (!ir.matrices.some((matrix) => matrix.id === id)) delete state.matrices[id];
+      }
+    }
+    const next = new Universe(ir, this.options);
+    next.restore(state);
+    this.ir = ir;
+    this.universe = next;
     this.emit();
   }
 
