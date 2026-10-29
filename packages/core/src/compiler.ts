@@ -165,6 +165,46 @@ class Compiler {
 
   // ---------- 收集 ----------
 
+  /** v5.12：把命名空间内的声明改写为限定名字；引用仍由作者显式限定。 */
+  private prefixNamespaceDecl(d: Decl, namespace: string): Decl {
+    switch (d.k) {
+      case 'world':
+      case 'namespace':
+        this.error('NRO2004', `命名空间内不能声明${d.k === 'world' ? '世界' : '嵌套命名空间'}。`, d.span);
+        return d;
+      case 'entity': {
+        const name = `${namespace}.${d.name}`;
+        return {
+          ...d,
+          name,
+          strings: d.strings.map((string) => ({ ...string, owner: name })),
+        };
+      }
+      case 'string':
+        return { ...d, namespace: d.namespace ?? namespace };
+      case 'scene':
+        return {
+          ...d,
+          name: `${namespace}.${d.name}`,
+          systems: d.systems.map((system) =>
+            system.includes('.') ? system : `${namespace}.${system}`,
+          ),
+        };
+      case 'bgm':
+        return { ...d, asset: d.asset.includes('.') ? d.asset : `${namespace}.${d.asset}` };
+      case 'coupling':
+      case 'loop':
+        return d;
+      case 'port':
+        return { ...d, name: `${namespace}.${d.name}` };
+      default:
+        if ('name' in d && typeof d.name === 'string') {
+          return { ...d, name: `${namespace}.${d.name}` } as Decl;
+        }
+        return d;
+    }
+  }
+
   private collect(decls: Decl[]): void {
     for (const d of decls) {
       switch (d.k) {
@@ -195,9 +235,10 @@ class Compiler {
         case 'string':
           this.declareString(d, undefined);
           break;
-        case 'namespace':
-          for (const string of d.strings) this.declareString(string, undefined, d.name);
+        case 'namespace': {
+          for (const child of d.decls) this.collect([this.prefixNamespaceDecl(child, d.name)]);
           break;
+        }
         case 'spectrum':
           this.declareSpectrum(d);
           break;
@@ -709,7 +750,8 @@ class Compiler {
   }
 
   private declareString(d: StringDecl, owner: string | undefined, namespace?: string): void {
-    const id = owner ? `${owner}.${d.name}` : namespace ? `${namespace}.${d.name}` : d.name;
+    const scope = namespace ?? d.namespace;
+    const id = owner ? `${owner}.${d.name}` : scope ? `${scope}.${d.name}` : d.name;
     if (this.strings.has(id)) {
       this.error('NRO2004', `弦「${id}」重复声明。`, d.span, { hint: '同一个实体下不能有两根同名的弦。' });
       return;
@@ -773,7 +815,7 @@ class Compiler {
       baseline,
       response: d.response ?? '线性',
       owner,
-      ...(namespace ? { namespace } : {}),
+      ...(scope ? { namespace: scope } : {}),
       target: d.target,
       ...(d.timbre ? { timbre: d.timbre } : {}),
       note: d.note,

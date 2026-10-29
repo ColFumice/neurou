@@ -79,6 +79,8 @@ export interface StringDecl extends DeclBase {
   k: 'string';
   stringKind: StringKind;
   name: string;
+  /** v5.11：编译期由命名空间写入。 */
+  namespace?: string;
   domain?: DomainAst;
   baseline?: Expr;
   verge?: Expr;
@@ -208,11 +210,11 @@ export interface PortDecl extends DeclBase {
   params: PortParam[];
 }
 
-/** v5.11：字符串命名空间；第一版只允许七类弦（不含实体）。 */
+/** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */
 export interface NamespaceDecl extends DeclBase {
   k: 'namespace';
   name: string;
-  strings: StringDecl[];
+  decls: Decl[];
 }
 
 export interface PhaseAst {

@@ -297,7 +297,7 @@ class Parser {
   /** v3.7：音频资产声明。路径校验在编译器（只允许 audio/ 下的一层音频文件）。 */
   private parseAudioAsset(): AudioAssetDecl {
     const start = this.advance(); // 关键字
-    const name = this.readName('音频资产名');
+    const name = this.readQualifiedName('音频资产名');
     const src = this.readString('音频路径');
     this.finishLine();
     return { k: 'audio-asset', name, src, span: this.spanFrom(start) };
@@ -306,7 +306,7 @@ class Parser {
   /** v5.1：系统是运行层调度单元，不是弦。 */
   private parseSystem(): SystemDecl {
     const start = this.advance();
-    const name = this.readName('系统名');
+    const name = this.readQualifiedName('系统名');
     const decl: SystemDecl = {
       k: 'system',
       name,
@@ -367,7 +367,7 @@ class Parser {
   /** v5.1：场景只启用系统 + 进入/离开效果，不拥有弦。 */
   private parseScene(): SceneDecl {
     const start = this.advance();
-    const name = this.readName('场景名');
+    const name = this.readQualifiedName('场景名');
     const decl: SceneDecl = {
       k: 'scene',
       name,
@@ -386,7 +386,7 @@ class Parser {
         const key = this.readName('字段名');
         if (key === '启用') {
           if (this.atIdent('系统')) this.advance();
-          decl.systems.push(this.readName('系统名'));
+          decl.systems.push(this.readQualifiedName('系统名'));
           this.finishLine();
         } else if (key === '进入' || key === '离开') {
           this.finishLine();
@@ -404,7 +404,7 @@ class Parser {
   /** v5.6：后端端口；参数绑定到已有弦，不创造新状态。 */
   private parsePort(kind: '视觉' | '音频'): PortDecl {
     const start = this.advance();
-    const name = this.readName('端口名');
+    const name = this.readQualifiedName('端口名');
     const decl: PortDecl = { k: 'port', kind, name, params: [], span: this.spanFrom(start) };
     this.finishLine();
     if (this.enterBlock('端口声明')) {
@@ -436,18 +436,16 @@ class Parser {
     return decl;
   }
 
-  /** v5.11：字符串命名空间；第一版只接纳七类弦。 */
+  /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */
   private parseNamespace(): NamespaceDecl {
     const start = this.advance();
     const name = this.readName('命名空间名');
-    const strings: StringDecl[] = [];
+    const decls: Decl[] = [];
     this.finishLine();
     if (this.enterBlock('命名空间')) {
       while (!this.at('dedent') && !this.at('eof')) {
-        if (this.at('newline')) {
-          this.advance();
-          continue;
-        }
+        this.skipNewlines();
+        if (this.at('eof') || this.at('dedent')) break;
         if (this.at('indent')) {
           const token = this.advance();
           this.fail('命名空间里多了一层缩进。', token.span);
@@ -455,27 +453,32 @@ class Parser {
           this.skipNewlines();
           continue;
         }
-        const keyword = this.peek();
-        if (keyword.kind === 'ident' && isStringKeyword(keyword.text)) {
-          strings.push(this.parseStringDecl(STRING_KEYWORDS[keyword.text]!, undefined));
-          this.skipNewlines();
-          continue;
+        try {
+          const decl = this.parseDecl();
+          if (!decl) continue;
+          if (decl.k === 'world' || decl.k === 'namespace') {
+            this.fail(`命名空间「${name}」里不能声明 ${decl.k === 'world' ? '世界' : '嵌套命名空间'}。`, decl.span);
+          } else {
+            decls.push(decl);
+          }
+        } catch (error) {
+          if (!(error instanceof ParseError)) throw error;
+          this.recoverTopLevel();
         }
-        this.fail('命名空间里只允许声明七类弦。', keyword.span, '实体/规则/系统等仍写在命名空间外。');
-        this.skipToLineEnd();
+        this.skipNewlines();
       }
       this.exitBlock();
     }
-    if (strings.length === 0) {
-      this.fail(`命名空间「${name}」里没有弦。`, start.span);
+    if (decls.length === 0) {
+      this.fail(`命名空间「${name}」里没有声明。`, start.span);
     }
-    return { k: 'namespace', name, strings, span: this.spanFrom(start) };
+    return { k: 'namespace', name, decls, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */
   private parseBgm(): BgmDecl {
     const start = this.advance(); // 关键字
-    const asset = this.readName('配乐资产名');
+    const asset = this.readQualifiedName('配乐资产名');
     let volume = 0.35;
     let loop = true;
     while (!this.at('newline') && !this.at('eof')) {
@@ -578,6 +581,16 @@ class Parser {
     throw new ParseError('unreachable');
   }
 
+  /** v5.12：声明/引用名字允许带命名空间点号。 */
+  private readQualifiedName(what: string): string {
+    const parts = [this.readName(what)];
+    while (this.at('punct', '.')) {
+      this.advance();
+      parts.push(this.readName(what));
+    }
+    return parts.join('.');
+  }
+
   private readPath(what = '名字'): string[] {
     const parts: string[] = [this.readName(what)];
     while (this.at('punct', '.')) {
@@ -652,7 +665,7 @@ class Parser {
 
   private parseEntity(): EntityDecl {
     const start = this.expect('ident', '实体', '「实体」');
-    const name = this.readName('实体名');
+    const name = this.readQualifiedName('实体名');
     let typeName: string | undefined;
     if (this.atIdent('是')) {
       this.advance();
@@ -715,7 +728,7 @@ class Parser {
    */
   private parseSpectrum(): SpectrumDecl {
     const start = this.advance(); // 关键字
-    const name = this.readName('谱名');
+    const name = this.readQualifiedName('谱名');
     const decl: SpectrumDecl = {
       k: 'spectrum',
       name,
@@ -862,7 +875,7 @@ class Parser {
    */
   private parseMatrix(): MatrixDecl {
     const start = this.advance(); // 关键字
-    const name = this.readName('关系谱名');
+    const name = this.readQualifiedName('关系谱名');
     const decl: MatrixDecl = {
       k: 'matrix',
       name,
@@ -1082,7 +1095,7 @@ class Parser {
 
   private parseStringDecl(stringKind: StringKind, owner: string | undefined): StringDecl {
     const start = this.advance(); // 关键字
-    const name = this.readName('弦名');
+    const name = this.readQualifiedName('弦名');
     const decl: StringDecl = { k: 'string', stringKind, name, owner, span: this.spanFrom(start) };
 
     if (this.eat('punct', ':')) {
@@ -1427,7 +1440,7 @@ class Parser {
 
   private parseForcing(): ForcingDecl {
     const start = this.advance();
-    const name = this.readName('力迫名');
+    const name = this.readQualifiedName('力迫名');
     const decl: ForcingDecl = {
       k: 'forcing',
       name,
@@ -1446,7 +1459,7 @@ class Parser {
 
   private parseChord(): ChordDecl {
     const start = this.advance();
-    const name = this.readName('和弦名');
+    const name = this.readQualifiedName('和弦名');
     const decl: ChordDecl = { k: 'chord', name, effects: [], repeat: false, span: this.spanFrom(start) };
     this.finishLine();
     this.parseRuleBody(decl, false);
@@ -1491,10 +1504,10 @@ class Parser {
           this.finishLine();
           break;
         case '先于': {
-          const names = [this.readName('力迫名')];
+          const names = [this.readQualifiedName('力迫名')];
           while (this.eat('punct', ',') || this.atIdent('和')) {
             if (this.atIdent('和')) this.advance();
-            names.push(this.readName('力迫名'));
+            names.push(this.readQualifiedName('力迫名'));
           }
           (decl as ForcingDecl).before.push(...names);
           this.finishLine();
@@ -1548,16 +1561,16 @@ class Parser {
     const start = this.peek();
     if (this.atIdent('施加')) {
       this.advance();
-      const chord = this.readName('和弦名');
+      const chord = this.readQualifiedName('和弦名');
       return { k: 'apply', chord, span: this.spanFrom(start) };
     }
     if (this.atIdent('切换场景')) {
       this.advance();
-      return { k: 'scene', scene: this.readName('场景名'), span: this.spanFrom(start) };
+      return { k: 'scene', scene: this.readQualifiedName('场景名'), span: this.spanFrom(start) };
     }
     if (this.atIdent('关系谱')) {
       this.advance();
-      const name = this.readName('关系谱名');
+      const name = this.readQualifiedName('关系谱名');
       const row = this.readName('行标签');
       const col = this.readName('列标签');
       const op = this.peek();
@@ -1586,7 +1599,7 @@ class Parser {
 
   private parseAxiom(): AxiomDecl {
     const start = this.advance();
-    const name = this.readName('公理名');
+    const name = this.readQualifiedName('公理名');
     let expr: Expr | undefined;
     if (this.eat('punct', ':')) {
       expr = this.parseExpr();
@@ -1622,7 +1635,7 @@ class Parser {
 
   private parseSignal(): SignalDecl {
     const start = this.advance();
-    const name = this.readName('信号名');
+    const name = this.readQualifiedName('信号名');
     this.finishLine();
     let guard: Expr | undefined;
     const cues: CueAst[] = [];
@@ -1684,7 +1697,7 @@ class Parser {
 
   private parseAction(): ActionDecl {
     const start = this.advance();
-    const name = this.readName('动作名');
+    const name = this.readQualifiedName('动作名');
     const decl: ActionDecl = { k: 'action', name, cost: 1, effects: [], span: this.spanFrom(start) };
     this.finishLine();
     if (this.enterBlock('动作声明')) {
@@ -1733,7 +1746,7 @@ class Parser {
 
   private parseForm(): FormDecl {
     const start = this.advance();
-    const name = this.readName('曲式名');
+    const name = this.readQualifiedName('曲式名');
     this.finishLine();
     const phases: PhaseAst[] = [];
     if (this.enterBlock('曲式声明')) {
@@ -1782,7 +1795,7 @@ class Parser {
 
   private parseEnding(): EndingDecl {
     const start = this.advance();
-    const name = this.readName('结局名');
+    const name = this.readQualifiedName('结局名');
     let guard: Expr | undefined;
     let declNext: string | undefined;
     const declNexts: string[] = [];

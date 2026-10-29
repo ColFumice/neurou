@@ -35,9 +35,58 @@ describe('字符串命名空间（v5.11）', () => {
     expect(result.ir.strings.map((string) => string.id)).toEqual(['天气.雨量']);
   });
 
-  it('命名空间内拒绝非弦声明', () => {
-    const bad = WORLD.replace('  叙事弦 雨量', '  实体 雨\n  叙事弦 雨量');
-    const result = compileText(bad, 'namespace-bad.nro');
-    expect(result.ok).toBe(false);
+  it('v5.12：实体也可进入命名空间', () => {
+    const source = WORLD.replace(
+      '  叙事弦 雨量',
+      '  实体 云\n    叙事弦 密度\n      类型 数值 0..100\n      基线 10\n  叙事弦 雨量',
+    );
+    const result = compileText(source, 'namespace-entity.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.strings.map((string) => string.id)).toContain('天气.云.密度');
+  });
+
+  it('v5.12：规则/系统/场景也可进入命名空间', () => {
+    const source = `世界 全命名空间
+  版本 0.1
+
+命名空间 天气
+  叙事弦 雨量
+    类型 数值 0..100
+    基线 40
+
+  系统 潮汐
+    阶段 传导
+    效果
+      天气.雨量 += 1
+
+  场景 夜
+    启用 系统 潮汐
+
+  力迫 久旱
+    当 天气.雨量 < 20
+    效果
+      天气.雨量 += 5
+
+结局 停: 当 天气.雨量 >= 100
+`;
+    const result = compileText(source, 'namespace-full.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.systems?.[0]?.name).toBe('天气.潮汐');
+    expect(result.ir.scenes?.[0]?.systems).toEqual(['天气.潮汐']);
+    expect(result.ir.rules.find((rule) => rule.kind === 'forcing')?.name).toBe('天气.久旱');
+    const text = serialize(result.ir);
+    expect(compileText(text, 'namespace-full-roundtrip.nro').ok).toBe(true);
+  });
+
+  it('命名空间内拒绝世界与嵌套命名空间', () => {
+    const bad = `世界 外层
+  版本 0.1
+
+命名空间 天气
+  世界 内层
+`;
+    expect(compileText(bad, 'namespace-world.nro').ok).toBe(false);
   });
 });
