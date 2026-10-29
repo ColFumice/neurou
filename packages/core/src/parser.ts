@@ -494,6 +494,7 @@ class Parser {
     const params: string[] = [];
     const paramTypes: (string | null)[] = [];
     const locals: FunctionDecl['locals'] = [];
+    const branches: FunctionDecl['branches'] = [];
     let returnType: string | null = null;
     let body: Expr | undefined;
     this.finishLine();
@@ -529,6 +530,30 @@ class Parser {
           const expr = this.parseExpr();
           locals.push({ name: localName, expr, span: this.spanFrom(localStart) });
           this.finishLine();
+        } else if (key === '当') {
+          const branchStart = this.peek();
+          const cond = this.parseExpr();
+          this.finishLine();
+          let branchBody: Expr | undefined;
+          if (this.enterBlock('当分支')) {
+            while (!this.at('dedent') && !this.at('eof')) {
+              if (this.at('newline')) {
+                this.advance();
+                continue;
+              }
+              const branchKey = this.readName('字段名');
+              if (branchKey === '返回') {
+                branchBody = this.parseExpr();
+                this.finishLine();
+              } else {
+                this.fail('「当」分支里只能写「返回」。', this.peek().span);
+                this.skipToLineEnd();
+              }
+            }
+            this.exitBlock();
+          }
+          if (!branchBody) this.fail('「当」分支需要一个「返回」。', branchStart.span);
+          else branches.push({ cond, body: branchBody, span: this.spanFrom(branchStart) });
         } else if (key === '返回') {
           body = this.parseExpr();
           this.finishLine();
@@ -543,7 +568,7 @@ class Parser {
       this.fail(`函数「${name}」没有「返回」。`, start.span, '纯函数必须返回一个表达式。');
       throw new ParseError('unreachable');
     }
-    return { k: 'function', name, params, paramTypes, returnType, locals, body, span: this.spanFrom(start) };
+    return { k: 'function', name, params, paramTypes, returnType, locals, branches, body, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */

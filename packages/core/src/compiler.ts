@@ -303,6 +303,10 @@ class Compiler {
                 name: local.name,
                 source: this.source.text.slice(local.expr.span.start.offset, local.expr.span.end.offset),
               })),
+              branches: d.branches.map((branch) => ({
+                condSource: this.source.text.slice(branch.cond.span.start.offset, branch.cond.span.end.offset),
+                bodySource: this.source.text.slice(branch.body.span.start.offset, branch.body.span.end.offset),
+              })),
               bodySource: this.source.text.slice(d.body.span.start.offset, d.body.span.end.offset),
             });
           }
@@ -1411,7 +1415,7 @@ class Compiler {
           params.set(decl.params[index]!, type ?? 'any');
         }
       }
-      const lowered = this.lower(this.expandLocals(decl), { params });
+      const lowered = this.lower(this.expandFunction(decl), { params });
       const declaredReturn = decl.returnType ? resolveFunctionType(decl.returnType) : undefined;
       if (decl.returnType && !declaredReturn) {
         this.error('NRO2003', `函数「${name}」的返回类型「${decl.returnType}」无效。`, decl.span, {
@@ -1461,13 +1465,24 @@ class Compiler {
     }
   }
 
-  /** v5.23：按顺序展开局部变量，再代入返回表达式；运行时无局部节点。 */
-  private expandLocals(decl: FunctionDecl): Expr {
+  /** v5.23/v5.24：展开局部变量，再从后往前拼 `当` 分支与最终返回。 */
+  private expandFunction(decl: FunctionDecl): Expr {
     const values = new Map<string, Expr>();
     for (const local of decl.locals) {
       values.set(local.name, this.substituteLocalExpr(local.expr, values));
     }
-    return this.substituteLocalExpr(decl.body, values);
+    let result = this.substituteLocalExpr(decl.body, values);
+    for (let index = decl.branches.length - 1; index >= 0; index--) {
+      const branch = decl.branches[index]!;
+      result = {
+        k: 'if',
+        cond: this.substituteLocalExpr(branch.cond, values),
+        then: this.substituteLocalExpr(branch.body, values),
+        otherwise: result,
+        span: branch.span,
+      };
+    }
+    return result;
   }
 
   private substituteLocalExpr(expr: Expr, values: Map<string, Expr>): Expr {

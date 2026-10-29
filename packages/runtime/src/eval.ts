@@ -55,6 +55,10 @@ export function evalExpr(
     }
     case 'call': {
       const userCall = e.fn.startsWith('用户:');
+      if (e.fn === '选择') {
+        const cond = evalExpr(e.args[0]!, state, params);
+        return truthy(cond) ? evalExpr(e.args[1]!, state, params) : evalExpr(e.args[2]!, state, params);
+      }
       if (userCall) {
         const name = e.fn.slice('用户:'.length);
         const fn = state.functions?.[name];

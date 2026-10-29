@@ -327,6 +327,10 @@ function functionBlock(w: Writer, fn: IRFunction): void {
   w.line(1, `参数 ${params.join(', ')}`);
   if (fn.returnType) w.line(1, `返回类型 ${fn.returnType}`);
   for (const local of fn.locals ?? []) w.line(1, `局部 ${local.name} = ${local.source}`);
+  for (const branch of fn.branches ?? []) {
+    w.line(1, `当 ${branch.condSource}`);
+    w.line(2, `返回 ${branch.bodySource}`);
+  }
   w.line(1, `返回 ${fn.bodySource}`);
   w.blank();
 }

@@ -136,4 +136,44 @@ describe('用户纯函数（v5.17）', () => {
     universe.tick();
     expect(universe.number('值')).toBe(50);
   });
+
+  it('当分支短路返回并可序列化', () => {
+    const source = `世界 分支函数
+  版本 0.1
+
+函数 分类
+  参数 x: 数值
+  返回类型 文本
+  当 x < 5
+    返回 "小"
+  当 x == 5
+    返回 "中"
+  返回 "大"
+
+叙事弦 输入
+  类型 数值 0..10
+  基线 3
+
+叙事弦 结果
+  类型 文本
+  基线 "?"
+
+力迫 判定
+  当 输入 < 5
+  效果
+    结果 = 分类(输入)
+
+结局 停: 当 假
+`;
+    const result = compileText(source, 'function-branches.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const text = serialize(result.ir);
+    expect(text).toContain('当 x < 5');
+    expect(text).toContain('返回 "小"');
+    expect(compileText(text, 'function-branches-roundtrip.nro').ok).toBe(true);
+    const universe = new Universe(result.ir, { seed: 1 });
+    universe.tick();
+    expect(universe.get('结果')).toBe('小');
+  });
 });

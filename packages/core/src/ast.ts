@@ -229,6 +229,8 @@ export interface FunctionDecl extends DeclBase {
   returnType: string | null;
   /** v5.23：函数局部变量，按声明顺序。 */
   locals: FunctionLocal[];
+  /** v5.24：`当 … 返回 …` 的分支，按顺序短路。 */
+  branches: { cond: Expr; body: Expr; span: Span }[];
   body: Expr;
 }
 
