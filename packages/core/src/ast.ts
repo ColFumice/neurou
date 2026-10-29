@@ -216,6 +216,10 @@ export interface FunctionDecl extends DeclBase {
   k: 'function';
   name: string;
   params: string[];
+  /** v5.22：与 params 对齐；null 表示未标注。 */
+  paramTypes: (string | null)[];
+  /** v5.22：返回类型；未标注为 null。 */
+  returnType: string | null;
   body: Expr;
 }
 

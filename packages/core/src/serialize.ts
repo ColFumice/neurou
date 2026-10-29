@@ -317,7 +317,12 @@ function portBlock(w: Writer, port: IRPort): void {
 
 function functionBlock(w: Writer, fn: IRFunction): void {
   w.line(0, `函数 ${fn.name}`);
-  w.line(1, `参数 ${fn.params.join(', ')}`);
+  const params = fn.params.map((param, index) => {
+    const type = fn.paramTypes?.[index];
+    return type ? `${param}: ${type}` : param;
+  });
+  w.line(1, `参数 ${params.join(', ')}`);
+  if (fn.returnType) w.line(1, `返回类型 ${fn.returnType}`);
   w.line(1, `返回 ${fn.bodySource}`);
   w.blank();
 }

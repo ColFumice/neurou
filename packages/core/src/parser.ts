@@ -492,6 +492,8 @@ class Parser {
     const start = this.advance();
     const name = this.readQualifiedName('函数名');
     const params: string[] = [];
+    const paramTypes: (string | null)[] = [];
+    let returnType: string | null = null;
     let body: Expr | undefined;
     this.finishLine();
     if (this.enterBlock('函数声明')) {
@@ -504,15 +506,26 @@ class Parser {
         if (key === '参数') {
           while (!this.atLineEnd()) {
             const param = this.readName('参数名');
-            if (!params.includes(param)) params.push(param);
+            let type: string | null = null;
+            if (this.eat('punct', ':')) type = this.readName('参数类型');
+            const index = params.indexOf(param);
+            if (index < 0) {
+              params.push(param);
+              paramTypes.push(type);
+            } else if (type) {
+              paramTypes[index] = type;
+            }
             if (this.at('punct', ',')) this.advance();
           }
+          this.finishLine();
+        } else if (key === '返回类型') {
+          returnType = this.readName('返回类型');
           this.finishLine();
         } else if (key === '返回') {
           body = this.parseExpr();
           this.finishLine();
         } else {
-          this.fail(`函数里不认识「${key}」。`, this.peek().span, '可用：参数、返回。');
+          this.fail(`函数里不认识「${key}」。`, this.peek().span, '可用：参数、返回类型、返回。');
           this.skipToLineEnd();
         }
       }
@@ -522,7 +535,7 @@ class Parser {
       this.fail(`函数「${name}」没有「返回」。`, start.span, '纯函数必须返回一个表达式。');
       throw new ParseError('unreachable');
     }
-    return { k: 'function', name, params, body, span: this.spanFrom(start) };
+    return { k: 'function', name, params, paramTypes, returnType, body, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */

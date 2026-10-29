@@ -309,6 +309,10 @@ export interface IRFunction {
   id: string;
   name: string;
   params: string[];
+  /** v5.22：与 params 对齐的类型标注；null 表示未标注。 */
+  paramTypes?: (string | null)[];
+  /** v5.22：返回类型标注；null/缺省表示未标注。 */
+  returnType?: string | null;
   bodySource: string;
   /** v5.20：lower 后的函数体（含 param 节点），运行时按函数表查找。 */
   body?: LExpr;

@@ -92,4 +92,31 @@ describe('用户纯函数（v5.17）', () => {
     expect(warnings.map((warning) => warning.message).join(' ')).toContain('废弃');
     expect(warnings.map((warning) => warning.message).join(' ')).not.toContain('夹紧');
   });
+
+  it('参数/返回类型标注可检查并序列化', () => {
+    const source = WORLD.replace(
+      '函数 夹紧\n  参数 x, lo, hi\n  返回 最大(lo, 最小(x, hi))',
+      '函数 夹紧\n  参数 x: 数值, lo: 数值, hi: 数值\n  返回类型 数值\n  返回 最大(lo, 最小(x, hi))',
+    );
+    const result = compileText(source, 'function-typed.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.functions?.[0]?.paramTypes).toEqual(['数值', '数值', '数值']);
+    expect(result.ir.functions?.[0]?.returnType).toBe('数值');
+    const text = serialize(result.ir);
+    expect(text).toContain('参数 x: 数值, lo: 数值, hi: 数值');
+    expect(text).toContain('返回类型 数值');
+    expect(compileText(text, 'function-typed-roundtrip.nro').ok).toBe(true);
+  });
+
+  it('类型不匹配报错', () => {
+    const typed = WORLD.replace(
+      '函数 夹紧\n  参数 x, lo, hi\n  返回 最大(lo, 最小(x, hi))',
+      '函数 夹紧\n  参数 x: 数值, lo: 数值, hi: 数值\n  返回类型 数值\n  返回 最大(lo, 最小(x, hi))',
+    );
+    const badArg = typed.replace('夹紧(值 + 50, 0, 100)', '夹紧(值 + 50, "x", 100)');
+    expect(compileText(badArg, 'function-bad-arg.nro').ok).toBe(false);
+    const badReturn = typed.replace('返回 最大(lo, 最小(x, hi))', '返回 "不是数字"');
+    expect(compileText(badReturn, 'function-bad-return.nro').ok).toBe(false);
+  });
 });

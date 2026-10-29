@@ -70,10 +70,24 @@ export interface CompileResult {
 
 type TypeName = 'number' | 'boolean' | 'text' | 'enum' | 'set' | 'ref' | 'any';
 
+const FUNCTION_TYPE_NAMES: Record<string, TypeName> = {
+  数值: 'number',
+  真假: 'boolean',
+  文本: 'text',
+  枚举: 'enum',
+  集合: 'set',
+  引用: 'ref',
+  任意: 'any',
+};
+
+function resolveFunctionType(raw: string): TypeName | undefined {
+  return FUNCTION_TYPE_NAMES[raw];
+}
+
 interface Scope {
   owner?: string;
-  /** v5.19：函数形参名；只在 lowering 函数体时存在。 */
-  params?: Set<string>;
+  /** v5.19/v5.22：函数形参类型；只在 lowering 函数体时存在。 */
+  params?: Map<string, TypeName>;
 }
 
 const KIND_SOLVER: Record<StringKind, string> = {
@@ -135,6 +149,7 @@ class Compiler {
   private readonly exportedQualified = new Set<string>();
   private readonly functionDecls = new Map<string, FunctionDecl>();
   private readonly functionBodies = new Map<string, LExpr>();
+  private readonly functionReturnTypes = new Map<string, TypeName>();
   private readonly functions: IRFunction[] = [];
   private readonly expandingFunctions = new Set<string>();
   /** v5.21：调用图；'<world>' 代表规则/动作/系统等世界级调用者。 */
@@ -282,6 +297,8 @@ class Compiler {
               id: `function:${d.name}`,
               name: d.name,
               params: [...d.params],
+              paramTypes: [...d.paramTypes],
+              returnType: d.returnType,
               bodySource: this.source.text.slice(d.body.span.start.offset, d.body.span.end.offset),
             });
           }
@@ -1013,7 +1030,7 @@ class Compiler {
       case 'path': {
         const joined = e.parts.join('.');
         if (e.parts.length === 1 && scope.params?.has(joined)) {
-          return { expr: { k: 'param', name: joined }, type: 'any' };
+          return { expr: { k: 'param', name: joined }, type: scope.params.get(joined) ?? 'any' };
         }
         // v2.3：此刻 = 当前拍数（无参内建值，可省略括号）。
         if (joined === '此刻') {
@@ -1076,6 +1093,18 @@ class Compiler {
           }
           const body = this.ensureFunctionBody(user.name, e.span);
           if (!body) return { expr: { k: 'const', v: null }, type: 'any' };
+          for (let index = 0; index < user.params.length; index++) {
+            const raw = user.paramTypes[index] ?? null;
+            const expected = raw ? resolveFunctionType(raw) : 'any';
+            const actual = args[index]!.type;
+            if (expected && expected !== 'any' && actual !== 'any' && !assignable(actual, expected)) {
+              this.error(
+                'NRO2003',
+                `函数「${e.name}」的参数「${user.params[index]!}」需要${typeLabel(expected)}，这里是${typeLabel(actual)}。`,
+                e.args[index]!.span,
+              );
+            }
+          }
           this.recordFunctionCall(this.currentFunction ?? '<world>', user.name);
           return {
             expr: {
@@ -1083,7 +1112,7 @@ class Compiler {
               fn: `用户:${user.name}`,
               args: args.map((arg) => arg.expr),
             },
-            type: 'any',
+            type: this.functionReturnTypes.get(user.name) ?? 'any',
           };
         }
         const argTypes = args.map((a) => a.type);
@@ -1346,11 +1375,35 @@ class Compiler {
     const previousFunction = this.currentFunction;
     this.currentFunction = name;
     try {
-      const body = this.lower(decl.body, { params: new Set(decl.params) }).expr;
-      this.functionBodies.set(name, body);
+      const params = new Map<string, TypeName>();
+      for (let index = 0; index < decl.params.length; index++) {
+        const raw = decl.paramTypes[index] ?? null;
+        const type = raw ? resolveFunctionType(raw) : 'any';
+        if (raw && !type) {
+          this.error('NRO2003', `函数「${name}」的参数「${decl.params[index]!}」类型「${raw}」无效。`, decl.span, {
+            hint: '可用：数值、真假、文本、枚举、集合、引用、任意。',
+          });
+          params.set(decl.params[index]!, 'any');
+        } else {
+          params.set(decl.params[index]!, type ?? 'any');
+        }
+      }
+      const lowered = this.lower(decl.body, { params });
+      const declaredReturn = decl.returnType ? resolveFunctionType(decl.returnType) : undefined;
+      if (decl.returnType && !declaredReturn) {
+        this.error('NRO2003', `函数「${name}」的返回类型「${decl.returnType}」无效。`, decl.span, {
+          hint: '可用：数值、真假、文本、枚举、集合、引用、任意。',
+        });
+      }
+      if (declaredReturn && lowered.type !== 'any' && !assignable(lowered.type, declaredReturn)) {
+        this.error('NRO2003', `函数「${name}」声明返回${typeLabel(declaredReturn)}，实际返回${typeLabel(lowered.type)}。`, decl.body.span);
+      }
+      const returnType = declaredReturn ?? lowered.type;
+      this.functionReturnTypes.set(name, returnType);
+      this.functionBodies.set(name, lowered.expr);
       const irFunction = this.functions.find((fn) => fn.name === name);
-      if (irFunction) irFunction.body = body;
-      return body;
+      if (irFunction) irFunction.body = lowered.expr;
+      return lowered.expr;
     } finally {
       this.currentFunction = previousFunction;
       this.expandingFunctions.delete(name);
