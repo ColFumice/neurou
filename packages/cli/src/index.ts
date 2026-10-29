@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { compileProject, ProjectError, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
+import { compileProject, ProjectError, formatDiagnostic, projectGraph, serialize, type WorldIR } from '@neurou/core';
 import { Engine, createEngine } from '@neurou/engine';
 import {
   ANSI,
@@ -20,6 +20,7 @@ const HELP = `neurou ${VERSION} · 雨若
 
 用法：
   neurou check <文件.nro>                检查一个世界（语法 / 语义 / 体验三级诊断）
+  neurou modules <文件.nro>              打印模块依赖图（引入关系）
   neurou sim <文件.nro> [选项]           跑批量模拟，出音准仪报告
   neurou run <文件.nro> [选项]           进入这个世界，逐拍游玩
   neurou ir <文件.nro> [--out 路径]      导出弦网络图（JSON）
@@ -122,6 +123,27 @@ async function main(): Promise<void> {
     case '--version':
       console.log(VERSION);
       return;
+    case 'modules': {
+      if (!args.file) {
+        console.error('用法：neurou modules <文件.nro>');
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        const graph = projectGraph(args.file, (modulePath) => readFileSync(modulePath, 'utf8'));
+        const byPath = new Map(graph.map((module) => [module.path, module]));
+        const print = (path: string, depth: number): void => {
+          const module = byPath.get(path);
+          console.log(`${'  '.repeat(depth)}${path}`);
+          for (const imported of module?.imports ?? []) print(imported, depth + 1);
+        };
+        print(args.file.replace(/\\/g, '/'), 0);
+      } catch (error) {
+        console.error(error instanceof ProjectError ? error.message : `读不到文件：${args.file}`);
+        process.exitCode = 1;
+      }
+      return;
+    }
     case 'check': {
       if (!args.file) {
         console.error('用法：neurou check <文件.nro>');

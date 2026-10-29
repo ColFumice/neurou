@@ -25,6 +25,8 @@ export {
   compileProject,
   compileProjectFromFiles,
   normalizeProjectPath,
+  projectGraph,
+  type ProjectModule,
   ProjectError,
   type ProjectSources,
 } from './project.js';

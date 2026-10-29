@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileProject, compileProjectFromFiles, ProjectError } from '../src/index.js';
+import { compileProject, compileProjectFromFiles, ProjectError, projectGraph } from '../src/index.js';
 
 const RAIN_MODULE = `叙事弦 雨量
   类型 数值 0..100
@@ -60,5 +60,20 @@ describe('模块/引入（v5.9）', () => {
         'mod.nro': '世界 不能这样\n',
       }),
     ).toThrow(ProjectError);
+  });
+
+  it('v5.15：projectGraph 返回依赖图', () => {
+    const files: Record<string, string> = {
+      'examples/entry3.nro': ENTRY,
+      'examples/lib/tide.nro': TIDE_MODULE,
+      'examples/lib/rain.nro': RAIN_MODULE,
+    };
+    const graph = projectGraph('examples/entry3.nro', (path) => files[path] ?? '');
+    expect(graph.map((module) => module.path)).toEqual([
+      'examples/lib/rain.nro',
+      'examples/lib/tide.nro',
+      'examples/entry3.nro',
+    ]);
+    expect(graph.at(-1)?.imports).toEqual(['examples/lib/tide.nro']);
   });
 });

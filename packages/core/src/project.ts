@@ -84,7 +84,7 @@ export function compileProjectFromFiles(entryPath: string, files: ProjectSources
   return compile(new SourceFile(entry, combined));
 }
 
-/** 带文件读取回调的版本，给 CLI 用；core 本身不做文件 I/O。 */
+/** v5.9：带文件读取回调的版本，给 CLI 用；core 本身不做文件 I/O。 */
 export function compileProject(
   entryPath: string,
   readFile: (path: string) => string,
@@ -112,4 +112,40 @@ export function compileProject(
 
   visit(entry);
   return compileProjectFromFiles(entry, files);
+}
+
+export interface ProjectModule {
+  path: string;
+  imports: string[];
+}
+
+/** v5.15：模块依赖图；入口在前，按深度优先顺序。 */
+export function projectGraph(
+  entryPath: string,
+  readFile: (path: string) => string,
+): ProjectModule[] {
+  const entry = normalizeProjectPath(entryPath);
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const out: ProjectModule[] = [];
+
+  const visit = (path: string): void => {
+    if (visiting.has(path)) throw new ProjectError(`模块循环引入：${path}`);
+    if (visited.has(path)) return;
+    visiting.add(path);
+    let source: string;
+    try {
+      source = readFile(path);
+    } catch {
+      throw new ProjectError(`读不到模块：${path}`);
+    }
+    const imports = importsOf(source).map((spec) => resolveImport(path, spec));
+    for (const imported of imports) visit(imported);
+    visiting.delete(path);
+    visited.add(path);
+    out.push({ path, imports });
+  };
+
+  visit(entry);
+  return out;
 }
