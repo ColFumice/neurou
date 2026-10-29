@@ -75,6 +75,9 @@ export class StringAudioEngine {
   private listeners = new Set<(state: StringAudioState) => void>();
   private bufferCache = new Map<string, AudioBuffer>();
   private sources = new Set<AudioBufferSourceNode>();
+  /** v3.7：音频资产按 src 缓存 AudioBuffer / 去重并发加载。 */
+  private assetCache = new Map<string, AudioBuffer>();
+  private assetLoads = new Map<string, Promise<AudioBuffer | null>>();
   private voices = new Map<number, SustainedVoice>();
   private voiceSeq = 0;
   /** v3.6：用户音量 0..1 / 静音；context 未建时先存值，创建时应用。 */
@@ -350,6 +353,77 @@ export class StringAudioEngine {
     }
     void this.ctx.resume().catch(() => undefined);
     run();
+  }
+
+  /** v3.7：预加载音频资产（fetch→decodeAudioData，按 src 缓存）；失败静默。 */
+  async preloadAsset(src: string): Promise<boolean> {
+    if (this.failed) return false;
+    await this.ensureStarted();
+    const buffer = await this.loadAsset(src);
+    return buffer !== null;
+  }
+
+  private async loadAsset(src: string): Promise<AudioBuffer | null> {
+    if (!src) return null;
+    const cached = this.assetCache.get(src);
+    if (cached) return cached;
+    const inflight = this.assetLoads.get(src);
+    if (inflight) return inflight;
+    const ctx = this.ctx;
+    if (!ctx || this.failed) return null;
+    const load = (async (): Promise<AudioBuffer | null> => {
+      try {
+        const response = await fetch(src);
+        if (!response.ok) return null;
+        const data = await response.arrayBuffer();
+        const buffer = await ctx.decodeAudioData(data);
+        if (buffer && buffer.length > 0) {
+          this.assetCache.set(src, buffer);
+          return buffer;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        this.assetLoads.delete(src);
+      }
+    })();
+    this.assetLoads.set(src, load);
+    return load;
+  }
+
+  /** v3.7：播放短音频资产，value 控 gain，经 master（受 F4 音量/静音）。失败返回 false。 */
+  async playAsset(src: string, value = 0.8): Promise<boolean> {
+    if (this.failed) return false;
+    await this.ensureStarted();
+    const ctx = this.ctx;
+    const master = this.master;
+    if (!ctx || !master || this.failed) return false;
+    const buffer = await this.loadAsset(src);
+    if (!buffer) return false;
+    try {
+      void ctx.resume().catch(() => undefined);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = Number.isFinite(value) ? clamp(value, 0, 1) : 0.8;
+      source.connect(gain);
+      gain.connect(master);
+      this.sources.add(source);
+      source.onended = () => {
+        this.sources.delete(source);
+        try {
+          source.disconnect();
+          gain.disconnect();
+        } catch {
+          /* ignore */
+        }
+      };
+      source.start();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** v2.0：谱模式里按下一个键，用当前谱作为音色试听。 */

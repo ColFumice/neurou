@@ -240,6 +240,9 @@ export function App() {
   /** v3.5：已播放的世界音频 cue 数/最近一条（仅用于可观测验收）。 */
   const [cueAudio, setCueAudio] = useState(0);
   const [lastCue, setLastCue] = useState('');
+  /** v3.7：音频资产 cue 次数/最近 cue 来源。 */
+  const [assetCues, setAssetCues] = useState(0);
+  const [lastCueKind, setLastCueKind] = useState('');
   /** v3.6：F4 音量档位，localStorage 持久化。 */
   const [audioPref, setAudioPref] = useState<AudioPref>(loadAudioPref);
   const [saves, setSaves] = useState(0);
@@ -324,24 +327,35 @@ export function App() {
       if (transitionRef.current) return; // 缓动期间暂停逐拍
       if (universe.state.ended) return;
       const result = universe.tick();
-      // v3.5：把世界信号的「音频」cue 接到本地声音层。cue 参数若命中谱名，
-      // 用该谱的形状塑造音色；否则由名字哈希出音高。
+      // v3.5/v3.7：把世界信号的「音频」cue 接到本地声音层。
+      // 优先级：音频资产（外部文件） > 同名的谱（合成音色） > 名字哈希。
       for (const emitted of result.cues) {
         const cue = emitted.cue;
         if (cue.k !== '音频' || !cue.param) continue;
-        const spectrum = worldIRRef.current?.spectra.find(
+        const audio = getStringAudio();
+        const asset = worldIRRef.current?.audioAssets?.find(
           (item) => item.id === cue.param || item.name === cue.param,
         );
-        const timbre: TimbreCurve | undefined = spectrum
-          ? {
-              bands: [...spectrum.bands],
-              min: spectrum.min,
-              max: spectrum.max,
-              smooth: spectrum.interpolation === '平滑',
-              loop: spectrum.loop,
-            }
-          : undefined;
-        getStringAudio().playCue(cue.param, cue.value ?? 0.5, timbre);
+        if (asset) {
+          setLastCueKind('asset');
+          setAssetCues((n) => n + 1);
+          void audio.playAsset(`/${asset.src}`, cue.value ?? 0.5);
+        } else {
+          const spectrum = worldIRRef.current?.spectra.find(
+            (item) => item.id === cue.param || item.name === cue.param,
+          );
+          const timbre: TimbreCurve | undefined = spectrum
+            ? {
+                bands: [...spectrum.bands],
+                min: spectrum.min,
+                max: spectrum.max,
+                smooth: spectrum.interpolation === '平滑',
+                loop: spectrum.loop,
+              }
+            : undefined;
+          audio.playCue(cue.param, cue.value ?? 0.5, timbre);
+          setLastCueKind(spectrum ? 'spectrum' : 'synth');
+        }
         setCueAudio((n) => n + 1);
         setLastCue(`${cue.param}:${cue.value ?? ''}`);
       }
@@ -628,6 +642,8 @@ export function App() {
       data-seed={INITIAL_SEED}
       data-cue-audio={cueAudio}
       data-last-cue={lastCue}
+      data-cue-assets={assetCues}
+      data-last-cue-kind={lastCueKind}
       data-audio-volume={audioPref.volume}
       data-audio-muted={audioPref.muted ? 'true' : 'false'}
       data-audio-level={audioLevel(audioPref)}

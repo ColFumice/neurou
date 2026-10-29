@@ -382,6 +382,11 @@ export function serialize(ir: WorldIR): string {
   const w = new Writer();
   worldHeader(w, ir);
 
+  for (const asset of ir.audioAssets ?? []) {
+    w.line(0, `音频资产 ${asset.name} "${asset.src}"`);
+  }
+  if ((ir.audioAssets ?? []).length > 0) w.blank();
+
   const stringsByOwner = new Map<string, IRString[]>();
   const globals: IRString[] = [];
   for (const s of ir.strings) {

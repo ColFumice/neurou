@@ -1418,6 +1418,23 @@ await audioControlPage.waitForTimeout(400);
 check('音量档 localStorage 持久化', (await audioControlApp.getAttribute('data-audio-level')) === '0.6', String(await audioControlApp.getAttribute('data-audio-level')));
 await audioControlPage.close();
 
+// v3.7：音频资产 cue（soundscape 的钟鸣改播 audio/clock.wav）
+const assetPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await assetPage.goto(`${URL}?world=${encodeURIComponent('examples/soundscape.nro')}`, { waitUntil: 'networkidle' });
+await assetPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await assetPage.waitForTimeout(700);
+await assetPage.mouse.click(720, 450);
+await assetPage.waitForTimeout(300);
+await assetPage.keyboard.press('Enter');
+await assetPage.waitForTimeout(250);
+await assetPage.keyboard.press('Enter');
+await assetPage.waitForTimeout(1400);
+const assetApp = assetPage.locator('[data-testid="ink-app"]');
+check('音频资产 cue 被消费', Number(await assetApp.getAttribute('data-cue-assets')) >= 1, String(await assetApp.getAttribute('data-cue-assets')));
+check('音频资产 cue 来源标记', (await assetApp.getAttribute('data-last-cue-kind')) === 'asset', String(await assetApp.getAttribute('data-last-cue-kind')));
+check('音频资产 cue 参数/strength', (await assetApp.getAttribute('data-last-cue')) === '钟声采样:0.8', String(await assetApp.getAttribute('data-last-cue')));
+await assetPage.close();
+
 // v3.5：F3 S 关系谱听音开关
 const listenPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await listenPage.goto(`${URL}?world=${encodeURIComponent('examples/soundscape.nro')}`, { waitUntil: 'networkidle' });

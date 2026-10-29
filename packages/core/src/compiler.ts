@@ -1,5 +1,6 @@
 import type {
   ActionDecl,
+  AudioAssetDecl,
   AxiomDecl,
   ChordDecl,
   CouplingDecl,
@@ -23,6 +24,7 @@ import type {
 } from './ast.js';
 import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
 import type {
+  IRAudioAsset,
   IRAxiom,
   IRCoupling,
   IRCue,
@@ -105,6 +107,8 @@ class Compiler {
   private readonly phases: IRPhase[] = [];
   private readonly spectra: IRSpectrum[] = [];
   private readonly spectrumNames = new Set<string>();
+  private readonly audioAssets: IRAudioAsset[] = [];
+  private readonly audioAssetNames = new Set<string>();
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
 
@@ -176,6 +180,9 @@ class Compiler {
           break;
         case 'matrix':
           this.declareMatrix(d);
+          break;
+        case 'audio-asset':
+          this.declareAudioAsset(d);
           break;
         case 'coupling':
           this.couplingDecls.push(d);
@@ -283,6 +290,23 @@ class Compiler {
         });
       }
     }
+  }
+
+  /** v3.7：音频资产，路径限制在 audio/ 下的一层音频文件。 */
+  private declareAudioAsset(d: AudioAssetDecl): void {
+    if (this.audioAssetNames.has(d.name)) {
+      this.error('NRO2004', `音频资产「${d.name}」重复声明。`, d.span);
+      return;
+    }
+    const src = d.src.trim().replace(/^\/+/, '');
+    if (!/^audio\/[A-Za-z0-9._-]+\.(wav|mp3|ogg)$/i.test(src)) {
+      this.error('NRO2108', `音频资产「${d.name}」的路径「${d.src}」无效。`, d.span, {
+        hint: '只允许 audio/ 下一层的 .wav/.mp3/.ogg，例如 "audio/clock.wav"。',
+      });
+      return;
+    }
+    this.audioAssetNames.add(d.name);
+    this.audioAssets.push({ id: d.name, name: d.name, src });
   }
 
   private declareSpectrum(d: SpectrumDecl): void {
@@ -1774,6 +1798,7 @@ class Compiler {
       strings: [...this.strings.values()],
       spectra: this.spectra,
       matrices: this.matrices,
+      ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,

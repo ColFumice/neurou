@@ -1,5 +1,6 @@
 import type {
   ActionDecl,
+  AudioAssetDecl,
   AxiomDecl,
   ChordDecl,
   CouplingDecl,
@@ -255,6 +256,7 @@ class Parser {
     if (kw === '实体') return this.parseEntity();
     if (kw === '谱') return this.parseSpectrum();
     if (kw === '关系谱') return this.parseMatrix();
+    if (kw === '音频资产') return this.parseAudioAsset();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -277,6 +279,15 @@ class Parser {
   }
 
   // ---------- 世界 ----------
+
+  /** v3.7：音频资产声明。路径校验在编译器（只允许 audio/ 下的一层音频文件）。 */
+  private parseAudioAsset(): AudioAssetDecl {
+    const start = this.advance(); // 关键字
+    const name = this.readName('音频资产名');
+    const src = this.readString('音频路径');
+    this.finishLine();
+    return { k: 'audio-asset', name, src, span: this.spanFrom(start) };
+  }
 
   private parseWorld(): WorldDecl {
     const start = this.expect('ident', '世界', '「世界」');

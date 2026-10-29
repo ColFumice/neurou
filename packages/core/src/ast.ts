@@ -188,6 +188,16 @@ export interface EndingDecl extends DeclBase {
 }
 
 /**
+ * 音频资产（v3.7）：给信号 `音频` cue 用的外部音频文件。
+ * 路径只允许 audio/ 下的一层 wav/mp3/ogg（vite public）。
+ */
+export interface AudioAssetDecl extends DeclBase {
+  k: 'audio-asset';
+  name: string;
+  src: string;
+}
+
+/**
  * 谱：一组采样音段，描述某个维度随参数变化的曲线。
  *
  * `mode` 决定调制如何留在谱上：
@@ -277,7 +287,8 @@ export type Decl =
   | FormDecl
   | EndingDecl
   | SpectrumDecl
-  | MatrixDecl;
+  | MatrixDecl
+  | AudioAssetDecl;
 
 export interface Program {
   decls: Decl[];
@@ -307,6 +318,7 @@ export const DECL_KEYWORDS = [
   '结局',
   '谱',
   '关系谱',
+  '音频资产',
 ] as const;
 
 export function isStringKeyword(word: string): word is keyof typeof STRING_KEYWORDS {

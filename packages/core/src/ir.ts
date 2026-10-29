@@ -231,6 +231,14 @@ export interface IRMatrix {
   span?: Span;
 }
 
+/** v3.7：外部音频资产；cue 参数名匹配时优先播放它。 */
+export interface IRAudioAsset {
+  id: string;
+  name: string;
+  /** 只允许 audio/ 下的一层文件；GUI 解析为站内路径。 */
+  src: string;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -239,6 +247,8 @@ export interface WorldIR {
   strings: IRString[];
   spectra: IRSpectrum[];
   matrices: IRMatrix[];
+  /** v3.7：信号音频 cue 可用的资产。 */
+  audioAssets?: IRAudioAsset[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];

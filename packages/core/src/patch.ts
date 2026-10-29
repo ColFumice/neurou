@@ -88,6 +88,7 @@ function structuralSignature(ir: WorldIR): string {
       mode: s.mode,
       articulation: s.articulation,
     })),
+    audioAssets: ir.audioAssets ?? [],
     // 关系谱的格子值可做行级 patch；行/列结构、曲线或采样元数据变化
     // 都会因签名不同而回退到规范序列化（v2.3a 还没有曲线编辑手势）。
     matrices: ir.matrices.map((m) => ({
