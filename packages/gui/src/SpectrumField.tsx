@@ -1106,7 +1106,25 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         const step = event.code === 'ArrowRight' ? 1 : -1;
         const next = selected === null ? (step > 0 ? 0 : count - 1) : ((selected + step) % count + count) % count;
         selected = next;
-        pushUi();
+        // v5.34：按住 ↑/↓ 调点时切段，必须把正在连续的编辑/持续音一起转到新段，
+        // 否则视觉选中新点、上下键却还在改旧点。
+        if (arrowTune) {
+          const oldBand = arrowTune.band;
+          const oldValue = targets[oldBand];
+          if (oldBand !== next && oldValue !== undefined && Math.abs(oldValue - arrowTune.startValue) > 1e-6) {
+            editRef.current(arrowTune.spectrumId, oldBand, oldValue, true);
+          }
+          if (oldBand !== next) {
+            stopNodeVoice(arrowTune.voiceId);
+            arrowTune.band = next;
+            arrowTune.spectrumId = spectrum.id;
+            arrowTune.startValue = targets[next] ?? spectrum.min;
+            arrowTune.velocity = 0;
+            arrowTune.voiceId = startNodeVoice(spectrum, next, targets[next] ?? spectrum.min);
+            setLastBand(next);
+          }
+        }
+        pushUi(true);
         return;
       }
       // ↑/↓：按住连续 + 惯性（速度从 0 线性加速到 vmax，松开 0.22s 线性减速到 0）。

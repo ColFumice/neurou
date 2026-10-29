@@ -15,7 +15,7 @@
  * D-膜 span、紧致化结点 micro、对偶塌缩、ESC 总谱。
  */
 import { useEffect, useRef, useState } from 'react';
-import type { StringKind } from '@neurou/core';
+import { STRING_INTERACTIONS, type StringInteraction, type StringKind } from '@neurou/core';
 import {
   KIND_ORDER,
   KIND_VISUAL,
@@ -202,6 +202,7 @@ interface KeyboardHold {
   x: number;
   y: number;
   startedAt: number;
+  interaction: StringInteraction;
 }
 
 /** 当前可见的 pin（鼠标 + 所有到时的键盘按住）。 */
@@ -396,6 +397,8 @@ declare global {
         direction: 1 | -1;
         heldMs: number;
       };
+      /** v5.34：持续型弦当前发声音数（验收用）。 */
+      sustainedStrings: () => number;
       /** 增删耦合的 link 目标（验收用）。 */
       linkTarget: () => { index: number; id: string; name: string; existing: boolean } | null;
       /** 当前所有可见 pin（鼠标 + 多键键盘，验收用）。 */
@@ -583,6 +586,8 @@ export function StringField({
     /** 按住绷弦：鼠标 pin 与按 keyCode 独立的多枚键盘 pin 共存。 */
     let mouseHold: MouseHold | null = null;
     const keyHolds = new Map<string, KeyboardHold>();
+    /** v5.34：持续型弦按住期间的声音 id。 */
+    const sustainedKeyVoices = new Map<string, number>();
     let pinsNow: PinView[] = [];
     let holdingNow = false;
     let heldAmplitudeNow = 0;
@@ -641,6 +646,10 @@ export function StringField({
 
     function kindOf(index: number): StringKind {
       return lanesNow[index]?.kind ?? '叙事';
+    }
+
+    function interactionOf(index: number): StringInteraction {
+      return STRING_INTERACTIONS[kindOf(index)] ?? '尾判';
     }
 
     function profileOf(index: number): KindVisualProfile {
@@ -738,6 +747,8 @@ export function StringField({
     function clearHold(): void {
       mouseHold = null;
       keyHolds.clear();
+      for (const id of sustainedKeyVoices.values()) audio.stopSustainedString(id);
+      sustainedKeyVoices.clear();
       pinsNow = [];
       setHoldingUi(false);
       setHeldAmplitudeUi(0);
@@ -2229,23 +2240,35 @@ export function StringField({
       if (!key) return;
       event.preventDefault();
       const label = event.key.length === 1 ? event.key : key.label;
-      // 键盘长按：keydown 只进入「按住」（每个 keyCode 独立），keyup 才拨弦。
+      const interaction = interactionOf(focusIdx);
+      if (interaction === '头判') {
+        // 头判：按下即发声/判定，不进入按住拉弦。
+        pluckFocus(key.cx, key.cy, event.code, label, true, true, true);
+        return;
+      }
       const profile = profileOf(focusIdx);
       const baseline = focusBaseline();
       const amplitude = Math.min(Math.abs(key.cy - baseline), profile.maxPull);
       const direction: 1 | -1 = key.cy < baseline ? -1 : 1;
       noteTouch(key.cx, key.cy, amplitude, direction, event.code);
       if (!keyHolds.has(event.code)) {
-        keyHolds.set(event.code, { code: event.code, label, x: key.cx, y: key.cy, startedAt: performance.now() });
-        // 键盘 keydown 立即用当前弦的音色发一声较轻的即时音（keyup 不再重复发声）。
-        audioBegin(
-          kindOf(focusIdx),
-          clamp(key.cx / LOGICAL_W, 0, 1),
-          clamp(key.cy / LOGICAL_H, 0, 1),
-          0.55,
-          1 / spanNow,
-          laneAt(focusIdx)?.timbre,
-        );
+        keyHolds.set(event.code, {
+          code: event.code,
+          label,
+          x: key.cx,
+          y: key.cy,
+          startedAt: performance.now(),
+          interaction,
+        });
+        if (interaction === '持续') {
+          const id = audio.startSustainedString(
+            kindOf(focusIdx),
+            clamp(key.cx / LOGICAL_W, 0, 1),
+            clamp(key.cy / LOGICAL_H, 0, 1),
+            clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
+          );
+          sustainedKeyVoices.set(event.code, id);
+        }
       }
     }
 
@@ -2255,8 +2278,14 @@ export function StringField({
       keyHolds.delete(event.code);
       pinsNow = pinsNow.filter((pin) => !(pin.source === 'keyboard' && pin.code === event.code));
       updateHeldState();
-      // 松手：以按住点的位移拨一次（视觉/值注入；键盘已在 keydown 即时发声，不再重复播放）。
-      pluckFocus(session.x, session.y, session.code, session.label, true, true, false);
+      if (session.interaction === '持续') {
+        const id = sustainedKeyVoices.get(event.code);
+        if (id !== undefined) audio.stopSustainedString(id);
+        sustainedKeyVoices.delete(event.code);
+        return;
+      }
+      // 尾判：松手才发声/判定；头判在 keydown 已经完成，不会进入这里。
+      pluckFocus(session.x, session.y, session.code, session.label, true, true, true);
     }
 
     /* —— 每帧 —— */
@@ -2362,7 +2391,14 @@ export function StringField({
         if (mouseHold !== null || keyHolds.size > 0 || pinsNow.length > 0) clearHold();
         return;
       }
-      if (!mouseHold && drag && drag.kind === 'pluck' && !drag.moved && now - drag.startedAt >= HOLD_MS) {
+      if (
+        !mouseHold &&
+        drag &&
+        drag.kind === 'pluck' &&
+        !drag.moved &&
+        now - drag.startedAt >= HOLD_MS &&
+        interactionOf(focusIdx) === '尾判'
+      ) {
         const point = pointerNow ?? { x: drag.startX, y: drag.startY };
         mouseHold = {
           pointerId: drag.pointerId,
@@ -2625,6 +2661,7 @@ export function StringField({
           heldMs: Math.round(performance.now() - startedAt),
         };
       },
+      sustainedStrings: () => audio.sustainedStringCount(),
       pins: () =>
         pinsNow.map((pin) => {
           const signed = pinAmplitudeAt(pin.y);

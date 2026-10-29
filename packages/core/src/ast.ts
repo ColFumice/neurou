@@ -12,6 +12,26 @@ import type { Span } from './source.js';
 export const STRING_KINDS = ['叙事', '视觉', '动画', '物理', '控制', '空间', '认知', '关系'] as const;
 export type StringKind = (typeof STRING_KINDS)[number];
 
+/** v5.34：弦的演奏/判定方式。尾判型才有「拉弦后松手」操作。 */
+export type StringInteraction = '持续' | '头判' | '尾判';
+
+/**
+ * 弦类别 → 交互方式：
+ * - 持续：按下持续发声，松手停；适合连续介质（视觉/动画/物理/空间）。
+ * - 头判：按下即判定/发声，无拉弦；适合离散指令（控制）。
+ * - 尾判：按住拉弦，松手才发声/判定；适合叙事、认知、关系。
+ */
+export const STRING_INTERACTIONS: Record<StringKind, StringInteraction> = {
+  叙事: '尾判',
+  视觉: '持续',
+  动画: '持续',
+  物理: '持续',
+  控制: '头判',
+  空间: '持续',
+  认知: '尾判',
+  关系: '尾判',
+};
+
 /** 8 类弦的固定顺序（与 STRING_KINDS 同源，供调律台等视图使用）。 */
 export const KIND_ORDER = STRING_KINDS;
 

@@ -87,6 +87,12 @@ export class StringAudioEngine {
   private loopPending: { src: string; volume: number; loop: boolean } | null = null;
   private loopToken = 0;
   private voices = new Map<number, SustainedVoice>();
+  /** v5.34：持续型弦的按住发声。 */
+  private sustainedStrings = new Map<
+    number,
+    { osc: OscillatorNode; gain: GainNode; pan: StereoPannerNode | null; kind: StringKind; x: number; y: number }
+  >();
+  private pendingSustainedStrings = new Map<number, { kind: StringKind; x: number; y: number; amplitude: number }>();
   private voiceSeq = 0;
   /** v3.6：用户音量 0..1 / 静音；context 未建时先存值，创建时应用。 */
   private volume = 1;
@@ -644,6 +650,106 @@ export class StringAudioEngine {
     }
     this.sources.clear();
     for (const id of [...this.voices.keys()]) this.stopSustainedSpectrum(id);
+    for (const id of [...this.sustainedStrings.keys()]) this.stopSustainedString(id);
+    this.pendingSustainedStrings.clear();
+  }
+
+  /** v5.34：持续型弦——按下即持续发声。返回 id，可用于 stop/update。 */
+  startSustainedString(kind: StringKind, xNorm: number, yNorm: number, amplitudeNorm = 0.6): number {
+    const id = ++this.voiceSeq;
+    const x = clamp(xNorm, 0, 1);
+    const y = clamp(yNorm, 0, 1);
+    this.pendingSustainedStrings.set(id, { kind, x, y, amplitude: amplitudeNorm });
+    const materialize = (): void => {
+      if (!this.pendingSustainedStrings.has(id)) return;
+      this.pendingSustainedStrings.delete(id);
+      this.materializeSustainedString(id, kind, x, y, amplitudeNorm);
+    };
+    if (this.ctx && this.master) materialize();
+    else void this.ensureStarted().then(materialize);
+    return id;
+  }
+
+  updateSustainedString(id: number, xNorm: number, yNorm: number): void {
+    const pending = this.pendingSustainedStrings.get(id);
+    if (pending) {
+      pending.x = clamp(xNorm, 0, 1);
+      pending.y = clamp(yNorm, 0, 1);
+      return;
+    }
+    const voice = this.sustainedStrings.get(id);
+    const ctx = this.ctx;
+    if (!voice || !ctx) return;
+    const profile = KIND_AUDIO[voice.kind];
+    const x = clamp(xNorm, 0, 1);
+    const y = clamp(yNorm, 0, 1);
+    const freq = clamp(pitchForX(x * WAVE_WIDTH).freq * profile.octave, 30, ctx.sampleRate / 2 - 1);
+    try {
+      voice.osc.frequency.setTargetAtTime(freq, ctx.currentTime, 0.035);
+      voice.gain.gain.setTargetAtTime(clamp(profile.gain * (0.35 + y * 0.4), 0.0005, 0.16), ctx.currentTime, 0.06);
+      voice.pan?.pan.setTargetAtTime((x * 2 - 1) * 0.4, ctx.currentTime, 0.05);
+      voice.x = x;
+      voice.y = y;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  stopSustainedString(id: number): void {
+    this.pendingSustainedStrings.delete(id);
+    const voice = this.sustainedStrings.get(id);
+    const ctx = this.ctx;
+    if (!voice || !ctx) return;
+    this.sustainedStrings.delete(id);
+    try {
+      const now = ctx.currentTime;
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), now);
+      voice.gain.gain.linearRampToValueAtTime(0.0001, now + 0.08);
+      voice.osc.stop(now + 0.12);
+      voice.osc.onended = () => {
+        try {
+          voice.osc.disconnect();
+          voice.gain.disconnect();
+          voice.pan?.disconnect();
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+  }
+
+  sustainedStringCount(): number {
+    return this.sustainedStrings.size + this.pendingSustainedStrings.size;
+  }
+
+  private materializeSustainedString(id: number, kind: StringKind, x: number, y: number, amplitude: number): void {
+    const ctx = this.ctx;
+    const master = this.master;
+    if (!ctx || !master) return;
+    const profile = KIND_AUDIO[kind];
+    const freq = clamp(pitchForX(x * WAVE_WIDTH).freq * profile.octave, 30, ctx.sampleRate / 2 - 1);
+    const osc = ctx.createOscillator();
+    osc.type = profile.brightness > 0.7 ? 'triangle' : 'sine';
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    const target = clamp(profile.gain * (0.35 + amplitude * 0.3), 0.0005, 0.16);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.055);
+    const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    if (pan) {
+      pan.pan.value = (x * 2 - 1) * 0.4;
+      osc.connect(gain);
+      gain.connect(pan);
+      pan.connect(master);
+    } else {
+      osc.connect(gain);
+      gain.connect(master);
+    }
+    osc.start();
+    this.sustainedStrings.set(id, { osc, gain, pan, kind, x, y });
   }
 
   /** v2.0.1：持续音色（拉奏/吹奏）——按住键时循环发声。返回 voice id。 */

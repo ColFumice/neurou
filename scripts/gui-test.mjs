@@ -535,6 +535,33 @@ await page.keyboard.up('d');
 await page.waitForTimeout(200);
 check('再松另一键 → 共拨两次', Number(await attr('data-plucks')) === 2 && Number(await attr('data-held-count')) === 0, String(await attr('data-plucks')));
 
+// v5.34：弦类别决定交互方式
+await resetLocal();
+await page.keyboard.press('Tab'); // 叙事 → 视觉（持续）
+await page.waitForTimeout(180);
+const sustainPlucks = Number(await attr('data-plucks'));
+await page.keyboard.down('a');
+await page.waitForTimeout(220);
+check('持续型：按下持续发声', (await page.evaluate(() => window.__neurouString.sustainedStrings())) === 1, 'sustained');
+await page.keyboard.up('a');
+await page.waitForTimeout(220);
+check(
+  '持续型：松手停止且不产生拨弦判定',
+  Number(await page.evaluate(() => window.__neurouString.sustainedStrings())) === 0 && Number(await attr('data-plucks')) === sustainPlucks,
+  String(await attr('data-plucks')),
+);
+await page.keyboard.press('Tab');
+await page.keyboard.press('Tab');
+await page.keyboard.press('Tab'); // 视觉 → 动画 → 物理 → 控制（头判）
+await page.waitForTimeout(180);
+const headBefore = Number(await attr('data-plucks'));
+await page.keyboard.down('a');
+await page.waitForTimeout(180);
+const headAfterDown = Number(await attr('data-plucks'));
+await page.keyboard.up('a');
+await page.waitForTimeout(180);
+check('头判型：按下即判定、松手不重复', headAfterDown === headBefore + 1 && Number(await attr('data-plucks')) === headAfterDown, `${headBefore}→${headAfterDown}`);
+
 // ============ 4. 阈值共振：共振点来自悬崖/安全线 ============
 await resetLocal();
 await page.evaluate(() => window.__neurouString.setValue('叙事', 26));
@@ -1052,6 +1079,29 @@ const inertiaFinal = (await bandsOf())[lastBand] ?? 0;
 check('方向键按住连续加速移动', inertiaEarly > inertiaStart + 1e-4 && inertiaLate > inertiaEarly + 1e-4, `${inertiaStart.toFixed(3)}→${inertiaEarly.toFixed(3)}→${inertiaLate.toFixed(3)}`);
 check('松开后惯性继续滑行', inertiaAfter > inertiaLate + 1e-4, `${inertiaLate.toFixed(3)}→${inertiaAfter.toFixed(3)}`);
 check('惯性平滑停下（位置连续、不跳变）', Math.abs(inertiaFinal - inertiaAfter) < 0.06 && inertiaFinal <= 1.0001, `${inertiaAfter.toFixed(3)}→${inertiaFinal.toFixed(3)}`);
+
+// v5.34：按住 ↑/↓ 时按 ←/→ 切段，上下键必须跟着新段
+const retargetBefore = await bandsOf();
+const retargetSelectedBefore = await page.evaluate(() => window.__neurouSpectrum?.state().selected ?? null);
+await page.keyboard.down('ArrowUp');
+await page.waitForTimeout(140);
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(160);
+const retargetSelectedAfter = await page.evaluate(() => window.__neurouSpectrum?.state().selected ?? null);
+const retargetMid = await bandsOf();
+await page.waitForTimeout(220);
+const retargetAfter = await bandsOf();
+await page.keyboard.up('ArrowUp');
+await page.waitForTimeout(700);
+const retargetNext = Number(retargetSelectedAfter);
+check(
+  '按住上下键切段后控制新段',
+  Number.isInteger(retargetSelectedAfter) &&
+    retargetSelectedAfter !== retargetSelectedBefore &&
+    Math.abs((retargetAfter[retargetNext] ?? 0) - (retargetBefore[retargetNext] ?? 0)) > 1e-4 &&
+    Math.abs((retargetAfter[retargetNext] ?? 0) - (retargetMid[retargetNext] ?? 0)) > 1e-4,
+  `sel ${retargetSelectedBefore}→${retargetSelectedAfter}, band=${retargetAfter[retargetNext]}`,
+);
 await page.keyboard.press('Tab');
 await page.keyboard.press('ArrowLeft');
 await page.waitForTimeout(120);
