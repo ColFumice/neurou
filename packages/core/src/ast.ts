@@ -211,6 +211,14 @@ export interface PortDecl extends DeclBase {
 }
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */
+/** v5.17：用户定义纯函数；编译期内联，不进入运行时状态。 */
+export interface FunctionDecl extends DeclBase {
+  k: 'function';
+  name: string;
+  params: string[];
+  body: Expr;
+}
+
 export interface NamespaceDecl extends DeclBase {
   k: 'namespace';
   name: string;
@@ -355,7 +363,8 @@ export type Decl =
   | SystemDecl
   | SceneDecl
   | PortDecl
-  | NamespaceDecl;
+  | NamespaceDecl
+  | FunctionDecl;
 
 export interface Program {
   decls: Decl[];
@@ -386,6 +395,7 @@ export const DECL_KEYWORDS = [
   '视觉端口',
   '音频端口',
   '命名空间',
+  '函数',
   '曲式',
   '结局',
   '谱',

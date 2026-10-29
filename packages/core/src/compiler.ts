@@ -13,6 +13,7 @@ import type {
   Expr,
   ForcingDecl,
   FormDecl,
+  FunctionDecl,
   LoopDecl,
   MatrixDecl,
   Program,
@@ -129,6 +130,8 @@ class Compiler {
   private readonly namespaceDecls: NamespaceDecl[] = [];
   private readonly namespaces: IRNamespace[] = [];
   private readonly exportedQualified = new Set<string>();
+  private readonly functionDecls = new Map<string, FunctionDecl>();
+  private readonly expandingFunctions = new Set<string>();
   private readonly ports: IRPort[] = [];
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
@@ -260,6 +263,13 @@ class Compiler {
           for (const child of d.decls) this.collect([this.prefixNamespaceDecl(child, d.name)]);
           break;
         }
+        case 'function':
+          if (this.functionDecls.has(d.name)) {
+            this.error('NRO2004', `函数「${d.name}」重复声明。`, d.span);
+          } else {
+            this.functionDecls.set(d.name, d);
+          }
+          break;
         case 'spectrum':
           this.declareSpectrum(d);
           break;
@@ -1038,6 +1048,24 @@ class Compiler {
         return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'number' };
       }
       case 'call': {
+        const user = this.functionDecls.get(e.name);
+        if (user) {
+          if (e.args.length !== user.params.length) {
+            this.error('NRO2003', `函数「${e.name}」需要 ${user.params.length} 个参数，现在给了 ${e.args.length} 个。`, e.span);
+            return { expr: { k: 'const', v: null }, type: 'any' };
+          }
+          if (this.expandingFunctions.has(user.name)) {
+            this.error('NRO2008', `函数「${e.name}」递归调用了自己。`, e.span, { hint: '纯函数必须可内联，不能递归。' });
+            return { expr: { k: 'const', v: null }, type: 'any' };
+          }
+          const substituted = this.substituteFunction(user.body, user.params, e.args);
+          this.expandingFunctions.add(user.name);
+          try {
+            return this.lower(substituted, scope);
+          } finally {
+            this.expandingFunctions.delete(user.name);
+          }
+        }
         const args = e.args.map((a) => this.lower(a, scope));
         const argTypes = args.map((a) => a.type);
         const fail = (want: string): { expr: LExpr; type: TypeName } => {
@@ -1278,6 +1306,31 @@ class Compiler {
           }
         }
       }
+    }
+  }
+
+  /** v5.17：把参数引用替换成调用点表达式，再交给 lower 做类型检查与内联。 */
+  private substituteFunction(expr: Expr, params: string[], args: Expr[]): Expr {
+    switch (expr.k) {
+      case 'path': {
+        if (expr.parts.length === 1) {
+          const index = params.indexOf(expr.parts[0]!);
+          if (index >= 0) return args[index]!;
+        }
+        return expr;
+      }
+      case 'bin':
+        return {
+          ...expr,
+          left: this.substituteFunction(expr.left, params, args),
+          right: this.substituteFunction(expr.right, params, args),
+        };
+      case 'un':
+        return { ...expr, operand: this.substituteFunction(expr.operand, params, args) };
+      case 'call':
+        return { ...expr, args: expr.args.map((arg) => this.substituteFunction(arg, params, args)) };
+      default:
+        return expr;
     }
   }
 

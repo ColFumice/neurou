@@ -14,6 +14,7 @@ import type {
   Expr,
   ForcingDecl,
   FormDecl,
+  FunctionDecl,
   LoopDecl,
   LoopEdgeAst,
   MatrixDecl,
@@ -271,6 +272,7 @@ class Parser {
     if (kw === '视觉端口') return this.parsePort('视觉');
     if (kw === '音频端口') return this.parsePort('音频');
     if (kw === '命名空间') return this.parseNamespace();
+    if (kw === '函数') return this.parseFunction();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -483,6 +485,44 @@ class Parser {
       this.fail(`命名空间「${name}」里没有声明。`, start.span);
     }
     return { k: 'namespace', name, exports, decls, span: this.spanFrom(start) };
+  }
+
+  /** v5.17：纯函数；编译期内联到调用点。 */
+  private parseFunction(): FunctionDecl {
+    const start = this.advance();
+    const name = this.readQualifiedName('函数名');
+    const params: string[] = [];
+    let body: Expr | undefined;
+    this.finishLine();
+    if (this.enterBlock('函数声明')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('字段名');
+        if (key === '参数') {
+          while (!this.atLineEnd()) {
+            const param = this.readName('参数名');
+            if (!params.includes(param)) params.push(param);
+            if (this.at('punct', ',')) this.advance();
+          }
+          this.finishLine();
+        } else if (key === '返回') {
+          body = this.parseExpr();
+          this.finishLine();
+        } else {
+          this.fail(`函数里不认识「${key}」。`, this.peek().span, '可用：参数、返回。');
+          this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    if (!body) {
+      this.fail(`函数「${name}」没有「返回」。`, start.span, '纯函数必须返回一个表达式。');
+      throw new ParseError('unreachable');
+    }
+    return { k: 'function', name, params, body, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */
