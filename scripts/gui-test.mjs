@@ -23,7 +23,25 @@ const URL = 'http://127.0.0.1:5188/';
 const WORLD_PATH = 'examples/tuner.nro';
 const TEMP_TUNER = 'examples/_acceptance-tuner.nro';
 const TEMP_TWO = 'examples/_acceptance-two.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO];
+const TEMP_PLAY = 'examples/_acceptance-play.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY];
+const PLAY_WORLD_SOURCE = `世界 可玩层测试
+  版本 0.1
+
+叙事弦 信任
+  类型 数值 0..100
+  基线 90
+  悬崖 10
+  安全 95
+
+动作 松手
+  当 信任 > 0
+  效果
+    信任 -= 80
+  描述 "松手。"
+
+结局 落点: 当 信任 <= 10
+`;
 const TWO_WORLD_SOURCE = `世界 双弦测试
   版本 0.1
 
@@ -1263,6 +1281,23 @@ check('lighthouse 潮阶使用阶跃插值', lighthouseState?.interpolation === 
 await page.keyboard.press('Tab');
 await page.waitForTimeout(700);
 check('lighthouse Tab 到心图且相位源生效', (await matrixRoot.getAttribute('data-matrix-name')) === '心图' && (await matrixRoot.getAttribute('data-phase-source')) === 'true', `${await matrixRoot.getAttribute('data-matrix-name')}/${await matrixRoot.getAttribute('data-phase-source')}`);
+
+// v3.0：动作选择 + 结局 + 重开
+writeFileSync(TEMP_PLAY, PLAY_WORLD_SOURCE, 'utf8');
+await page.goto(`${URL}?world=${encodeURIComponent(TEMP_PLAY)}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(900);
+const playRoot = page.locator('[data-testid="string-field"]');
+check('可玩层收到世界动作', Number(await playRoot.getAttribute('data-action-count')) === 1, String(await playRoot.getAttribute('data-action-count')));
+await page.keyboard.press('Enter');
+await page.waitForTimeout(300);
+check('Enter 打开极简动作列表', (await playRoot.getAttribute('data-action-open')) === 'true' && (await page.locator('[data-testid="string-actions"]').count()) === 1, String(await playRoot.getAttribute('data-action-open')));
+await page.keyboard.press('Enter');
+await page.waitForTimeout(1000);
+check('动作执行后淡显结局', (await playRoot.getAttribute('data-ending')) === '落点' && Number(await playRoot.getAttribute('data-action-count')) === 0, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);
+await page.keyboard.press('r');
+await page.waitForTimeout(1000);
+check('R 重开清结局并恢复动作', (await playRoot.getAttribute('data-ending')) === '' && Number(await playRoot.getAttribute('data-action-count')) === 1, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

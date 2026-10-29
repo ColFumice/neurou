@@ -182,6 +182,7 @@ export function App() {
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
+  const [playReset, setPlayReset] = useState(0);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -573,6 +574,11 @@ export function App() {
     ended: universe.state.ended?.name ?? null,
     lanes,
     couplings: couplingLanes(worldIR),
+    actions: universe.availableActions().map((action) => ({
+      id: action.id,
+      name: action.name,
+      ...(action.note ? { note: action.note } : {}),
+    })),
   };
 
   const spectra: SpectrumView[] = worldIR.spectra.map((s) => ({
@@ -617,6 +623,21 @@ export function App() {
     universe.inject(lane.id, value);
     setVersion((v) => v + 1);
     if (persist) scheduleSave();
+  };
+
+  /** v3.0：可玩层——把动作排队到下一拍；GUI 只发意图，规则由运行时执行。 */
+  const performAction = (id: string): void => {
+    if (transitionRef.current || !universe) return;
+    if (universe.act(id)) setVersion((v) => v + 1);
+  };
+
+  /** v3.0：结局后重开当前世界（不写回，只重建运行时）。 */
+  const restartWorld = (): void => {
+    const ir = worldIRRef.current ?? worldIR;
+    if (!ir) return;
+    setUniverse(new Universe(ir, { seed: 7 }));
+    setPlayReset((n) => n + 1);
+    setVersion((v) => v + 1);
   };
 
   const onEditThreshold = (
@@ -996,6 +1017,9 @@ export function App() {
         onToggleCoupling={onToggleCoupling}
         onAddString={onAddString}
         onRemoveString={onRemoveString}
+        onPerformAction={performAction}
+        onRestart={restartWorld}
+        resetSignal={playReset}
       />
     ),
     false,

@@ -70,7 +70,7 @@ function StringDemo() {
   }, []);
 
   const view = useMemo<WorldView>(
-    () => ({ name: '调律台·演示', tick, ended: null, lanes, couplings: [] }),
+    () => ({ name: '调律台·演示', tick, ended: null, lanes, couplings: [], actions: [] }),
     [lanes, tick],
   );
   const onInject = (kind: StringKind, raw: number): void => {

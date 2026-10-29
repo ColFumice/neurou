@@ -259,6 +259,12 @@ export interface StringFieldProps {
   onAddString?: (focusId: string) => void;
   /** Alt+Backspace：删除焦点弦（App 校验引用/回路，失败写 data-save-error）。 */
   onRemoveString?: (focusId: string) => void;
+  /** v3.0 可玩层：执行一个世界动作（App 排队到下一拍）。 */
+  onPerformAction?: (id: string) => void;
+  /** v3.0 可玩层：结局后重开世界。 */
+  onRestart?: () => void;
+  /** v3.0 重开信号：变化时清本地 sim/拖尾/动作 UI。 */
+  resetSignal?: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -428,6 +434,9 @@ export function StringField({
   onToggleCoupling,
   onAddString,
   onRemoveString,
+  onPerformAction,
+  onRestart,
+  resetSignal,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -439,6 +448,9 @@ export function StringField({
   const toggleCouplingRef = useRef(onToggleCoupling);
   const addStringRef = useRef(onAddString);
   const removeStringRef = useRef(onRemoveString);
+  const performActionRef = useRef(onPerformAction);
+  const restartRef = useRef(onRestart);
+  const resetSignalRef = useRef<number | undefined>(resetSignal);
   viewRef.current = view;
   injectRef.current = onInject;
   thresholdEditRef.current = onEditThreshold;
@@ -447,12 +459,21 @@ export function StringField({
   toggleCouplingRef.current = onToggleCoupling;
   addStringRef.current = onAddString;
   removeStringRef.current = onRemoveString;
+  performActionRef.current = onPerformAction;
+  restartRef.current = onRestart;
+  resetSignalRef.current = resetSignal;
 
   const laneCount = view.lanes.length;
   const [focusIndex, setFocusIndex] = useState(0);
   const safeFocus = laneCount > 0 ? Math.min(focusIndex, laneCount - 1) : 0;
   const focusLane = view.lanes[safeFocus] ?? null;
   const focusKind = focusLane ? focusLane.kind : '叙事';
+
+  const actions = view.actions ?? [];
+  const [actionOpen, setActionOpen] = useState(false);
+  const [actionSelected, setActionSelected] = useState(0);
+  const [lastAction, setLastAction] = useState('');
+  const safeActionSelected = actions.length > 0 ? Math.min(actionSelected, actions.length - 1) : 0;
 
   const [mode, setMode] = useState<ViewMode>('strings');
   const [plucks, setPlucks] = useState(0);
@@ -553,6 +574,10 @@ export function StringField({
     let trailSettle = 0;
     /** 最近一次用户拨/拖弦的 trail 续画截止时间（此后只衰减不重画）。 */
     let trailFeedUntil = 0;
+    let actionsOpenNow = false;
+    let actionSelectedNow = 0;
+    let lastActionAt = 0;
+    let lastResetSignal = resetSignalRef.current;
     let lastFrame = 0;
     let requestId = 0;
 
@@ -1800,6 +1825,8 @@ export function StringField({
       if (drag !== null) return;
       const point = pointToLogical(event.clientX, event.clientY);
       pointerNow = point;
+      // 点击画布即收起动作列表（不打断这次拖弦/点击本身）。
+      if (actionsOpenNow) closeActions();
       if (modeNow === 'overview') {
         selectOverviewRow(point.y);
         return;
@@ -1976,6 +2003,56 @@ export function StringField({
       }
     }
 
+    /* —— v3.0 可玩层：动作选择 / 结局 —— */
+    function actionList(): Array<{ id: string; name: string; note?: string }> {
+      return viewRef.current.actions ?? [];
+    }
+
+    function setActionsOpenUi(open: boolean): void {
+      if (actionsOpenNow === open) return;
+      actionsOpenNow = open;
+      setActionOpen(open);
+    }
+
+    function setActionSelectedUi(index: number): void {
+      const list = actionList();
+      const next = list.length > 0 ? clamp(index, 0, list.length - 1) : 0;
+      if (next === actionSelectedNow) return;
+      actionSelectedNow = next;
+      setActionSelected(next);
+    }
+
+    function openActions(): void {
+      if (actionsOpenNow) return;
+      if (!actionList().length || viewRef.current.ended) return;
+      if (modeNow !== 'strings' || dualNow) return;
+      setActionSelectedUi(0);
+      setActionsOpenUi(true);
+    }
+
+    function closeActions(): void {
+      setActionsOpenUi(false);
+    }
+
+    /** 执行动作：关闭列表 + 400ms 防连发；真正规则执行交给 App/运行时。 */
+    function performActionAt(index: number): void {
+      const list = actionList();
+      const action = list[index];
+      if (!action || !performActionRef.current) return;
+      const now = performance.now();
+      if (now - lastActionAt < 400) return;
+      lastActionAt = now;
+      setLastAction(action.name);
+      closeActions();
+      performActionRef.current(action.id);
+    }
+
+    function resetLocalForRestart(clearLastAction: boolean): void {
+      closeActions();
+      resetField();
+      if (clearLastAction) setLastAction('');
+    }
+
     function onKeyDown(event: KeyboardEvent): void {
       if (event.repeat) return;
       // Alt+Enter / Alt+Backspace：增删弦（Alt 组合优先于普通按键，避免被 alt 守卫吞掉）。
@@ -1993,6 +2070,13 @@ export function StringField({
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;
+      // v3.0 结局后 R 重开：清本地 sim/拖尾/动作 UI，再交给 App 重建运行时。
+      if (viewRef.current.ended && event.code === 'KeyR') {
+        event.preventDefault();
+        resetLocalForRestart(true);
+        restartRef.current?.();
+        return;
+      }
       if (event.code === 'Tab') {
         event.preventDefault();
         if (dualNow) return;
@@ -2002,6 +2086,10 @@ export function StringField({
       }
       if (event.code === 'Escape') {
         event.preventDefault();
+        if (actionsOpenNow) {
+          closeActions();
+          return;
+        }
         if (linkTargetIndex !== null) {
           clearLinkTarget();
           return;
@@ -2010,6 +2098,30 @@ export function StringField({
         return;
       }
       if (modeNow === 'overview' || dualNow) return;
+      // v3.0 Enter：打开动作列表；列表打开时 Enter 执行当前项。A 始终只走 46 键拨弦。
+      if (event.code === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        if (actionsOpenNow) performActionAt(actionSelectedNow);
+        else if (actionList().length > 0 && !viewRef.current.ended) openActions();
+        return;
+      }
+      // 动作列表打开时，↑/↓/1..9 专用于选择/执行；其它 46 键继续正常拨弦。
+      if (actionsOpenNow && !event.shiftKey) {
+        const list = actionList();
+        if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+          event.preventDefault();
+          setActionSelectedUi(actionSelectedNow + (event.code === 'ArrowDown' ? 1 : -1));
+          return;
+        }
+        if (event.code.startsWith('Digit')) {
+          const index = Number(event.code.slice(5)) - 1;
+          if (Number.isInteger(index) && index >= 0 && index < list.length) {
+            event.preventDefault();
+            performActionAt(index);
+            return;
+          }
+        }
+      }
       // 增删耦合：Shift+↑/↓ 选目标，Shift+Enter 切换关系。
       if (event.shiftKey && (event.code === 'ArrowUp' || event.code === 'ArrowDown')) {
         event.preventDefault();
@@ -2191,6 +2303,16 @@ export function StringField({
       requestId = window.requestAnimationFrame(frame);
       const dt = lastFrame > 0 ? Math.min(0.05, (now - lastFrame) / 1000) : 1 / 60;
       lastFrame = now;
+
+      // v3.0：App 重开信号 / 结局 / 动作列表变化时维护本地可玩层状态。
+      if (resetSignalRef.current !== lastResetSignal) {
+        lastResetSignal = resetSignalRef.current;
+        resetLocalForRestart(true);
+      }
+      if (actionsOpenNow) {
+        if (viewRef.current.ended || actionList().length === 0 || modeNow !== 'strings' || dualNow) closeActions();
+        else setActionSelectedUi(actionSelectedNow);
+      }
 
       if (chartAlpha !== chartTarget) {
         const stepSize = (dt * 1000) / OVERVIEW_FADE_MS;
@@ -2558,8 +2680,72 @@ export function StringField({
       data-last-key={lastKey}
       data-last-amplitude={lastAmplitude}
       data-last-direction={lastDirection}
+      data-action-count={actions.length}
+      data-action-open={actionOpen ? 'true' : 'false'}
+      data-action-selected={actionOpen ? String(safeActionSelected) : ''}
+      data-last-action={lastAction}
+      data-ending={view.ended ?? ''}
     >
       <canvas ref={canvasRef} className="string-canvas" data-testid="string-canvas" />
+      {actionOpen && !view.ended && mode === 'strings' ? (
+        <div
+          data-testid="string-actions"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '58%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            gap: '9px',
+            pointerEvents: 'none',
+            fontFamily: 'var(--serif)',
+            fontSize: '13px',
+            letterSpacing: '0.06em',
+            lineHeight: 1.55,
+            color: 'var(--ink)',
+          }}
+        >
+          {actions.map((action, index) => (
+            <span
+              key={action.id}
+              style={{
+                opacity: index === safeActionSelected ? 0.9 : 0.35,
+                fontSize: index === safeActionSelected ? '14px' : '13px',
+                letterSpacing: index === safeActionSelected ? '0.12em' : '0.06em',
+              }}
+            >
+              {index + 1}. {action.name}
+              {action.note ? (
+                <span style={{ opacity: 0.5, marginLeft: '0.8em', fontSize: '11px' }}>{action.note}</span>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {view.ended ? (
+        <div
+          data-testid="string-ending"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            fontFamily: 'var(--serif)',
+            fontSize: '28px',
+            letterSpacing: '0.14em',
+            color: 'var(--ink)',
+            opacity: 0.3,
+            userSelect: 'none',
+          }}
+        >
+          {view.ended}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -530,6 +530,12 @@ export interface Lane {
 }
 
 /** 调律台读取的一份世界切片。 */
+export interface PlayActionView {
+  id: string;
+  name: string;
+  note?: string;
+}
+
 export interface WorldView {
   name: string;
   tick: number;
@@ -537,6 +543,8 @@ export interface WorldView {
   lanes: Lane[];
   /** 世界里的耦合关系（只用于画布上编辑强度）。 */
   couplings: CouplingLane[];
+  /** v3.0：当前可执行的世界动作（供可玩层选择）。 */
+  actions: PlayActionView[];
 }
 
 /** 一条耦合在界面上的投影：两端用世界弦 id 表示。 */
