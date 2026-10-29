@@ -42,6 +42,7 @@ import { compileGlsl, type GlslArtifact } from './glslBackend.js';
 import { GlslCanvas } from './GlslCanvas.js';
 import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import { FaustFallback } from './faustAudio.js';
+import { FaustWasmHost, compileFaustWasm } from './faustWasm.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -376,7 +377,10 @@ export function App() {
   const [faustStatus, setFaustStatus] = useState('');
   const [faustError, setFaustError] = useState('');
   const [faustAudioState, setFaustAudioState] = useState('stopped');
+  const [faustRuntime, setFaustRuntime] = useState('stopped');
+  const [faustCompile, setFaustCompile] = useState('');
   const faustAudioRef = useRef<FaustFallback | null>(null);
+  const faustWasmRef = useRef<FaustWasmHost | null>(null);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -746,29 +750,65 @@ export function App() {
     setFaustError(compiled.result.ok ? '' : compiled.result.error);
   }, [worldIR, universe]);
 
-  // v5.28：Faust 源码 ≠ Faust 编译；预览时用 WebAudio 兜底试听端口参数。
+  // v5.28/v5.32：优先真实 Faust 编译；失败才回退 WebAudio 正弦兜底。
   useEffect(() => {
-    const audio = faustAudioRef.current ?? (faustAudioRef.current = new FaustFallback());
+    const fallback = faustAudioRef.current ?? (faustAudioRef.current = new FaustFallback());
+    const wasm = faustWasmRef.current ?? (faustWasmRef.current = new FaustWasmHost());
     const audioPort = (worldIR?.ports ?? []).find((port) => port.kind === '音频');
-    if (!previewOpen || faustStatus !== 'source' || !audioPort || !universe || audioPref.muted || audioPref.volume <= 0) {
-      audio.stop();
-      setFaustAudioState(audio.state);
-      return;
+    let cancelled = false;
+    const stopAll = (): void => {
+      wasm.stop();
+      fallback.stop();
+      setFaustRuntime('stopped');
+      setFaustAudioState('stopped');
+    };
+    if (
+      !previewOpen ||
+      faustStatus !== 'source' ||
+      !faustArtifact ||
+      !audioPort ||
+      !universe ||
+      audioPref.muted ||
+      audioPref.volume <= 0
+    ) {
+      stopAll();
+      if (!previewOpen || audioPref.muted || audioPref.volume <= 0) setFaustCompile('');
+      return stopAll;
     }
     const values: number[] = [];
     for (const param of audioPort.params) {
       const value = universe.get(param.string);
       values.push(typeof value === 'number' ? value : 0);
     }
-    audio.start(values, audioPref.volume);
-    setFaustAudioState(audio.state);
+    void (async () => {
+      const ok = await wasm.start(faustArtifact, values, audioPref.volume);
+      if (cancelled) {
+        wasm.stop();
+        return;
+      }
+      setFaustCompile(ok ? 'ok' : wasm.compiled ? 'ok' : wasm.compileError || 'error');
+      if (ok) {
+        setFaustRuntime('faust-wasm');
+        setFaustAudioState(wasm.state);
+        return;
+      }
+      fallback.start(values, audioPref.volume);
+      setFaustRuntime('webaudio-fallback');
+      setFaustAudioState(fallback.state);
+    })();
     return () => {
-      audio.stop();
+      cancelled = true;
+      wasm.stop();
+      fallback.stop();
+      setFaustRuntime('stopped');
       setFaustAudioState('stopped');
     };
-  }, [previewOpen, faustStatus, audioPref.muted, audioPref.volume, worldIR, universe]);
+  }, [previewOpen, faustStatus, faustArtifact, audioPref.muted, audioPref.volume, worldIR, universe]);
 
-  useEffect(() => () => faustAudioRef.current?.stop(), []);
+  useEffect(() => () => {
+    faustAudioRef.current?.stop();
+    faustWasmRef.current?.stop();
+  }, []);
 
   useEffect(() => {
     const onPreviewKey = (event: KeyboardEvent): void => {
@@ -1132,7 +1172,8 @@ export function App() {
       data-glsl-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉').length}
       data-glsl-error={glslError}
       data-faust-audio={faustAudioState}
-      data-faust-runtime="webaudio-fallback"
+      data-faust-runtime={faustRuntime}
+      data-faust-compile={faustCompile}
       data-glsl-textures={(worldIR?.ports ?? [])
         .filter((port) => port.kind === '视觉')
         .map((port) => port.texture?.pattern ?? '棋盘')

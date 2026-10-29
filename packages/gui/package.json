@@ -9,9 +9,10 @@
     "preview": "vite preview --host 127.0.0.1 --port 5188"
   },
   "dependencies": {
+    "@grame/faustwasm": "0.19.3",
     "@neurou/core": "workspace:*",
-    "@neurou/runtime": "workspace:*",
     "@neurou/engine": "workspace:*",
+    "@neurou/runtime": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

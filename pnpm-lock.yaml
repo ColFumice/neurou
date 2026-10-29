@@ -58,6 +58,9 @@ importers:
 
   packages/gui:
     dependencies:
+      '@grame/faustwasm':
+        specifier: 0.19.3
+        version: 0.19.3
       '@neurou/core':
         specifier: workspace:*
         version: link:../core
@@ -604,6 +607,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@grame/faustwasm@0.19.3':
+    resolution: {integrity: sha512-UIaN1If2NqPN4uiT9ztE4n3fH9MwHP4uioqkVGe4/SmFuCCW+n6AgvyB6MGvIzuznFlpdNkxIzcvAcKARPAJxA==}
+    hasBin: true
+
   '@jridgewell/gen-mapping@0.3.12':
     resolution: {integrity: sha512-OuLGC46TjB5BbN1dH8JULVVZY4WTdkF7tV9Ys6wLL1rubZnCMstOhNHueU5bLCrnRuDhKPDM4g6sw4Bel5Gzqg==}
 
@@ -784,6 +791,9 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
+
+  '@types/emscripten@1.41.6':
+    resolution: {integrity: sha512-uN+9i8bFT5CUcZfyIEYDrSueACEyKGbUs5kC/72DGlZZoinh84sJfVV0i8UOJD1asdzkvLPBRrKs41kZ8MdEXg==}
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
@@ -1488,6 +1498,10 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
+  '@grame/faustwasm@0.19.3':
+    dependencies:
+      '@types/emscripten': 1.41.6
+
   '@jridgewell/gen-mapping@0.3.12':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -1613,6 +1627,8 @@ snapshots:
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.29.11
+
+  '@types/emscripten@1.41.6': {}
 
   '@types/estree@1.0.9': {}
 
