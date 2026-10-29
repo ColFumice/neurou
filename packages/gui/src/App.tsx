@@ -38,6 +38,7 @@ import { getStringAudio } from './stringAudio.js';
 import { buildChapterGraph, type ChapterGraphNode } from './chapterGraph.js';
 import { compileGlsl, type GlslArtifact } from './glslBackend.js';
 import { GlslCanvas } from './GlslCanvas.js';
+import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -343,6 +344,10 @@ export function App() {
   const [glslArtifact, setGlslArtifact] = useState<GlslArtifact | null>(null);
   const [glslStatus, setGlslStatus] = useState('');
   const [glslError, setGlslError] = useState('');
+  /** v5.8：音频端口 → Faust 源码适配（不含实际 Faust 编译）。 */
+  const [faustArtifact, setFaustArtifact] = useState<FaustArtifact | null>(null);
+  const [faustStatus, setFaustStatus] = useState('');
+  const [faustError, setFaustError] = useState('');
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -687,6 +692,24 @@ export function App() {
     setGlslError(compiled.result.ok ? '' : compiled.result.error);
   }, [worldIR, universe]);
 
+  // v5.8：音频端口 → Faust 源码；只生成源码，真正编译/发声由未来 Host 服务负责。
+  useEffect(() => {
+    const audioPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '音频');
+    if (audioPorts.length === 0 || !universe) {
+      setFaustArtifact(null);
+      setFaustStatus('');
+      setFaustError('');
+      return;
+    }
+    const first = audioPorts[0]!;
+    const params: Record<string, ReturnType<typeof universe.get>> = {};
+    for (const param of first.params) params[param.name] = universe.get(param.string);
+    const compiled = compileFaust({ id: first.id, name: first.name, kind: first.kind, params });
+    setFaustArtifact(compiled.artifact);
+    setFaustStatus(compiled.result.ok ? 'source' : 'error');
+    setFaustError(compiled.result.ok ? '' : compiled.result.error);
+  }, [worldIR, universe]);
+
   useEffect(() => {
     const onPreviewKey = (event: KeyboardEvent): void => {
       if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -999,6 +1022,9 @@ export function App() {
       data-glsl-status={glslStatus}
       data-glsl-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉').length}
       data-glsl-error={glslError}
+      data-faust-status={faustStatus}
+      data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}
+      data-faust-error={faustError}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
@@ -1099,6 +1125,12 @@ export function App() {
               <span key={`${index}-${cue}`}>{cue}</span>
             ))}
           </div>
+          {faustStatus === 'source' && faustArtifact ? (
+            <div className="preview-audio" data-testid="preview-audio">
+              音频 {faustArtifact.name} ·{' '}
+              {faustArtifact.bindings.map((binding) => `${binding.param} ${binding.control}`).join(' / ')}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {slotMenuOpen ? (

@@ -223,3 +223,14 @@ body {
   filter: grayscale(1);
   pointer-events: none;
 }
+
+/* v5.8：Faust 源码适配状态，只在现象层淡显示，不发声。 */
+.preview-audio {
+  position: absolute;
+  right: 8%;
+  bottom: 8%;
+  font-family: var(--serif);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  opacity: 0.28;
+}

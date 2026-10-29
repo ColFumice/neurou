@@ -28,7 +28,8 @@ const TEMP_AUDIO = 'examples/_acceptance-audio.nro';
 const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
 const TEMP_CHOICES = 'examples/_acceptance-choices.nro';
 const TEMP_GLSL = 'examples/_acceptance-glsl.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES, TEMP_GLSL];
+const TEMP_FAUST = 'examples/_acceptance-faust.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES, TEMP_GLSL, TEMP_FAUST];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
   下一章 "examples/garden.nro"
@@ -65,6 +66,17 @@ const GLSL_WORLD_SOURCE = `世界 GLSL端口
 
 视觉端口 雨幕
   参数 强度 雨量
+`;
+const FAUST_WORLD_SOURCE = `世界 Faust端口
+  版本 0.1
+  章节 "低鸣"
+
+叙事弦 潮位
+  类型 数值 0..100
+  基线 35
+
+音频端口 潮声
+  参数 强度 潮位
 `;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1
@@ -1645,6 +1657,20 @@ await glslPage.keyboard.press('Space');
 await glslPage.waitForTimeout(300);
 check('预览蒙版出现 GLSL canvas', (await glslPage.locator('[data-testid="preview-glsl"]').count()) === 1, String(await glslPage.locator('[data-testid="preview-glsl"]').count()));
 await glslPage.close();
+
+// v5.8：音频端口 → Faust 源码适配
+writeFileSync(TEMP_FAUST, FAUST_WORLD_SOURCE, 'utf8');
+const faustPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await faustPage.goto(`${URL}?world=${encodeURIComponent(TEMP_FAUST)}&fresh=1`, { waitUntil: 'networkidle' });
+await faustPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await faustPage.waitForTimeout(700);
+const faustApp = faustPage.locator('[data-testid="ink-app"]');
+check('音频端口进入 Faust 适配', Number(await faustApp.getAttribute('data-faust-ports')) === 1, String(await faustApp.getAttribute('data-faust-ports')));
+check('Faust 源码生成成功', (await faustApp.getAttribute('data-faust-status')) === 'source', String(await faustApp.getAttribute('data-faust-error')));
+await faustPage.keyboard.press('Space');
+await faustPage.waitForTimeout(300);
+check('现象层显示音频端口状态', (await faustPage.locator('[data-testid="preview-audio"]').count()) === 1, String(await faustPage.locator('[data-testid="preview-audio"]').count()));
+await faustPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
