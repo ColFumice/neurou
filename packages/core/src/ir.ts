@@ -316,7 +316,9 @@ export interface IRFunction {
   /** v5.23：局部变量源码（作者结构；运行时已展开）。 */
   locals?: { name: string; source: string }[];
   /** v5.24：当分支源码（作者结构；运行时已展开）。 */
-  branches?: { condSource: string; bodySource: string }[];
+  branches?: { condSource: string; bodySource: string; locals?: { name: string; source: string }[] }[];
+  /** v5.25：显式否则分支。 */
+  otherwise?: { bodySource: string; locals?: { name: string; source: string }[] };
   bodySource: string;
   /** v5.20：lower 后的函数体（含 param 节点），运行时按函数表查找。 */
   body?: LExpr;

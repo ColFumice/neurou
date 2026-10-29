@@ -176,4 +176,45 @@ describe('用户纯函数（v5.17）', () => {
     universe.tick();
     expect(universe.get('结果')).toBe('小');
   });
+
+  it('分支局部变量与否则块可序列化', () => {
+    const source = `世界 分支作用域
+  版本 0.1
+
+函数 分类
+  参数 x: 数值
+  返回类型 文本
+  当 x < 5
+    局部 词 = "小"
+    返回 词
+  否则
+    局部 词 = "大"
+    返回 词
+
+叙事弦 输入
+  类型 数值 0..10
+  基线 3
+
+叙事弦 结果
+  类型 文本
+  基线 "?"
+
+力迫 判定
+  当 输入 < 5
+  效果
+    结果 = 分类(输入)
+
+结局 停: 当 假
+`;
+    const result = compileText(source, 'function-otherwise.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const text = serialize(result.ir);
+    expect(text).toContain('否则');
+    expect(text).toContain('局部 词 = "小"');
+    expect(compileText(text, 'function-otherwise-roundtrip.nro').ok).toBe(true);
+    const universe = new Universe(result.ir, { seed: 1 });
+    universe.tick();
+    expect(universe.get('结果')).toBe('小');
+  });
 });

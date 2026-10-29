@@ -329,9 +329,16 @@ function functionBlock(w: Writer, fn: IRFunction): void {
   for (const local of fn.locals ?? []) w.line(1, `局部 ${local.name} = ${local.source}`);
   for (const branch of fn.branches ?? []) {
     w.line(1, `当 ${branch.condSource}`);
+    for (const local of branch.locals ?? []) w.line(2, `局部 ${local.name} = ${local.source}`);
     w.line(2, `返回 ${branch.bodySource}`);
   }
-  w.line(1, `返回 ${fn.bodySource}`);
+  if (fn.otherwise) {
+    w.line(1, '否则');
+    for (const local of fn.otherwise.locals ?? []) w.line(2, `局部 ${local.name} = ${local.source}`);
+    w.line(2, `返回 ${fn.otherwise.bodySource}`);
+  } else {
+    w.line(1, `返回 ${fn.bodySource}`);
+  }
   w.blank();
 }
 

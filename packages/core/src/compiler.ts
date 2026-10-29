@@ -306,8 +306,29 @@ class Compiler {
               branches: d.branches.map((branch) => ({
                 condSource: this.source.text.slice(branch.cond.span.start.offset, branch.cond.span.end.offset),
                 bodySource: this.source.text.slice(branch.body.span.start.offset, branch.body.span.end.offset),
+                locals: branch.locals.map((local) => ({
+                  name: local.name,
+                  source: this.source.text.slice(local.expr.span.start.offset, local.expr.span.end.offset),
+                })),
               })),
-              bodySource: this.source.text.slice(d.body.span.start.offset, d.body.span.end.offset),
+              ...(d.otherwise
+                ? {
+                    otherwise: {
+                      bodySource: this.source.text.slice(
+                        d.otherwise.body.span.start.offset,
+                        d.otherwise.body.span.end.offset,
+                      ),
+                      locals: d.otherwise.locals.map((local) => ({
+                        name: local.name,
+                        source: this.source.text.slice(local.expr.span.start.offset, local.expr.span.end.offset),
+                      })),
+                    },
+                  }
+                : {}),
+              bodySource: this.source.text.slice(
+                (d.body ?? d.otherwise!.body).span.start.offset,
+                (d.body ?? d.otherwise!.body).span.end.offset,
+              ),
             });
           }
           break;
@@ -1423,7 +1444,11 @@ class Compiler {
         });
       }
       if (declaredReturn && lowered.type !== 'any' && !assignable(lowered.type, declaredReturn)) {
-        this.error('NRO2003', `函数「${name}」声明返回${typeLabel(declaredReturn)}，实际返回${typeLabel(lowered.type)}。`, decl.body.span);
+        this.error(
+          'NRO2003',
+          `函数「${name}」声明返回${typeLabel(declaredReturn)}，实际返回${typeLabel(lowered.type)}。`,
+          decl.body?.span ?? decl.otherwise?.span ?? decl.span,
+        );
       }
       const returnType = declaredReturn ?? lowered.type;
       this.functionReturnTypes.set(name, returnType);
@@ -1465,19 +1490,32 @@ class Compiler {
     }
   }
 
-  /** v5.23/v5.24：展开局部变量，再从后往前拼 `当` 分支与最终返回。 */
+  /** v5.23–v5.25：展开函数/分支局部变量，再从后往前拼 `当` 分支与兜底。 */
   private expandFunction(decl: FunctionDecl): Expr {
     const values = new Map<string, Expr>();
     for (const local of decl.locals) {
       values.set(local.name, this.substituteLocalExpr(local.expr, values));
     }
-    let result = this.substituteLocalExpr(decl.body, values);
+    let result: Expr;
+    if (decl.otherwise) {
+      const otherwiseValues = new Map(values);
+      for (const local of decl.otherwise.locals) {
+        otherwiseValues.set(local.name, this.substituteLocalExpr(local.expr, otherwiseValues));
+      }
+      result = this.substituteLocalExpr(decl.otherwise.body, otherwiseValues);
+    } else {
+      result = this.substituteLocalExpr(decl.body!, values);
+    }
     for (let index = decl.branches.length - 1; index >= 0; index--) {
       const branch = decl.branches[index]!;
+      const branchValues = new Map(values);
+      for (const local of branch.locals) {
+        branchValues.set(local.name, this.substituteLocalExpr(local.expr, branchValues));
+      }
       result = {
         k: 'if',
         cond: this.substituteLocalExpr(branch.cond, values),
-        then: this.substituteLocalExpr(branch.body, values),
+        then: this.substituteLocalExpr(branch.body, branchValues),
         otherwise: result,
         span: branch.span,
       };

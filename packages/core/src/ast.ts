@@ -229,9 +229,11 @@ export interface FunctionDecl extends DeclBase {
   returnType: string | null;
   /** v5.23：函数局部变量，按声明顺序。 */
   locals: FunctionLocal[];
-  /** v5.24：`当 … 返回 …` 的分支，按顺序短路。 */
-  branches: { cond: Expr; body: Expr; span: Span }[];
-  body: Expr;
+  /** v5.24：`当 … 返回 …` 的分支，按顺序短路；v5.25 支持分支局部变量。 */
+  branches: { cond: Expr; body: Expr; locals: FunctionLocal[]; span: Span }[];
+  /** v5.25：显式 `否则` 分支；有它时不再需要末尾无条件返回。 */
+  otherwise?: { body: Expr; locals: FunctionLocal[]; span: Span };
+  body?: Expr;
 }
 
 export interface NamespaceDecl extends DeclBase {

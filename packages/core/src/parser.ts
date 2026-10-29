@@ -15,6 +15,7 @@ import type {
   ForcingDecl,
   FormDecl,
   FunctionDecl,
+  FunctionLocal,
   LoopDecl,
   LoopEdgeAst,
   MatrixDecl,
@@ -497,6 +498,7 @@ class Parser {
     const branches: FunctionDecl['branches'] = [];
     let returnType: string | null = null;
     let body: Expr | undefined;
+    let otherwise: FunctionDecl['otherwise'];
     this.finishLine();
     if (this.enterBlock('函数声明')) {
       while (!this.at('dedent') && !this.at('eof')) {
@@ -534,6 +536,7 @@ class Parser {
           const branchStart = this.peek();
           const cond = this.parseExpr();
           this.finishLine();
+          const branchLocals: FunctionLocal[] = [];
           let branchBody: Expr | undefined;
           if (this.enterBlock('当分支')) {
             while (!this.at('dedent') && !this.at('eof')) {
@@ -542,18 +545,56 @@ class Parser {
                 continue;
               }
               const branchKey = this.readName('字段名');
-              if (branchKey === '返回') {
+              if (branchKey === '局部') {
+                const localStart = this.peek();
+                const localName = this.readName('局部变量名');
+                if (!this.eat('op', '=')) this.fail('局部变量需要一个「=」。', this.peek().span);
+                const expr = this.parseExpr();
+                branchLocals.push({ name: localName, expr, span: this.spanFrom(localStart) });
+                this.finishLine();
+              } else if (branchKey === '返回') {
                 branchBody = this.parseExpr();
                 this.finishLine();
               } else {
-                this.fail('「当」分支里只能写「返回」。', this.peek().span);
+                this.fail('「当」分支里只能写「局部」「返回」。', this.peek().span);
                 this.skipToLineEnd();
               }
             }
             this.exitBlock();
           }
           if (!branchBody) this.fail('「当」分支需要一个「返回」。', branchStart.span);
-          else branches.push({ cond, body: branchBody, span: this.spanFrom(branchStart) });
+          else branches.push({ cond, body: branchBody, locals: branchLocals, span: this.spanFrom(branchStart) });
+        } else if (key === '否则') {
+          const otherwiseStart = this.peek();
+          const otherwiseLocals: FunctionLocal[] = [];
+          let otherwiseBody: Expr | undefined;
+          this.finishLine();
+          if (this.enterBlock('否则分支')) {
+            while (!this.at('dedent') && !this.at('eof')) {
+              if (this.at('newline')) {
+                this.advance();
+                continue;
+              }
+              const branchKey = this.readName('字段名');
+              if (branchKey === '局部') {
+                const localStart = this.peek();
+                const localName = this.readName('局部变量名');
+                if (!this.eat('op', '=')) this.fail('局部变量需要一个「=」。', this.peek().span);
+                const expr = this.parseExpr();
+                otherwiseLocals.push({ name: localName, expr, span: this.spanFrom(localStart) });
+                this.finishLine();
+              } else if (branchKey === '返回') {
+                otherwiseBody = this.parseExpr();
+                this.finishLine();
+              } else {
+                this.fail('「否则」里只能写「局部」「返回」。', this.peek().span);
+                this.skipToLineEnd();
+              }
+            }
+            this.exitBlock();
+          }
+          if (!otherwiseBody) this.fail('「否则」需要一个「返回」。', otherwiseStart.span);
+          else otherwise = { body: otherwiseBody, locals: otherwiseLocals, span: this.spanFrom(otherwiseStart) };
         } else if (key === '返回') {
           body = this.parseExpr();
           this.finishLine();
@@ -564,11 +605,11 @@ class Parser {
       }
       this.exitBlock();
     }
-    if (!body) {
-      this.fail(`函数「${name}」没有「返回」。`, start.span, '纯函数必须返回一个表达式。');
+    if (!body && !otherwise) {
+      this.fail(`函数「${name}」没有「返回」或「否则」。`, start.span, '纯函数必须有兜底返回。');
       throw new ParseError('unreachable');
     }
-    return { k: 'function', name, params, paramTypes, returnType, locals, branches, body, span: this.spanFrom(start) };
+    return { k: 'function', name, params, paramTypes, returnType, locals, branches, otherwise, body, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */
