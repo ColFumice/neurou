@@ -21,6 +21,13 @@ export * from './ast.js';
 export * from './ir.js';
 export { parse } from './parser.js';
 export { compile, compileText, kindSolver, suggestName, type CompileResult } from './compiler.js';
+export {
+  compileProject,
+  compileProjectFromFiles,
+  normalizeProjectPath,
+  ProjectError,
+  type ProjectSources,
+} from './project.js';
 export { serialize, stringBlockLines } from './serialize.js';
 export { patchWorldText, type PatchResult } from './patch.js';
 export {

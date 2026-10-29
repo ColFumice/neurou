@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { SourceFile, compile, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
+import { compileProject, ProjectError, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
 import {
   ANSI,
   Engine,
@@ -79,14 +79,13 @@ function paint(enabled: boolean, code: string, s: string): string {
 }
 
 function load(path: string, quiet = false): { ir: WorldIR; ok: boolean } | undefined {
-  let text: string;
+  let result;
   try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    console.error(`读不到文件：${path}`);
+    result = compileProject(path, (modulePath) => readFileSync(modulePath, 'utf8'));
+  } catch (error) {
+    console.error(error instanceof ProjectError ? error.message : `读不到文件：${path}`);
     return undefined;
   }
-  const result = compile(new SourceFile(path, text));
   const color = colorEnabled({});
   if (!quiet || !result.ok) {
     for (const d of result.diagnostics.sorted()) {
