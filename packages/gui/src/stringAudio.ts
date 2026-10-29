@@ -78,6 +78,14 @@ export class StringAudioEngine {
   /** v3.7：音频资产按 src 缓存 AudioBuffer / 去重并发加载。 */
   private assetCache = new Map<string, AudioBuffer>();
   private assetLoads = new Map<string, Promise<AudioBuffer | null>>();
+  /** v3.8：循环音频（context 未建时 pending，首次 ensureStarted 后自动开） */
+  private loopSrc: string | null = null;
+  private loopSource: AudioBufferSourceNode | null = null;
+  private loopGain: GainNode | null = null;
+  private loopVolume = 1;
+  private loopRepeat = true;
+  private loopPending: { src: string; volume: number; loop: boolean } | null = null;
+  private loopToken = 0;
   private voices = new Map<number, SustainedVoice>();
   private voiceSeq = 0;
   /** v3.6：用户音量 0..1 / 静音；context 未建时先存值，创建时应用。 */
@@ -172,6 +180,7 @@ export class StringAudioEngine {
       }
       this.status = existing.state === 'running' ? 'running' : 'suspended';
       this.emit();
+      this.resumePendingLoop();
       return;
     }
 
@@ -231,6 +240,7 @@ export class StringAudioEngine {
     }
     this.status = ctx.state === 'running' ? 'running' : 'suspended';
     this.emit();
+    this.resumePendingLoop();
   }
 
   /**
@@ -424,6 +434,113 @@ export class StringAudioEngine {
     } catch {
       return false;
     }
+  }
+
+  /** v3.8：当前循环音频 src（pending 也算）。 */
+  getLoopSrc(): string | null {
+    return this.loopSrc ?? this.loopPending?.src ?? null;
+  }
+
+  /** v3.8：循环播放音频资产；context 未建时 pending，首次 ensureStarted 后自动开。 */
+  async playLoop(src: string, volume = 1, loop = true): Promise<boolean> {
+    if (this.failed || !src) return false;
+    const nextVolume = Number.isFinite(volume) ? clamp(volume, 0, 1) : 1;
+    const ctx = this.ctx;
+    const master = this.master;
+    // 同源不叠层：正在播放则只调 gain/loop。
+    if (this.loopSrc === src && this.loopSource && this.loopGain && ctx) {
+      this.loopVolume = nextVolume;
+      this.loopRepeat = loop;
+      try {
+        this.loopGain.gain.setTargetAtTime(nextVolume, ctx.currentTime, 0.02);
+        this.loopSource.loop = loop;
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+    if (this.loopPending?.src === src) {
+      this.loopPending = { src, volume: nextVolume, loop };
+      return true;
+    }
+    if (!ctx || !master) {
+      this.loopPending = { src, volume: nextVolume, loop };
+      return true;
+    }
+    this.stopLoop(30);
+    const token = ++this.loopToken;
+    const buffer = await this.loadAsset(src);
+    if (token !== this.loopToken) return false;
+    if (!buffer || !this.ctx || !this.master) return false;
+    try {
+      void this.ctx.resume().catch(() => undefined);
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = loop;
+      const gain = this.ctx.createGain();
+      gain.gain.value = nextVolume;
+      source.connect(gain);
+      gain.connect(this.master);
+      this.sources.add(source);
+      this.loopSrc = src;
+      this.loopSource = source;
+      this.loopGain = gain;
+      this.loopVolume = nextVolume;
+      this.loopRepeat = loop;
+      this.loopPending = null;
+      source.onended = () => {
+        this.sources.delete(source);
+        try {
+          source.disconnect();
+          gain.disconnect();
+        } catch {
+          /* ignore */
+        }
+        if (this.loopSource === source) {
+          this.loopSrc = null;
+          this.loopSource = null;
+          this.loopGain = null;
+        }
+      };
+      source.start();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** v3.8：停止循环（20–80ms 淡出），清 pending。 */
+  stopLoop(fadeMs = 50): void {
+    this.loopToken += 1;
+    this.loopPending = null;
+    this.loopSrc = null;
+    const source = this.loopSource;
+    const gain = this.loopGain;
+    this.loopSource = null;
+    this.loopGain = null;
+    if (!source || !gain || !this.ctx) return;
+    const ctx = this.ctx;
+    const fade = clamp(Number.isFinite(fadeMs) ? fadeMs : 50, 20, 80) / 1000;
+    const now = ctx.currentTime;
+    try {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now);
+      gain.gain.linearRampToValueAtTime(0.0001, now + fade);
+    } catch {
+      /* ignore */
+    }
+    try {
+      source.stop(now + fade + 0.02);
+    } catch {
+      /* already stopped */
+    }
+  }
+
+  private resumePendingLoop(): void {
+    const pending = this.loopPending;
+    if (!pending || !this.ctx || !this.master) return;
+    this.loopPending = null;
+    void this.playLoop(pending.src, pending.volume, pending.loop);
   }
 
   /** v2.0：谱模式里按下一个键，用当前谱作为音色试听。 */

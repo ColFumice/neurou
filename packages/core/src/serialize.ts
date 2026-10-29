@@ -386,6 +386,10 @@ export function serialize(ir: WorldIR): string {
     w.line(0, `音频资产 ${asset.name} "${asset.src}"`);
   }
   if ((ir.audioAssets ?? []).length > 0) w.blank();
+  if (ir.bgm) {
+    w.line(0, `配乐 ${ir.bgm.asset} 音量 ${numberText(ir.bgm.volume)} 循环 ${ir.bgm.loop ? '是' : '否'}`);
+    w.blank();
+  }
 
   const stringsByOwner = new Map<string, IRString[]>();
   const globals: IRString[] = [];

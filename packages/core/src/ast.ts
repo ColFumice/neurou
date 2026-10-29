@@ -197,6 +197,15 @@ export interface AudioAssetDecl extends DeclBase {
   src: string;
 }
 
+/** v3.8：世界循环配乐；引用一个音频资产。 */
+export interface BgmDecl extends DeclBase {
+  k: 'bgm';
+  asset: string;
+  /** 0..1，默认 0.35。 */
+  volume: number;
+  loop: boolean;
+}
+
 /**
  * 谱：一组采样音段，描述某个维度随参数变化的曲线。
  *
@@ -288,7 +297,8 @@ export type Decl =
   | EndingDecl
   | SpectrumDecl
   | MatrixDecl
-  | AudioAssetDecl;
+  | AudioAssetDecl
+  | BgmDecl;
 
 export interface Program {
   decls: Decl[];
@@ -319,6 +329,7 @@ export const DECL_KEYWORDS = [
   '谱',
   '关系谱',
   '音频资产',
+  '配乐',
 ] as const;
 
 export function isStringKeyword(word: string): word is keyof typeof STRING_KEYWORDS {

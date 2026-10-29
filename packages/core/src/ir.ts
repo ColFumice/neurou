@@ -239,6 +239,14 @@ export interface IRAudioAsset {
   src: string;
 }
 
+/** v3.8：世界配乐；播放层根据它启动循环音频。 */
+export interface IRBgm {
+  /** 音频资产的 id/名字。 */
+  asset: string;
+  volume: number;
+  loop: boolean;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -249,6 +257,8 @@ export interface WorldIR {
   matrices: IRMatrix[];
   /** v3.7：信号音频 cue 可用的资产。 */
   audioAssets?: IRAudioAsset[];
+  /** v3.8：世界循环配乐。 */
+  bgm?: IRBgm;
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];

@@ -2,6 +2,7 @@ import type {
   ActionDecl,
   AudioAssetDecl,
   AxiomDecl,
+  BgmDecl,
   ChordDecl,
   CouplingDecl,
   CueAst,
@@ -257,6 +258,7 @@ class Parser {
     if (kw === '谱') return this.parseSpectrum();
     if (kw === '关系谱') return this.parseMatrix();
     if (kw === '音频资产') return this.parseAudioAsset();
+    if (kw === '配乐') return this.parseBgm();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -287,6 +289,39 @@ class Parser {
     const src = this.readString('音频路径');
     this.finishLine();
     return { k: 'audio-asset', name, src, span: this.spanFrom(start) };
+  }
+
+  /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */
+  private parseBgm(): BgmDecl {
+    const start = this.advance(); // 关键字
+    const asset = this.readName('配乐资产名');
+    let volume = 0.35;
+    let loop = true;
+    while (!this.at('newline') && !this.at('eof')) {
+      if (this.atIdent('音量')) {
+        this.advance();
+        volume = this.readNumber('配乐音量');
+      } else if (this.atIdent('循环')) {
+        this.advance();
+        if (this.atIdent('是') || this.atIdent('真')) {
+          this.advance();
+          loop = true;
+        } else if (this.atIdent('否') || this.atIdent('假')) {
+          this.advance();
+          loop = false;
+        } else {
+          this.fail(`「循环」只能写「是」或「否」，但读到了「${this.peek().text}」。`, this.peek().span);
+          this.skipToLineEnd();
+          break;
+        }
+      } else {
+        this.fail(`「配乐」里不认识「${this.peek().text}」。`, this.peek().span, '可用：音量、循环。');
+        this.skipToLineEnd();
+        break;
+      }
+    }
+    this.finishLine();
+    return { k: 'bgm', asset, volume, loop, span: this.spanFrom(start) };
   }
 
   private parseWorld(): WorldDecl {

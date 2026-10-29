@@ -2,6 +2,7 @@ import type {
   ActionDecl,
   AudioAssetDecl,
   AxiomDecl,
+  BgmDecl,
   ChordDecl,
   CouplingDecl,
   CueAst,
@@ -26,6 +27,7 @@ import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
 import type {
   IRAudioAsset,
   IRAxiom,
+  IRBgm,
   IRCoupling,
   IRCue,
   IREffect,
@@ -109,6 +111,8 @@ class Compiler {
   private readonly spectrumNames = new Set<string>();
   private readonly audioAssets: IRAudioAsset[] = [];
   private readonly audioAssetNames = new Set<string>();
+  private bgmDecl: BgmDecl | undefined;
+  private bgm: IRBgm | undefined;
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
 
@@ -184,6 +188,13 @@ class Compiler {
         case 'audio-asset':
           this.declareAudioAsset(d);
           break;
+        case 'bgm':
+          if (this.bgmDecl) {
+            this.error('NRO2004', '世界只能声明一段「配乐」。', d.span);
+          } else {
+            this.bgmDecl = d;
+          }
+          break;
         case 'coupling':
           this.couplingDecls.push(d);
           break;
@@ -232,6 +243,7 @@ class Compiler {
     this.checkMatrixNameConflicts();
     this.checkMatrixPhaseSources();
     this.checkTimbreReferences();
+    this.checkBgm();
   }
 
   /** v2.7：多矩阵联动——相位源指向源矩阵的格子（曲线或标量），且不能成环。 */
@@ -290,6 +302,25 @@ class Compiler {
         });
       }
     }
+  }
+
+  /** v3.8：配乐必须引用已声明的音频资产，音量 0..1。 */
+  private checkBgm(): void {
+    const decl = this.bgmDecl;
+    if (!decl) return;
+    const asset = this.audioAssets.find((item) => item.id === decl.asset || item.name === decl.asset);
+    if (!asset) {
+      this.error('NRO2101', `配乐引用了不存在的音频资产「${decl.asset}」。`, decl.span, {
+        hint: '先写「音频资产 名字 "audio/xxx.wav"」，再写「配乐 名字」。',
+      });
+      return;
+    }
+    let volume = decl.volume;
+    if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+      this.error('NRO2100', `配乐音量「${String(decl.volume)}」无效：必须在 0..1 之间。`, decl.span);
+      volume = 0.35;
+    }
+    this.bgm = { asset: asset.id, volume, loop: decl.loop };
   }
 
   /** v3.7：音频资产，路径限制在 audio/ 下的一层音频文件。 */
@@ -1799,6 +1830,7 @@ class Compiler {
       spectra: this.spectra,
       matrices: this.matrices,
       ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
+      ...(this.bgm ? { bgm: this.bgm } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,

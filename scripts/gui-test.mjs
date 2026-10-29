@@ -1423,13 +1423,15 @@ const assetPage = await browser.newPage({ viewport: { width: 1440, height: 900 }
 await assetPage.goto(`${URL}?world=${encodeURIComponent('examples/soundscape.nro')}`, { waitUntil: 'networkidle' });
 await assetPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await assetPage.waitForTimeout(700);
+const assetApp = assetPage.locator('[data-testid="ink-app"]');
+check('世界配乐 BGM 被识别', (await assetApp.getAttribute('data-bgm')) === '雨幕', String(await assetApp.getAttribute('data-bgm')));
+check('配乐解析到音频资产路径', (await assetApp.getAttribute('data-bgm-src')) === 'audio/rain.wav', String(await assetApp.getAttribute('data-bgm-src')));
 await assetPage.mouse.click(720, 450);
 await assetPage.waitForTimeout(300);
 await assetPage.keyboard.press('Enter');
 await assetPage.waitForTimeout(250);
 await assetPage.keyboard.press('Enter');
 await assetPage.waitForTimeout(1400);
-const assetApp = assetPage.locator('[data-testid="ink-app"]');
 check('音频资产 cue 被消费', Number(await assetApp.getAttribute('data-cue-assets')) >= 1, String(await assetApp.getAttribute('data-cue-assets')));
 check('音频资产 cue 来源标记', (await assetApp.getAttribute('data-last-cue-kind')) === 'asset', String(await assetApp.getAttribute('data-last-cue-kind')));
 check('音频资产 cue 参数/strength', (await assetApp.getAttribute('data-last-cue')) === '钟声采样:0.8', String(await assetApp.getAttribute('data-last-cue')));

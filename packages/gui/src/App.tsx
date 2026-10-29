@@ -364,6 +364,20 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [universe]);
 
+  // v3.8：世界配乐——引用音频资产，循环播放；首次手势后由引擎自动启动。
+  const bgm = worldIR?.bgm;
+  const bgmAsset = bgm ? worldIR?.audioAssets?.find((item) => item.id === bgm.asset || item.name === bgm.asset) : undefined;
+  const bgmSrc = bgmAsset?.src;
+  useEffect(() => {
+    const audio = getStringAudio();
+    if (!bgm || !bgmSrc) {
+      audio.stopLoop();
+      return;
+    }
+    void audio.playLoop(`/${bgmSrc}`, bgm.volume, bgm.loop);
+  }, [bgm?.asset, bgm?.volume, bgm?.loop, bgmSrc]);
+  useEffect(() => () => getStringAudio().stopLoop(), []);
+
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
     const audio = getStringAudio();
@@ -647,6 +661,10 @@ export function App() {
       data-audio-volume={audioPref.volume}
       data-audio-muted={audioPref.muted ? 'true' : 'false'}
       data-audio-level={audioLevel(audioPref)}
+      data-bgm={bgm?.asset ?? ''}
+      data-bgm-volume={bgm?.volume ?? 0}
+      data-bgm-loop={bgm?.loop ? 'true' : 'false'}
+      data-bgm-src={bgmSrc ?? ''}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}
