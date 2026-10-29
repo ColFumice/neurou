@@ -80,3 +80,31 @@ body {
     opacity: 0;
   }
 }
+
+/* v4.4：存档槽淡列表（无面板，仅文字）。 */
+.slot-menu {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.slot-row {
+  opacity: 0.28;
+  transition: opacity 140ms ease, letter-spacing 140ms ease;
+}
+
+.slot-row--selected {
+  opacity: 0.88;
+  letter-spacing: 0.14em;
+  font-size: 14px;
+}

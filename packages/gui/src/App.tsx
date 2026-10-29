@@ -96,6 +96,20 @@ function clearRunSave(file: string, seed: number, slot: number): void {
   }
 }
 
+interface SlotInfo {
+  slot: number;
+  exists: boolean;
+  tick: number;
+  ended: boolean;
+}
+
+function readAllSlots(file: string, seed: number): SlotInfo[] {
+  return Array.from({ length: 10 }, (_, slot) => {
+    const saved = readRunSave(file, seed, slot);
+    return { slot, exists: Boolean(saved), tick: saved?.tick ?? 0, ended: saved?.ended ?? false };
+  });
+}
+
 interface AudioPref {
   volume: number;
   muted: boolean;
@@ -299,6 +313,10 @@ export function App() {
   const [savedTick, setSavedTick] = useState(0);
   /** v4.2：章节标题的短暂淡入。 */
   const [chapterIntro, setChapterIntro] = useState(false);
+  /** v4.4：存档槽淡列表（Backquote）。 */
+  const [slotMenuOpen, setSlotMenuOpen] = useState(false);
+  const [slotSelected, setSlotSelected] = useState(0);
+  const [slotInfos, setSlotInfos] = useState<SlotInfo[]>([]);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -538,6 +556,42 @@ export function App() {
     window.addEventListener('click', onClickChapter, true);
     return () => window.removeEventListener('click', onClickChapter, true);
   }, [nextChapter, prevChapter, universe]);
+
+  // v4.4：Backquote 打开 0..9 存档槽淡列表；上下选择，Enter 切换/新建。
+  useEffect(() => {
+    const onSlotKey = (event: KeyboardEvent): void => {
+      if (event.code === 'Backquote' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (slotMenuOpen) {
+          setSlotMenuOpen(false);
+        } else if (screenRef.current === 'strings') {
+          setSlotInfos(readAllSlots(WORLD_FILE, INITIAL_SEED));
+          setSlotSelected(RUN_SLOT);
+          setSlotMenuOpen(true);
+        }
+        return;
+      }
+      if (!slotMenuOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.code === 'Escape') {
+        setSlotMenuOpen(false);
+      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        const step = event.code === 'ArrowDown' ? 1 : -1;
+        setSlotSelected((current) => (current + step + 10) % 10);
+      } else if (event.code === 'Enter') {
+        saveRunRef.current();
+        const saved = readRunSave(WORLD_FILE, INITIAL_SEED, slotSelected);
+        const mode = saved ? 'resume=1' : 'fresh=1';
+        window.location.assign(
+          `${window.location.pathname}?world=${encodeURIComponent(WORLD_FILE)}&seed=${INITIAL_SEED}&slot=${slotSelected}&${mode}`,
+        );
+      }
+    };
+    window.addEventListener('keydown', onSlotKey, true);
+    return () => window.removeEventListener('keydown', onSlotKey, true);
+  }, [slotMenuOpen, slotSelected]);
 
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
@@ -831,6 +885,8 @@ export function App() {
       data-prev-chapter={prevChapter}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
+      data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
+      data-slot-menu-selected={slotMenuOpen ? slotSelected : ''}
       data-resumed={resumed ? 'true' : 'false'}
       data-save-tick={savedTick}
       data-slot={RUN_SLOT}
@@ -869,6 +925,19 @@ export function App() {
       {chapterIntro && chapterTitle ? (
         <div className="chapter-intro" data-testid="chapter-intro">
           {chapterTitle}
+        </div>
+      ) : null}
+      {slotMenuOpen ? (
+        <div className="slot-menu" data-testid="slot-menu">
+          {slotInfos.map((info) => (
+            <span
+              key={info.slot}
+              className={`slot-row${info.slot === slotSelected ? ' slot-row--selected' : ''}`}
+              data-slot-row={info.slot}
+            >
+              {info.slot} · {info.exists ? `${info.tick} 拍${info.ended ? ' · 完' : ''}` : '空'}
+            </span>
+          ))}
         </div>
       ) : null}
     </div>

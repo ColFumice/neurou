@@ -1542,6 +1542,24 @@ await slotPage.waitForTimeout(800);
 check('slot=2 刷新后续档', (await slotApp.getAttribute('data-slot')) === '2' && (await slotApp.getAttribute('data-resumed')) === 'true', `${await slotApp.getAttribute('data-slot')}/${await slotApp.getAttribute('data-resumed')}`);
 await slotPage.close();
 
+// v4.4：Backquote 存档槽淡列表
+const slotMenuPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await slotMenuPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&slot=0&fresh=1`, { waitUntil: 'networkidle' });
+await slotMenuPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await slotMenuPage.waitForTimeout(700);
+const slotMenuApp = slotMenuPage.locator('[data-testid="ink-app"]');
+await slotMenuPage.keyboard.press('Backquote');
+await slotMenuPage.waitForTimeout(250);
+check('Backquote 打开存档槽列表', (await slotMenuApp.getAttribute('data-slot-menu-open')) === 'true' && (await slotMenuPage.locator('[data-testid="slot-menu"] .slot-row').count()) === 10, String(await slotMenuPage.locator('[data-testid="slot-menu"] .slot-row').count()));
+await slotMenuPage.keyboard.press('ArrowDown');
+await slotMenuPage.keyboard.press('ArrowDown');
+await slotMenuPage.waitForTimeout(120);
+check('存档槽上下选择', (await slotMenuApp.getAttribute('data-slot-menu-selected')) === '2', String(await slotMenuApp.getAttribute('data-slot-menu-selected')));
+await slotMenuPage.keyboard.press('Enter');
+await slotMenuPage.waitForTimeout(900);
+check('Enter 切到 slot=2', (await slotMenuApp.getAttribute('data-slot')) === '2', String(await slotMenuApp.getAttribute('data-slot')));
+await slotMenuPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
