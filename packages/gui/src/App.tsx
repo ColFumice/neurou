@@ -317,6 +317,8 @@ export function App() {
   const [slotMenuOpen, setSlotMenuOpen] = useState(false);
   const [slotSelected, setSlotSelected] = useState(0);
   const [slotInfos, setSlotInfos] = useState<SlotInfo[]>([]);
+  /** v4.5：结局多出口选择。 */
+  const [choiceSelected, setChoiceSelected] = useState(0);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -501,18 +503,31 @@ export function App() {
   }, [bgm?.asset, bgm?.volume, bgm?.loop, bgmSrc]);
   useEffect(() => () => getStringAudio().stopLoop(), []);
 
-  // v4.1/v4.3：上一章 / 下一章；结局专属下一章优先于世界默认。
+  // v4.1/v4.3/v4.5：上一章 / 下一章；结局多出口。
   const worldNextRaw = worldIR?.meta['下一章'];
   const worldNextChapter =
     typeof worldNextRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(worldNextRaw) ? worldNextRaw : '';
   const endedId = universe?.state.ended?.id;
-  const endedNextRaw = endedId ? worldIR?.endings.find((ending) => ending.id === endedId)?.nextChapter : undefined;
-  const nextChapter =
-    typeof endedNextRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(endedNextRaw) ? endedNextRaw : worldNextChapter;
+  const endedEnding = endedId ? worldIR?.endings.find((ending) => ending.id === endedId) : undefined;
+  const choiceRaw = endedEnding?.nextChapters ?? (endedEnding?.nextChapter ? [endedEnding.nextChapter] : []);
+  const chapterChoices = Array.from(
+    new Set(choiceRaw.filter((path) => /^examples\/[^/\\]+\.nro$/.test(path))),
+  );
+  const nextChapter = chapterChoices[0] ?? worldNextChapter;
   const prevChapterRaw = worldIR?.meta['上一章'];
   const prevChapter =
     typeof prevChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(prevChapterRaw) ? prevChapterRaw : '';
   const chapterTitle = typeof worldIR?.meta['章节'] === 'string' ? String(worldIR.meta['章节']) : '';
+  const goChapter = (chapter: string): void => {
+    if (!chapter) return;
+    saveRunRef.current();
+    window.location.assign(
+      `${window.location.pathname}?world=${encodeURIComponent(chapter)}&seed=${INITIAL_SEED}&slot=${RUN_SLOT}`,
+    );
+  };
+  useEffect(() => {
+    setChoiceSelected(0);
+  }, [endedId, chapterChoices.length]);
   useEffect(() => {
     if (!chapterTitle) {
       setChapterIntro(false);
@@ -524,38 +539,48 @@ export function App() {
   }, [chapterTitle]);
   useEffect(() => {
     const onChapterKey = (event: KeyboardEvent): void => {
+      if (!universe?.state.ended) return;
+      if (chapterChoices.length > 1) {
+        if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const step = event.code === 'ArrowDown' ? 1 : -1;
+          setChoiceSelected((current) => (current + step + chapterChoices.length) % chapterChoices.length);
+          return;
+        }
+        if (event.code === 'Enter') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          goChapter(chapterChoices[choiceSelected] ?? chapterChoices[0]!);
+        }
+        return;
+      }
       const target = event.code === 'KeyN' ? nextChapter : event.code === 'KeyB' ? prevChapter : '';
       if (!target || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (!universe?.state.ended) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      saveRunRef.current();
-      window.location.assign(
-        `${window.location.pathname}?world=${encodeURIComponent(target)}&seed=${INITIAL_SEED}&slot=${RUN_SLOT}`,
-      );
+      goChapter(target);
     };
     window.addEventListener('keydown', onChapterKey, true);
     return () => window.removeEventListener('keydown', onChapterKey, true);
-  }, [nextChapter, prevChapter, universe]);
+  }, [chapterChoices, choiceSelected, nextChapter, prevChapter, universe]);
 
   // v4.2：触控/鼠标结局点击——右半屏下一章、左半屏上一章（桌面 N/B 仍保留）。
   useEffect(() => {
     const onClickChapter = (event: MouseEvent): void => {
       if (!universe?.state.ended || screenRef.current !== 'strings') return;
+      if (chapterChoices.length > 1) return; // 多出口用选择列表
       const target = event.target as HTMLElement | null;
       if (target?.closest('[data-testid="matrix-field"], [data-testid="spectrum-field"]')) return;
       const chapter = event.clientX >= window.innerWidth / 2 ? nextChapter : prevChapter;
       if (!chapter) return;
       event.preventDefault();
       event.stopPropagation();
-      saveRunRef.current();
-      window.location.assign(
-        `${window.location.pathname}?world=${encodeURIComponent(chapter)}&seed=${INITIAL_SEED}&slot=${RUN_SLOT}`,
-      );
+      goChapter(chapter);
     };
     window.addEventListener('click', onClickChapter, true);
     return () => window.removeEventListener('click', onClickChapter, true);
-  }, [nextChapter, prevChapter, universe]);
+  }, [chapterChoices, nextChapter, prevChapter, universe]);
 
   // v4.4：Backquote 打开 0..9 存档槽淡列表；上下选择，Enter 切换/新建。
   useEffect(() => {
@@ -883,6 +908,8 @@ export function App() {
       data-bgm-src={bgmSrc ?? ''}
       data-next-chapter={nextChapter}
       data-prev-chapter={prevChapter}
+      data-chapter-choices={chapterChoices.length}
+      data-chapter-choice-selected={chapterChoices.length > 1 ? choiceSelected : ''}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
@@ -925,6 +952,23 @@ export function App() {
       {chapterIntro && chapterTitle ? (
         <div className="chapter-intro" data-testid="chapter-intro">
           {chapterTitle}
+        </div>
+      ) : null}
+      {chapterChoices.length > 1 && universe?.state.ended ? (
+        <div className="chapter-choices" data-testid="chapter-choices">
+          {chapterChoices.map((path, index) => (
+            <span
+              key={path}
+              className={`chapter-choice${index === choiceSelected ? ' chapter-choice--selected' : ''}`}
+              data-chapter-choice={path}
+              onClick={(event) => {
+                event.stopPropagation();
+                goChapter(path);
+              }}
+            >
+              {path.replace(/^examples\//, '').replace(/\.nro$/, '')}
+            </span>
+          ))}
         </div>
       ) : null}
       {slotMenuOpen ? (

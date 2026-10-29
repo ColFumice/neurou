@@ -1658,17 +1658,23 @@ class Compiler {
       if (lowered.type !== 'boolean' && lowered.type !== 'any') {
         this.error('NRO2003', `结局「${d.name}」的触发条件必须是真假判断。`, d.guard.span);
       }
-      const nextChapter = d.nextChapter;
-      if (nextChapter !== undefined && !/^examples\/[^/\\]+\.nro$/.test(nextChapter)) {
-        this.error('NRO2101', `结局「${d.name}」的下一章路径「${nextChapter}」无效。`, d.span, {
-          hint: '只允许 examples/<名字>.nro，并写成字符串。',
-        });
+      const rawNexts = d.nextChapters ?? (d.nextChapter ? [d.nextChapter] : []);
+      const nexts: string[] = [];
+      for (const nextChapter of rawNexts) {
+        if (!/^examples\/[^/\\]+\.nro$/.test(nextChapter)) {
+          this.error('NRO2101', `结局「${d.name}」的下一章路径「${nextChapter}」无效。`, d.span, {
+            hint: '只允许 examples/<名字>.nro，并写成字符串。',
+          });
+        } else {
+          nexts.push(nextChapter);
+        }
       }
       this.endings.push({
         id: `ending:${d.name}`,
         name: d.name,
         guard: lowered.expr,
-        ...(nextChapter !== undefined && /^examples\/[^/\\]+\.nro$/.test(nextChapter) ? { nextChapter } : {}),
+        ...(nexts.length > 0 ? { nextChapter: nexts[0]! } : {}),
+        ...(nexts.length > 1 ? { nextChapters: nexts } : {}),
         span: d.span,
       });
       this.markEndingReads(lowered.expr);

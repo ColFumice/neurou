@@ -1593,6 +1593,7 @@ class Parser {
     const name = this.readName('结局名');
     let guard: Expr | undefined;
     let declNext: string | undefined;
+    const declNexts: string[] = [];
     const hadColon = this.eat('punct', ':');
     if (hadColon && !this.atLineEnd()) {
       if (this.atIdent('当')) this.advance();
@@ -1612,6 +1613,7 @@ class Parser {
             this.finishLine();
           } else if (key === '下一章') {
             declNext = this.readString('下一章路径');
+            declNexts.push(declNext);
             this.finishLine();
           } else {
             this.fail(`结局里不认识「${key}」。`, this.peek().span);
@@ -1625,7 +1627,14 @@ class Parser {
       this.fail(`结局「${name}」没有触发条件。`, start.span, '写成「结局 崩坏: 当 信任 <= 0」。');
       throw new ParseError('unreachable');
     }
-    return { k: 'ending', name, guard, ...(declNext ? { nextChapter: declNext } : {}), span: this.spanFrom(start) };
+    return {
+      k: 'ending',
+      name,
+      guard,
+      ...(declNext ? { nextChapter: declNext } : {}),
+      ...(declNexts.length > 0 ? { nextChapters: declNexts } : {}),
+      span: this.spanFrom(start),
+    };
   }
 
   // ---------- 表达式 ----------

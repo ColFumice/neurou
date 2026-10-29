@@ -432,10 +432,11 @@ export function serialize(ir: WorldIR): string {
   for (const signal of ir.signals) signalBlock(w, signal);
   if (ir.phases.length > 0) phasesBlock(w, ir.phases);
   for (const ending of ir.endings) {
-    if (ending.nextChapter) {
+    const nexts = ending.nextChapters ?? (ending.nextChapter ? [ending.nextChapter] : []);
+    if (nexts.length > 0) {
       w.line(0, `结局 ${ending.name}:`);
       w.line(1, `当 ${exprText(ending.guard)}`);
-      w.line(1, `下一章 ${stringText(ending.nextChapter)}`);
+      for (const next of nexts) w.line(1, `下一章 ${stringText(next)}`);
     } else {
       w.line(0, endingLine(ending));
     }

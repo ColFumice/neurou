@@ -47,4 +47,22 @@ describe('章节/下一章元数据（v4.0）', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.diagnostics.errors.some((e) => e.code === 'NRO2101')).toBe(true);
   });
+
+  it('保留多个结局出口并序列化', () => {
+    const source = WORLD.replace(
+      '结局 完: 当 进度 >= 0',
+      '结局 完:\n  当 进度 >= 0\n  下一章 "examples/lighthouse.nro"\n  下一章 "examples/tuner.nro"',
+    );
+    const result = compileText(source, 'chapter-multi.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.endings[0]?.nextChapters).toEqual([
+      'examples/lighthouse.nro',
+      'examples/tuner.nro',
+    ]);
+    const text = serialize(result.ir);
+    expect(text).toContain('下一章 "examples/lighthouse.nro"');
+    expect(text).toContain('下一章 "examples/tuner.nro"');
+    expect(compileText(text, 'chapter-multi-roundtrip.nro').ok).toBe(true);
+  });
 });

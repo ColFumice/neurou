@@ -108,3 +108,31 @@ body {
   letter-spacing: 0.14em;
   font-size: 14px;
 }
+
+/* v4.5：结局多出口淡列表。 */
+.chapter-choices {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.chapter-choice {
+  opacity: 0.32;
+  cursor: default;
+  transition: opacity 140ms ease, letter-spacing 140ms ease;
+}
+
+.chapter-choice--selected {
+  opacity: 0.9;
+  letter-spacing: 0.16em;
+  font-size: 15px;
+}

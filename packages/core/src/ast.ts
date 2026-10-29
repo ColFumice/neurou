@@ -185,8 +185,10 @@ export interface EndingDecl extends DeclBase {
   k: 'ending';
   name: string;
   guard: Expr;
-  /** v4.3：这个结局专属的下一章（块写法 `下一章 "examples/..."`）。 */
+  /** v4.3：这个结局专属的下一章（块写法）；v4.5 起可多个出口。 */
   nextChapter?: string;
+  /** v4.5：结局的全部出口，按声明顺序。 */
+  nextChapters?: string[];
 }
 
 /**

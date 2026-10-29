@@ -78,6 +78,7 @@
 结局 归港:
   当 航向 >= 90 且 灯塔 >= 65
   下一章 "examples/soundscape.nro"
+  下一章 "examples/lighthouse.nro"
 
 结局 失踪:
   当 航向 <= 8

@@ -26,7 +26,8 @@ const TEMP_TWO = 'examples/_acceptance-two.nro';
 const TEMP_PLAY = 'examples/_acceptance-play.nro';
 const TEMP_AUDIO = 'examples/_acceptance-audio.nro';
 const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER];
+const TEMP_CHOICES = 'examples/_acceptance-choices.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
   下一章 "examples/garden.nro"
@@ -39,6 +40,19 @@ const CHAPTER_WORLD_SOURCE = `世界 章节切换
 结局 终:
   当 进度 >= 0
   下一章 "examples/tuner.nro"
+`;
+const CHOICES_WORLD_SOURCE = `世界 多出口
+  版本 0.1
+  下一章 "examples/tuner.nro"
+
+叙事弦 进度
+  类型 数值 0..100
+  基线 10
+
+结局 终:
+  当 进度 >= 0
+  下一章 "examples/tuner.nro"
+  下一章 "examples/garden.nro"
 `;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1
@@ -1559,6 +1573,22 @@ await slotMenuPage.keyboard.press('Enter');
 await slotMenuPage.waitForTimeout(900);
 check('Enter 切到 slot=2', (await slotMenuApp.getAttribute('data-slot')) === '2', String(await slotMenuApp.getAttribute('data-slot')));
 await slotMenuPage.close();
+
+// v4.5：结局多出口选择
+writeFileSync(TEMP_CHOICES, CHOICES_WORLD_SOURCE, 'utf8');
+const choicesPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await choicesPage.goto(`${URL}?world=${encodeURIComponent(TEMP_CHOICES)}&fresh=1`, { waitUntil: 'networkidle' });
+await choicesPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await choicesPage.waitForTimeout(1100);
+const choicesApp = choicesPage.locator('[data-testid="ink-app"]');
+check('结局多出口显示两个选择', Number(await choicesApp.getAttribute('data-chapter-choices')) === 2 && (await choicesPage.locator('[data-testid="chapter-choices"] .chapter-choice').count()) === 2, `${await choicesApp.getAttribute('data-chapter-choices')}`);
+await choicesPage.keyboard.press('ArrowDown');
+await choicesPage.waitForTimeout(150);
+check('多出口方向键选择', (await choicesApp.getAttribute('data-chapter-choice-selected')) === '1', String(await choicesApp.getAttribute('data-chapter-choice-selected')));
+await choicesPage.keyboard.press('Enter');
+await choicesPage.waitForTimeout(1200);
+check('多出口 Enter 去第二个世界', (await choicesApp.getAttribute('data-world-file')) === 'examples/garden.nro', String(await choicesApp.getAttribute('data-world-file')));
+await choicesPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

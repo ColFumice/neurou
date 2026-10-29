@@ -152,6 +152,8 @@ export interface IREnding {
   guard: LExpr;
   /** v4.3：结局专属下一章；缺省用世界元数据「下一章」。 */
   nextChapter?: string;
+  /** v4.5：结局的多个出口，按声明顺序；GUI 会显示选择列表。 */
+  nextChapters?: string[];
   span?: Span;
 }
 
