@@ -1686,6 +1686,7 @@ check('Faust 源码生成成功', (await faustApp.getAttribute('data-faust-statu
 await faustPage.keyboard.press('Space');
 await faustPage.waitForTimeout(300);
 check('现象层显示音频端口状态', (await faustPage.locator('[data-testid="preview-audio"]').count()) === 1, String(await faustPage.locator('[data-testid="preview-audio"]').count()));
+check('WebAudio 兜底已接线', (await faustApp.getAttribute('data-faust-runtime')) === 'webaudio-fallback', String(await faustApp.getAttribute('data-faust-audio')));
 await faustPage.close();
 
 // v5.10：F8 场景切换

@@ -219,7 +219,7 @@ engine.subscribe(listener)
 - **v5.3**：场景切换 DSL（初始场景、切换场景、收尾生效）；
 - **v5.4**：GUI 改为 Host：调律台 + Space 现象层蒙版（已完成；结构编辑仍是重建 Engine，真正保 tick 热替换后置）；
 - **v5.5**：保 tick 热替换（已完成）；模块/命名空间/用户函数（语言层，不与场景混在一起）；
-- **v5.27**：GLSL 多端口与时间/纹理（已完成：多 canvas + uTime + 程序化纹理）；
+- **v5.28**：Faust WebAudio 兜底（已完成：预览试听；非 Faust 编译器）；
 
 ## 11. 后端 DSL 适配层（GLSL / Faust，v5.6+）
 

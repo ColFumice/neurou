@@ -41,6 +41,7 @@ import { buildChapterGraph, type ChapterGraphNode } from './chapterGraph.js';
 import { compileGlsl, type GlslArtifact } from './glslBackend.js';
 import { GlslCanvas } from './GlslCanvas.js';
 import { compileFaust, type FaustArtifact } from './faustBackend.js';
+import { FaustFallback } from './faustAudio.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -374,6 +375,8 @@ export function App() {
   const [faustArtifact, setFaustArtifact] = useState<FaustArtifact | null>(null);
   const [faustStatus, setFaustStatus] = useState('');
   const [faustError, setFaustError] = useState('');
+  const [faustAudioState, setFaustAudioState] = useState('stopped');
+  const faustAudioRef = useRef<FaustFallback | null>(null);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -736,6 +739,30 @@ export function App() {
     setFaustError(compiled.result.ok ? '' : compiled.result.error);
   }, [worldIR, universe]);
 
+  // v5.28：Faust 源码 ≠ Faust 编译；预览时用 WebAudio 兜底试听端口参数。
+  useEffect(() => {
+    const audio = faustAudioRef.current ?? (faustAudioRef.current = new FaustFallback());
+    const audioPort = (worldIR?.ports ?? []).find((port) => port.kind === '音频');
+    if (!previewOpen || faustStatus !== 'source' || !audioPort || !universe || audioPref.muted || audioPref.volume <= 0) {
+      audio.stop();
+      setFaustAudioState(audio.state);
+      return;
+    }
+    const values: number[] = [];
+    for (const param of audioPort.params) {
+      const value = universe.get(param.string);
+      values.push(typeof value === 'number' ? value : 0);
+    }
+    audio.start(values, audioPref.volume);
+    setFaustAudioState(audio.state);
+    return () => {
+      audio.stop();
+      setFaustAudioState('stopped');
+    };
+  }, [previewOpen, faustStatus, audioPref.muted, audioPref.volume, worldIR, universe]);
+
+  useEffect(() => () => faustAudioRef.current?.stop(), []);
+
   useEffect(() => {
     const onPreviewKey = (event: KeyboardEvent): void => {
       if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -1097,6 +1124,8 @@ export function App() {
       data-glsl-status={glslStatus}
       data-glsl-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉').length}
       data-glsl-error={glslError}
+      data-faust-audio={faustAudioState}
+      data-faust-runtime="webaudio-fallback"
       data-faust-status={faustStatus}
       data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}
       data-faust-error={faustError}
@@ -1220,6 +1249,7 @@ export function App() {
             <div className="preview-audio" data-testid="preview-audio">
               音频 {faustArtifact.name} ·{' '}
               {faustArtifact.bindings.map((binding) => `${binding.param} ${binding.control}`).join(' / ')}
+              {' '}· WebAudio {faustAudioState}
             </div>
           ) : null}
           {projectMode ? (
