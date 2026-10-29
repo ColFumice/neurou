@@ -86,6 +86,9 @@ const FAUST_WORLD_SOURCE = `世界 Faust端口
 
 音频端口 潮声
   参数 强度 潮位
+
+音频端口 钟声
+  参数 强度 潮位
 `;
 const SCENES_WORLD_SOURCE = `世界 场景切换
   版本 0.1
@@ -1692,12 +1695,13 @@ await faustPage.goto(`${URL}?world=${encodeURIComponent(TEMP_FAUST)}&fresh=1`, {
 await faustPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await faustPage.waitForTimeout(700);
 const faustApp = faustPage.locator('[data-testid="ink-app"]');
-check('音频端口进入 Faust 适配', Number(await faustApp.getAttribute('data-faust-ports')) === 1, String(await faustApp.getAttribute('data-faust-ports')));
+check('音频端口进入 Faust 适配', Number(await faustApp.getAttribute('data-faust-ports')) === 2, String(await faustApp.getAttribute('data-faust-ports')));
 check('Faust 源码生成成功', (await faustApp.getAttribute('data-faust-status')) === 'source', String(await faustApp.getAttribute('data-faust-error')));
 await faustPage.keyboard.press('Space');
 await faustPage.waitForTimeout(4000);
 check('现象层显示音频端口状态', (await faustPage.locator('[data-testid="preview-audio"]').count()) === 1, String(await faustPage.locator('[data-testid="preview-audio"]').count()));
 check('Faust wasm 真实编译', (await faustApp.getAttribute('data-faust-compile')) === 'ok', `${await faustApp.getAttribute('data-faust-runtime')}/${await faustApp.getAttribute('data-faust-compile')}`);
+check('多个音频端口各自建节点', Number(await faustApp.getAttribute('data-faust-nodes')) === 2, String(await faustApp.getAttribute('data-faust-nodes')));
 check('WebAudio 兜底已接线', (await faustApp.getAttribute('data-faust-runtime')) === 'faust-wasm', String(await faustApp.getAttribute('data-faust-runtime')));
 await faustPage.close();
 

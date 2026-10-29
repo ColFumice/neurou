@@ -119,6 +119,16 @@ export class FaustWasmHost {
     this.state = 'stopped';
   }
 
+  dispose(): void {
+    this.stop();
+    try {
+      void this.context?.close();
+    } catch {
+      /* ignore */
+    }
+    this.context = null;
+  }
+
   private applyValues(values: number[]): void {
     const artifact = this.artifact;
     if (!this.node || !artifact) return;

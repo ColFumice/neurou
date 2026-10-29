@@ -42,7 +42,7 @@ import { compileGlsl, type GlslArtifact } from './glslBackend.js';
 import { GlslCanvas } from './GlslCanvas.js';
 import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import { FaustFallback } from './faustAudio.js';
-import { FaustWasmHost, compileFaustWasm } from './faustWasm.js';
+import { FaustWasmHost } from './faustWasm.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -379,8 +379,9 @@ export function App() {
   const [faustAudioState, setFaustAudioState] = useState('stopped');
   const [faustRuntime, setFaustRuntime] = useState('stopped');
   const [faustCompile, setFaustCompile] = useState('');
-  const faustAudioRef = useRef<FaustFallback | null>(null);
-  const faustWasmRef = useRef<FaustWasmHost | null>(null);
+  const [faustNodes, setFaustNodes] = useState(0);
+  const faustAudioRef = useRef<FaustFallback[]>([]);
+  const faustWasmRef = useRef<FaustWasmHost[]>([]);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -750,23 +751,23 @@ export function App() {
     setFaustError(compiled.result.ok ? '' : compiled.result.error);
   }, [worldIR, universe]);
 
-  // v5.28/v5.32：优先真实 Faust 编译；失败才回退 WebAudio 正弦兜底。
+  // v5.28/v5.32/v5.33：每个音频端口一个真实 Faust 节点；失败回退正弦兜底。
   useEffect(() => {
-    const fallback = faustAudioRef.current ?? (faustAudioRef.current = new FaustFallback());
-    const wasm = faustWasmRef.current ?? (faustWasmRef.current = new FaustWasmHost());
-    const audioPort = (worldIR?.ports ?? []).find((port) => port.kind === '音频');
+    const audioPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '音频');
     let cancelled = false;
     const stopAll = (): void => {
-      wasm.stop();
-      fallback.stop();
+      for (const host of faustWasmRef.current) host.dispose();
+      for (const fallback of faustAudioRef.current) fallback.stop();
+      faustWasmRef.current = [];
+      faustAudioRef.current = [];
       setFaustRuntime('stopped');
       setFaustAudioState('stopped');
+      setFaustNodes(0);
     };
     if (
       !previewOpen ||
       faustStatus !== 'source' ||
-      !faustArtifact ||
-      !audioPort ||
+      audioPorts.length === 0 ||
       !universe ||
       audioPref.muted ||
       audioPref.volume <= 0
@@ -775,39 +776,74 @@ export function App() {
       if (!previewOpen || audioPref.muted || audioPref.volume <= 0) setFaustCompile('');
       return stopAll;
     }
-    const values: number[] = [];
-    for (const param of audioPort.params) {
-      const value = universe.get(param.string);
-      values.push(typeof value === 'number' ? value : 0);
-    }
-    void (async () => {
-      const ok = await wasm.start(faustArtifact, values, audioPref.volume);
-      if (cancelled) {
-        wasm.stop();
-        return;
+    const values = audioPorts.map((port) => {
+      const list: number[] = [];
+      for (const param of port.params) {
+        const value = universe.get(param.string);
+        list.push(typeof value === 'number' ? value : 0);
       }
-      setFaustCompile(ok ? 'ok' : wasm.compiled ? 'ok' : wasm.compileError || 'error');
-      if (ok) {
+      return list;
+    });
+    const artifacts = audioPorts.map((port) => {
+      const params: Record<string, ReturnType<typeof universe.get>> = {};
+      for (const param of port.params) params[param.name] = universe.get(param.string);
+      return compileFaust({ id: port.id, name: port.name, kind: port.kind, params }).artifact;
+    });
+    const hosts = audioPorts.map(() => new FaustWasmHost());
+    const fallbacks = audioPorts.map(() => new FaustFallback());
+    faustWasmRef.current = hosts;
+    faustAudioRef.current = fallbacks;
+    void Promise.all(
+      hosts.map(async (host, index) => {
+        const ok = await host.start(artifacts[index]!, values[index]!, audioPref.volume);
+        if (!ok) fallbacks[index]!.start(values[index]!, audioPref.volume);
+        return ok;
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const real = results.filter(Boolean).length;
+      setFaustNodes(real);
+      setFaustCompile(
+        hosts.every((host) => host.compiled) ? 'ok' : hosts.find((host) => host.compileError)?.compileError || 'error',
+      );
+      if (real === hosts.length) {
         setFaustRuntime('faust-wasm');
-        setFaustAudioState(wasm.state);
-        return;
+        setFaustAudioState(hosts[0]?.state ?? 'playing');
+      } else if (real > 0) {
+        setFaustRuntime('mixed');
+        setFaustAudioState(hosts.find((host) => host.state !== 'stopped')?.state ?? 'playing');
+      } else {
+        setFaustRuntime('webaudio-fallback');
+        setFaustAudioState(fallbacks[0]?.state ?? 'stopped');
       }
-      fallback.start(values, audioPref.volume);
-      setFaustRuntime('webaudio-fallback');
-      setFaustAudioState(fallback.state);
-    })();
+    });
     return () => {
       cancelled = true;
-      wasm.stop();
-      fallback.stop();
+      for (const host of hosts) host.dispose();
+      for (const fallback of fallbacks) fallback.stop();
       setFaustRuntime('stopped');
       setFaustAudioState('stopped');
+      setFaustNodes(0);
     };
-  }, [previewOpen, faustStatus, faustArtifact, audioPref.muted, audioPref.volume, worldIR, universe]);
+  }, [previewOpen, faustStatus, audioPref.muted, audioPref.volume, worldIR, universe]);
+
+  // v5.33：每拍把端口参数写进 Faust 参数路径。
+  useEffect(() => {
+    const audioPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '音频');
+    if (!universe) return;
+    audioPorts.forEach((port, index) => {
+      const values = port.params.map((param) => {
+        const value = universe.get(param.string);
+        return typeof value === 'number' ? value : 0;
+      });
+      faustWasmRef.current[index]?.update(values);
+      faustAudioRef.current[index]?.update(values, audioPref.volume);
+    });
+  }, [frame, worldIR, universe, audioPref.volume]);
 
   useEffect(() => () => {
-    faustAudioRef.current?.stop();
-    faustWasmRef.current?.stop();
+    for (const host of faustWasmRef.current) host.dispose();
+    for (const fallback of faustAudioRef.current) fallback.stop();
   }, []);
 
   useEffect(() => {
@@ -1174,6 +1210,7 @@ export function App() {
       data-faust-audio={faustAudioState}
       data-faust-runtime={faustRuntime}
       data-faust-compile={faustCompile}
+      data-faust-nodes={faustNodes}
       data-glsl-textures={(worldIR?.ports ?? [])
         .filter((port) => port.kind === '视觉')
         .map((port) => port.texture?.pattern ?? '棋盘')

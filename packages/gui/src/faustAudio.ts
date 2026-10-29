@@ -25,8 +25,7 @@ export class FaustFallback {
   state: 'stopped' | 'playing' | 'suspended' | 'unavailable' = 'stopped';
 
   start(values: number[], volume: number): void {
-    const params = faustFallbackParams(values, volume);
-    try {
+    const params = faustFallbackParams(values, volume);    try {
       if (!this.context) {
         const Ctor =
           typeof window === 'undefined'
@@ -60,6 +59,13 @@ export class FaustFallback {
     } catch {
       this.state = 'unavailable';
     }
+  }
+
+  update(values: number[], volume: number): void {
+    if (!this.context || !this.oscillator || !this.gainNode) return;
+    const params = faustFallbackParams(values, volume);
+    this.oscillator.frequency.setTargetAtTime(params.frequency, this.context.currentTime, 0.08);
+    this.gainNode.gain.setTargetAtTime(params.gain, this.context.currentTime, 0.12);
   }
 
   stop(): void {
