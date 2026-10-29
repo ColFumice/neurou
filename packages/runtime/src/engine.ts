@@ -5,9 +5,11 @@ import type {
   IREffect,
   IREnding,
   IRRule,
+  IRScene,
   IRSignal,
   IRSpectrum,
   IRString,
+  IRSystem,
   WorldIR,
 } from '@neurou/core';
 import { evalExpr, asNumber, truthy, matrixCellValue, matrixTimePosition } from './eval.js';
@@ -112,6 +114,9 @@ export class Universe {
   readonly endings: IREnding[];
   readonly axioms: IRAxiom[];
   readonly couplingByFrom = new Map<string, IRCoupling[]>();
+  private readonly systemsById = new Map<string, IRSystem>();
+  private readonly systemsByPhase = new Map<string, IRSystem[]>();
+  private readonly scenesById = new Map<string, IRScene>();
   private readonly actionList: IRRule[];
 
   private queuedAction: string | undefined;
@@ -160,6 +165,24 @@ export class Universe {
     this.ensureSpectrumState();
     this.ensureMatrixState();
     this.logEnabled = opts.log ?? false;
+
+    for (const scene of world.scenes ?? []) this.scenesById.set(scene.id, scene);
+    for (const system of world.systems ?? []) {
+      this.systemsById.set(system.id, system);
+      const list = this.systemsByPhase.get(system.phase) ?? [];
+      list.push(system);
+      this.systemsByPhase.set(system.phase, list);
+    }
+    if (this.scenesById.size > 0 && !this.state.sceneId) {
+      this.state.sceneId = [...this.scenesById.keys()][0];
+    }
+    const initialScene = this.state.sceneId ? this.scenesById.get(this.state.sceneId) : undefined;
+    if (initialScene) {
+      const deltas = new Map<string, number>();
+      const fired: string[] = [];
+      this.applyEffects(initialScene.enter, initialScene.name, 'scene', deltas, fired);
+    }
+
     this.prevValues = { ...this.state.values };
     if (this.logEnabled) this.log({ tick: 0, kind: 'ending', id: 'world.start' });
   }
@@ -180,6 +203,53 @@ export class Universe {
 
   get phaseName(): string | undefined {
     return this.ir.phases[this.state.phaseIndex]?.name;
+  }
+
+  /** v5.1：当前场景名。 */
+  get sceneName(): string | undefined {
+    const id = this.state.sceneId;
+    return id ? this.scenesById.get(id)?.name : undefined;
+  }
+
+  /** v5.1：当前场景启用的系统名。 */
+  activeSystems(): string[] {
+    return this.activeSystemList().map((system) => system.name);
+  }
+
+  /** v5.1：切换运行场景；进入/离开效果立即生效。 */
+  transitionScene(nameOrId: string): boolean {
+    const scene = this.scenesById.get(nameOrId) ?? [...this.scenesById.values()].find((item) => item.name === nameOrId);
+    if (!scene) return false;
+    if (this.state.sceneId === scene.id) return false;
+    const deltas = new Map<string, number>();
+    const fired: string[] = [];
+    const previous = this.state.sceneId ? this.scenesById.get(this.state.sceneId) : undefined;
+    if (previous) this.applyEffects(previous.exit, previous.name, 'scene', deltas, fired);
+    this.state.sceneId = scene.id;
+    this.applyEffects(scene.enter, scene.name, 'scene', deltas, fired);
+    return true;
+  }
+
+  private activeSystemList(): IRSystem[] {
+    if (this.scenesById.size === 0) return [...this.systemsById.values()];
+    const scene = this.state.sceneId ? this.scenesById.get(this.state.sceneId) : undefined;
+    if (!scene) return [];
+    const names = new Set(scene.systems);
+    return [...this.systemsById.values()].filter((system) => names.has(system.name));
+  }
+
+  private runSystems(
+    phase: IRSystem['phase'],
+    deltas: Map<string, number>,
+    fired: string[],
+  ): void {
+    const active = new Set(this.activeSystemList().map((system) => system.id));
+    for (const system of this.systemsByPhase.get(phase) ?? []) {
+      if (!active.has(system.id)) continue;
+      if (system.guard && !truthy(evalExpr(system.guard, this.state))) continue;
+      this.applyEffects(system.effects, system.name, 'system', deltas, fired);
+      this.log({ tick: this.state.tick, kind: 'action', id: system.name, detail: `系统/${phase}` });
+    }
   }
 
   availableActions(): IRRule[] {
@@ -459,6 +529,7 @@ export class Universe {
 
     // 1. 投递到期的耦合
     this.deliverPending(t, deltas);
+    this.runSystems('投递', deltas, fired);
 
     // 2. 玩家动作
     if (this.queuedAction) {
@@ -471,6 +542,7 @@ export class Universe {
         this.log({ tick: t, kind: 'action', id: action.name });
       }
     }
+    this.runSystems('输入', deltas, fired);
 
     // 3. 力迫与带触发的和弦（已按偏序排好）
     for (const rule of this.orderedRules) {
@@ -487,8 +559,11 @@ export class Universe {
       this.log({ tick: t, kind: rule.kind === 'chord' ? 'chord' : 'forcing', id: rule.name });
     }
 
+    this.runSystems('规则', deltas, fired);
+
     // 4. 传导耦合：这一拍的变化，下一拍抵达邻弦
     this.propagate(deltas, t);
+    this.runSystems('传导', deltas, fired);
 
     // 5. 公理
     for (const ax of this.axioms) {
@@ -501,6 +576,8 @@ export class Universe {
       }
     }
 
+    this.runSystems('校验', deltas, fired);
+
     // 6. 结局
     if (!this.state.ended) {
       for (const en of this.endings) {
@@ -511,6 +588,8 @@ export class Universe {
         }
       }
     }
+
+    this.runSystems('终止', deltas, fired);
 
     // 7. 信号
     for (const sg of this.signals) {
@@ -531,6 +610,8 @@ export class Universe {
       }
     }
 
+    this.runSystems('观测', deltas, fired);
+
     // 8. 阈值穿越
     this.trackCrossings(t);
 
@@ -539,6 +620,8 @@ export class Universe {
 
     // 10. 谱：受迫模式先向锚点衰减，再按入队顺序叠加本拍调制（锚点不动）。
     this.applySpectrumTick();
+
+    this.runSystems('收尾', deltas, fired);
 
     this.stats.ticks++;
     this.state.tick = t + 1;
@@ -575,6 +658,9 @@ export class Universe {
     // 关系谱则整体是 v2.3a 新增的字段，统一从 IR 重写元数据/静态数据。
     this.ensureSpectrumState(true);
     this.ensureMatrixState(true);
+    if (this.scenesById.size > 0 && (!this.state.sceneId || !this.scenesById.has(this.state.sceneId))) {
+      this.state.sceneId = [...this.scenesById.keys()][0];
+    }
   }
 
   /** 从当前状态分叉出一个新宇宙（力迫的 V[G]）。 */
@@ -758,7 +844,7 @@ export class Universe {
   private applyEffects(
     effects: IREffect[],
     source: string,
-    kind: 'forcing' | 'chord' | 'action',
+    kind: 'forcing' | 'chord' | 'action' | 'system' | 'scene',
     deltas: Map<string, number>,
     fired: string[],
   ): void {

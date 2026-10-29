@@ -269,6 +269,8 @@ export interface TimelineEvent {
 export interface WorldState {
   /** 当前拍数，从 0 开始 */
   tick: number;
+  /** v5.1：当前运行场景 id；旧快照缺省时由 Universe 回退默认场景。 */
+  sceneId?: string;
   phaseIndex: number;
   phaseTick: number;
   values: Record<string, RuntimeValue>;
@@ -372,6 +374,7 @@ function cloneMatrices(matrices: Record<string, MatrixState>): Record<string, Ma
 export function createState(world: WorldIR, seed = 1, log = false): WorldState {
   return {
     tick: 0,
+    ...(world.scenes?.[0] ? { sceneId: world.scenes[0].id } : {}),
     phaseIndex: 0,
     phaseTick: 0,
     values: initialValues(world),
@@ -394,6 +397,7 @@ export function cloneState(s: WorldState): WorldState {
   for (const [k, v] of Object.entries(s.values)) values[k] = cloneValue(v);
   return {
     tick: s.tick,
+    ...(s.sceneId ? { sceneId: s.sceneId } : {}),
     phaseIndex: s.phaseIndex,
     phaseTick: s.phaseTick,
     values,
@@ -414,6 +418,8 @@ export function cloneState(s: WorldState): WorldState {
 /** 可移植的存档格式：把 Set 变成数组，便于 JSON。 */
 export interface SerializedState {
   tick: number;
+  /** v5.1：场景 id（可选）。 */
+  sceneId?: string;
   phaseIndex: number;
   phaseTick: number;
   values: Record<string, string | number | boolean | string[] | null>;
@@ -436,6 +442,7 @@ export function serializeState(s: WorldState): SerializedState {
   for (const [k, v] of Object.entries(s.values)) values[k] = toJson(v);
   return {
     tick: s.tick,
+    ...(s.sceneId ? { sceneId: s.sceneId } : {}),
     phaseIndex: s.phaseIndex,
     phaseTick: s.phaseTick,
     values,
@@ -457,6 +464,7 @@ export function deserializeState(s: SerializedState): WorldState {
   for (const [k, v] of Object.entries(s.values)) values[k] = toRuntime(v);
   return {
     tick: s.tick,
+    ...(s.sceneId ? { sceneId: s.sceneId } : {}),
     phaseIndex: s.phaseIndex,
     phaseTick: s.phaseTick,
     values,

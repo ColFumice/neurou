@@ -10,9 +10,11 @@ import type {
   IRMatrix,
   IRPhase,
   IRRule,
+  IRScene,
   IRSignal,
   IRSpectrum,
   IRString,
+  IRSystem,
   LExpr,
   WorldIR,
 } from './ir.js';
@@ -275,6 +277,32 @@ function loopBlock(w: Writer, loop: IRLoop, byId: Map<string, IRCoupling>): void
   w.blank();
 }
 
+// ---------- 运行层：系统 / 场景 ----------
+
+function systemBlock(w: Writer, system: IRSystem): void {
+  w.line(0, `系统 ${system.name}`);
+  w.line(1, `阶段 ${system.phase}`);
+  if (system.every) w.line(1, '每拍');
+  if (system.guard) w.line(1, `当 ${exprText(system.guard)}`);
+  w.line(1, '效果');
+  for (const effect of system.effects) w.line(2, effectLine(effect));
+  w.blank();
+}
+
+function sceneBlock(w: Writer, scene: IRScene): void {
+  w.line(0, `场景 ${scene.name}`);
+  for (const system of scene.systems) w.line(1, `启用 系统 ${system}`);
+  if (scene.enter.length > 0) {
+    w.line(1, '进入');
+    for (const effect of scene.enter) w.line(2, effectLine(effect));
+  }
+  if (scene.exit.length > 0) {
+    w.line(1, '离开');
+    for (const effect of scene.exit) w.line(2, effectLine(effect));
+  }
+  w.blank();
+}
+
 // ---------- 规则 ----------
 
 function effectLine(e: IREffect): string {
@@ -414,6 +442,8 @@ export function serialize(ir: WorldIR): string {
 
   for (const spectrum of ir.spectra) spectrumBlock(w, spectrum);
   for (const matrix of ir.matrices) matrixBlock(w, matrix);
+  for (const system of ir.systems ?? []) systemBlock(w, system);
+  for (const scene of ir.scenes ?? []) sceneBlock(w, scene);
 
   const byId = new Map(ir.couplings.map((c) => [c.id, c]));
   const loopCouplingIds = new Set(ir.couplings.filter((c) => c.loop).map((c) => c.id));

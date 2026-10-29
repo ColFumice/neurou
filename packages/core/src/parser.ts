@@ -21,12 +21,16 @@ import type {
   PhaseAst,
   Program,
   ResponseCurve,
+  SceneDecl,
   SignalDecl,
   SpectrumDecl,
   StringDecl,
   StringKind,
+  SystemDecl,
+  SystemPhase,
   WorldDecl,
 } from './ast.js';
+import { SYSTEM_PHASES } from './ast.js';
 import { DECL_KEYWORDS, STRING_KEYWORDS, isStringKeyword } from './ast.js';
 import { type DiagnosticBag } from './diagnostics.js';
 import { tokenize, type Token } from './lexer.js';
@@ -259,6 +263,8 @@ class Parser {
     if (kw === '关系谱') return this.parseMatrix();
     if (kw === '音频资产') return this.parseAudioAsset();
     if (kw === '配乐') return this.parseBgm();
+    if (kw === '系统') return this.parseSystem();
+    if (kw === '场景') return this.parseScene();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -289,6 +295,104 @@ class Parser {
     const src = this.readString('音频路径');
     this.finishLine();
     return { k: 'audio-asset', name, src, span: this.spanFrom(start) };
+  }
+
+  /** v5.1：系统是运行层调度单元，不是弦。 */
+  private parseSystem(): SystemDecl {
+    const start = this.advance();
+    const name = this.readName('系统名');
+    const decl: SystemDecl = {
+      k: 'system',
+      name,
+      phase: '规则',
+      every: true,
+      effects: [],
+      span: this.spanFrom(start),
+    };
+    this.finishLine();
+    if (this.enterBlock('系统声明')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('字段名');
+        switch (key) {
+          case '阶段': {
+            const phase = this.readName('系统阶段');
+            if (!(SYSTEM_PHASES as readonly string[]).includes(phase)) {
+              this.fail(`系统阶段「${phase}」无效。`, this.peek().span, `可用：${SYSTEM_PHASES.join('、')}。`);
+            } else {
+              decl.phase = phase as SystemPhase;
+            }
+            this.finishLine();
+            break;
+          }
+          case '每拍':
+            decl.every = true;
+            this.finishLine();
+            break;
+          case '当':
+            decl.guard = this.parseExpr();
+            this.finishLine();
+            break;
+          case '效果':
+            if (!this.atLineEnd()) {
+              decl.effects.push(this.parseEffect());
+              this.finishLine();
+            } else {
+              this.finishLine();
+              this.parseEffectBlock(decl.effects);
+            }
+            break;
+          default:
+            this.fail(`系统里不认识「${key}」。`, this.peek().span, '可用：阶段、每拍、当、效果。');
+            this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    if (decl.effects.length === 0) {
+      this.fail(`系统「${name}」没有效果。`, decl.span, '系统是「每拍在某个阶段做一件事」，至少写一个效果。');
+    }
+    return decl;
+  }
+
+  /** v5.1：场景只启用系统 + 进入/离开效果，不拥有弦。 */
+  private parseScene(): SceneDecl {
+    const start = this.advance();
+    const name = this.readName('场景名');
+    const decl: SceneDecl = {
+      k: 'scene',
+      name,
+      systems: [],
+      enter: [],
+      exit: [],
+      span: this.spanFrom(start),
+    };
+    this.finishLine();
+    if (this.enterBlock('场景声明')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('字段名');
+        if (key === '启用') {
+          if (this.atIdent('系统')) this.advance();
+          decl.systems.push(this.readName('系统名'));
+          this.finishLine();
+        } else if (key === '进入' || key === '离开') {
+          this.finishLine();
+          this.parseEffectBlock(key === '进入' ? decl.enter : decl.exit);
+        } else {
+          this.fail(`场景里不认识「${key}」。`, this.peek().span, '可用：启用 系统、进入、离开。');
+          this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    return decl;
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */

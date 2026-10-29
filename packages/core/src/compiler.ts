@@ -17,10 +17,12 @@ import type {
   MatrixDecl,
   Program,
   ResponseCurve,
+  SceneDecl,
   SignalDecl,
   SpectrumDecl,
   StringDecl,
   StringKind,
+  SystemDecl,
   WorldDecl,
 } from './ast.js';
 import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
@@ -37,9 +39,11 @@ import type {
   IRMatrix,
   IRPhase,
   IRRule,
+  IRScene,
   IRSignal,
   IRSpectrum,
   IRString,
+  IRSystem,
   LExpr,
   Value,
   WorldIR,
@@ -113,6 +117,10 @@ class Compiler {
   private readonly audioAssetNames = new Set<string>();
   private bgmDecl: BgmDecl | undefined;
   private bgm: IRBgm | undefined;
+  private readonly systemDecls: SystemDecl[] = [];
+  private readonly sceneDecls: SceneDecl[] = [];
+  private readonly systems: IRSystem[] = [];
+  private readonly scenes: IRScene[] = [];
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
 
@@ -131,6 +139,8 @@ class Compiler {
     this.buildCouplings();
     this.buildLoops();
     this.buildRules();
+    this.buildSystems();
+    this.buildScenes();
     this.buildAxioms();
     this.buildSignals();
     this.buildEndings();
@@ -184,6 +194,12 @@ class Compiler {
           break;
         case 'matrix':
           this.declareMatrix(d);
+          break;
+        case 'system':
+          this.systemDecls.push(d);
+          break;
+        case 'scene':
+          this.sceneDecls.push(d);
           break;
         case 'audio-asset':
           this.declareAudioAsset(d);
@@ -1560,6 +1576,58 @@ class Compiler {
 
   // ---------- 公理 / 信号 / 结局 / 曲式 ----------
 
+  /** v5.1：系统是运行层调度单元，不改变弦网络本体。 */
+  private buildSystems(): void {
+    const seen = new Set<string>();
+    for (const d of this.systemDecls) {
+      if (seen.has(d.name)) {
+        this.error('NRO2004', `系统「${d.name}」重复声明。`, d.span);
+        continue;
+      }
+      seen.add(d.name);
+      const guard = d.guard ? this.lowerGuard(d.guard, {}, `系统「${d.name}」`) : undefined;
+      this.systems.push({
+        id: `system:${d.name}`,
+        name: d.name,
+        phase: d.phase,
+        every: d.every,
+        ...(guard ? { guard } : {}),
+        effects: this.lowerEffects(d.effects, {}),
+        span: d.span,
+      });
+    }
+  }
+
+  /** v5.1：场景只启用系统 + 进入/离开效果，不能声明弦。 */
+  private buildScenes(): void {
+    const systemNames = new Set(this.systems.map((system) => system.name));
+    const seen = new Set<string>();
+    for (const d of this.sceneDecls) {
+      if (seen.has(d.name)) {
+        this.error('NRO2004', `场景「${d.name}」重复声明。`, d.span);
+        continue;
+      }
+      seen.add(d.name);
+      const systems: string[] = [];
+      for (const name of d.systems) {
+        if (!systemNames.has(name)) {
+          const hint = suggestName(name, [...systemNames]);
+          this.error('NRO2101', `场景「${d.name}」启用了不存在的系统「${name}」。`, d.span, hint ? { hint: `你是不是想写「${hint}」？` } : undefined);
+          continue;
+        }
+        if (!systems.includes(name)) systems.push(name);
+      }
+      this.scenes.push({
+        id: `scene:${d.name}`,
+        name: d.name,
+        systems,
+        enter: this.lowerEffects(d.enter, {}),
+        exit: this.lowerEffects(d.exit, {}),
+        span: d.span,
+      });
+    }
+  }
+
   private buildAxioms(): void {
     for (const d of this.axiomDecls) {
       const lowered = this.lower(d.expr, {});
@@ -1849,6 +1917,8 @@ class Compiler {
       matrices: this.matrices,
       ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
       ...(this.bgm ? { bgm: this.bgm } : {}),
+      ...(this.systems.length > 0 ? { systems: this.systems } : {}),
+      ...(this.scenes.length > 0 ? { scenes: this.scenes } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,

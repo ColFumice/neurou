@@ -169,6 +169,29 @@ export interface ActionDecl extends DeclBase {
   note?: string;
 }
 
+/** v5.1：运行层阶段。默认顺序与旧固定 tick 对齐。 */
+export const SYSTEM_PHASES = ['投递', '输入', '规则', '传导', '校验', '终止', '观测', '收尾'] as const;
+export type SystemPhase = (typeof SYSTEM_PHASES)[number];
+
+/** v5.1：系统是调度单元，不是弦/实体。 */
+export interface SystemDecl extends DeclBase {
+  k: 'system';
+  name: string;
+  phase: SystemPhase;
+  every: boolean;
+  guard?: Expr;
+  effects: EffectAst[];
+}
+
+/** v5.1：场景是运行时作用域，只启用系统 + 进入/离开效果。 */
+export interface SceneDecl extends DeclBase {
+  k: 'scene';
+  name: string;
+  systems: string[];
+  enter: EffectAst[];
+  exit: EffectAst[];
+}
+
 export interface PhaseAst {
   name: string;
   duration: number;
@@ -302,7 +325,9 @@ export type Decl =
   | SpectrumDecl
   | MatrixDecl
   | AudioAssetDecl
-  | BgmDecl;
+  | BgmDecl
+  | SystemDecl
+  | SceneDecl;
 
 export interface Program {
   decls: Decl[];
@@ -328,6 +353,8 @@ export const DECL_KEYWORDS = [
   '公理',
   '信号',
   '动作',
+  '系统',
+  '场景',
   '曲式',
   '结局',
   '谱',

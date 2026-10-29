@@ -251,6 +251,27 @@ export interface IRBgm {
   loop: boolean;
 }
 
+/** v5.1：运行层系统。 */
+export interface IRSystem {
+  id: string;
+  name: string;
+  phase: '投递' | '输入' | '规则' | '传导' | '校验' | '终止' | '观测' | '收尾';
+  every: boolean;
+  guard?: LExpr;
+  effects: IREffect[];
+  span?: Span;
+}
+
+/** v5.1：运行层场景。 */
+export interface IRScene {
+  id: string;
+  name: string;
+  systems: string[];
+  enter: IREffect[];
+  exit: IREffect[];
+  span?: Span;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -263,6 +284,10 @@ export interface WorldIR {
   audioAssets?: IRAudioAsset[];
   /** v3.8：世界循环配乐。 */
   bgm?: IRBgm;
+  /** v5.1：运行层系统；不是世界本体。 */
+  systems?: IRSystem[];
+  /** v5.1：运行层场景；按声明顺序，第一个是默认场景。 */
+  scenes?: IRScene[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];
