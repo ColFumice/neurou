@@ -46,6 +46,8 @@ export interface MatrixView {
   phase: number;
   /** v2.7 相位源：用另一张关系谱的曲线采样值替代静态 phase。 */
   phaseSource?: { matrix: string; row: string; col: string };
+  /** v3.1 运行期格值（App 每拍传入 getMatrixCell）；V 叠加显示用。 */
+  runtimeValues?: number[][];
 }
 
 export interface MatrixFieldProps {
@@ -542,6 +544,7 @@ export function MatrixField({
   const [focusCurveUi, setFocusCurveUi] = useState('');
   const [focusBandEditsUi, setFocusBandEditsUi] = useState(0);
   const [playingUi, setPlayingUi] = useState(false);
+  const [liveValuesUi, setLiveValuesUi] = useState(false);
   const [playheadUi, setPlayheadUi] = useState(0);
   const [playSpeedUi, setPlaySpeedUi] = useState(0);
   const [effectivePhaseUi, setEffectivePhaseUi] = useState(0);
@@ -606,6 +609,7 @@ export function MatrixField({
     /* —— 可变状态 —— */
     let displayed: number[][] = [];
     let targets: number[][] = [];
+    let liveValuesNow = false;
     let selected: CellRef | null = null;
     let hover: CellRef | null = null;
     let drag: {
@@ -1958,6 +1962,26 @@ export function MatrixField({
       selectionY.step(dt);
     }
 
+    /** v3.1：V 运行期只读叠加。 */
+    function matrixValueSource(matrix: MatrixView): number[][] {
+      return liveValuesNow && matrix.runtimeValues && matrix.runtimeValues.length > 0
+        ? matrix.runtimeValues
+        : matrix.values;
+    }
+
+    function toggleLiveValues(): void {
+      liveValuesNow = !liveValuesNow;
+      flushAllCurveKeyEdits(true);
+      stopCurveGestureVoices();
+      curveDrag = null;
+      focusDrag = null;
+      focusArrow = null;
+      drag = null;
+      pendingFocusAfterAdd = false;
+      if (liveValuesNow && focusIsOpen()) closeFocus();
+      setLiveValuesUi(liveValuesNow);
+    }
+
     /** 矩阵切换 / 首次加载：快照新矩阵、清交互、重启淡入。 */
     function syncMatrix(now: number): MatrixView | null {
       const matrix = currentMatrix();
@@ -1990,7 +2014,8 @@ export function MatrixField({
         curveCellAlphas.clear();
         pendingFocusAfterAdd = false;
         layout = layoutOf(rows, cols);
-        displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
+        const sourceValues = matrixValueSource(matrix);
+        displayed = sourceValues.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
         targets = displayed.map((row) => row.slice());
         selected = rows > 0 && cols > 0 ? { row: 0, col: 0 } : null;
         hover = null;
@@ -2028,7 +2053,8 @@ export function MatrixField({
         curveCellAlphas.clear();
         pendingFocusAfterAdd = false;
         layout = layoutOf(rows, cols);
-        displayed = matrix.values.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
+        const sourceValues = matrixValueSource(matrix);
+        displayed = sourceValues.map((row) => row.slice(0, cols).map((value) => clampValue(value)));
         targets = displayed.map((row) => row.slice());
         if (selected) {
           selected = {
@@ -2055,11 +2081,12 @@ export function MatrixField({
         pushUi(true);
         return matrix;
       }
-      // App 回传的新值：非拖动时跟随（拖动中本地 target 优先）。
-      if (!drag && matrix.values.length === targets.length) {
+      // App 回传的新值（或 V 运行期叠加）：非拖动时跟随（拖动中本地 target 优先）。
+      const sourceValues = matrixValueSource(matrix);
+      if (!drag && sourceValues.length === targets.length) {
         let changed = false;
         for (let r = 0; r < targets.length; r += 1) {
-          const nextRow = matrix.values[r] ?? [];
+          const nextRow = sourceValues[r] ?? [];
           const targetRow = targets[r] ?? [];
           for (let c = 0; c < targetRow.length; c += 1) {
             const next = clampValue(nextRow[c] ?? 0);
@@ -2156,6 +2183,8 @@ export function MatrixField({
       updateCursorUi(point);
       // 新手势开始前，先停掉上一条手势的持续音（保证同一手势只 start/stop 一次）。
       stopCurveGestureVoices();
+      // v3.1 运行期只读叠加：不响应点选/拖值/聚焦/曲线编辑。
+      if (liveValuesNow) return;
       // 聚焦模式：只接受大曲线段点拖动，矩阵手势全部隐藏。
       if (focusIsOpen()) {
         event.preventDefault();
@@ -2685,6 +2714,26 @@ export function MatrixField({
     function onKeyDown(event: KeyboardEvent): void {
       const targetEl = event.target as HTMLElement | null;
       if (targetEl && (targetEl.tagName === 'INPUT' || targetEl.isContentEditable)) return;
+      // v3.1 运行期只读叠加：只允许 Tab/P/F3/V，其余按键全部拦下（含结构/曲线/空格编辑）。
+      if (liveValuesNow) {
+        if (event.code === 'KeyV' && !event.shiftKey) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          toggleLiveValues();
+          return;
+        }
+        if (event.code !== 'Tab' && event.code !== 'F3' && !(event.code === 'KeyP' && !event.shiftKey)) {
+          if (event.code === 'Space') event.preventDefault();
+          return;
+        }
+      }
+      // V：切换运行期只读叠加（编辑模式也可用）。
+      if (event.code === 'KeyV' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toggleLiveValues();
+        return;
+      }
       // Ctrl+Enter / Ctrl+Shift+Enter：插行/列；Ctrl+Backspace / Ctrl+Shift+Backspace：删行/列。
       if (event.ctrlKey && !event.metaKey && !event.altKey) {
         if (focusIsOpen() || curveDrag !== null || curveKeyEdits.size > 0) return;
@@ -3046,7 +3095,7 @@ export function MatrixField({
 
     /** 选中曲线格 → 矩阵下方无面板曲线编辑器（淡入淡出 200ms、段点 spring）。 */
     function drawCurveEditor(matrix: MatrixView, now: number, contentAlpha: number): void {
-      if (focusIsOpen()) return;
+      if (focusIsOpen() || liveValuesNow) return;
       if (curveAlpha <= 0.004 || curveBands.length < 2) return;
       const editorAlpha = clamp(contentAlpha * curveAlpha, 0, 1);
       if (editorAlpha <= 0.004) return;
@@ -3781,6 +3830,7 @@ export function MatrixField({
       data-focus-curve={focusCurveUi}
       data-focus-band-edits={focusBandEditsUi}
       data-playing={playingUi ? 'true' : 'false'}
+      data-live-values={liveValuesUi ? 'true' : 'false'}
       data-playhead={playheadUi.toFixed(4)}
       data-play-speed={playSpeedUi.toFixed(3)}
       data-synced={syncedAttr}

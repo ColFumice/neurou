@@ -599,6 +599,12 @@ export function App() {
     rows: [...m.rows],
     cols: [...m.cols],
     values: m.values.map((row) => [...row]),
+    runtimeValues: m.rows.map((row) =>
+      m.cols.map((col) => {
+        const value = universe.getMatrixCell(m.id, row, col);
+        return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+      }),
+    ),
     curves: (m.curves ?? []).map((c) => ({
       row: c.row,
       col: c.col,

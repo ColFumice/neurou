@@ -474,6 +474,7 @@ export function StringField({
   const [actionSelected, setActionSelected] = useState(0);
   const [lastAction, setLastAction] = useState('');
   const safeActionSelected = actions.length > 0 ? Math.min(actionSelected, actions.length - 1) : 0;
+  const selectedActionNote = actions[safeActionSelected]?.note ?? '';
 
   const [mode, setMode] = useState<ViewMode>('strings');
   const [plucks, setPlucks] = useState(0);
@@ -2685,6 +2686,7 @@ export function StringField({
       data-action-selected={actionOpen ? String(safeActionSelected) : ''}
       data-last-action={lastAction}
       data-ending={view.ended ?? ''}
+      data-action-note={selectedActionNote}
     >
       <canvas ref={canvasRef} className="string-canvas" data-testid="string-canvas" />
       {actionOpen && !view.ended && mode === 'strings' ? (
@@ -2718,11 +2720,22 @@ export function StringField({
               }}
             >
               {index + 1}. {action.name}
-              {action.note ? (
-                <span style={{ opacity: 0.5, marginLeft: '0.8em', fontSize: '11px' }}>{action.note}</span>
-              ) : null}
             </span>
           ))}
+          {selectedActionNote ? (
+            <div
+              data-testid="string-action-note"
+              style={{
+                opacity: 0.2,
+                fontSize: '11px',
+                letterSpacing: '0.04em',
+                marginTop: '2px',
+                maxWidth: '46em',
+              }}
+            >
+              {selectedActionNote}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {view.ended ? (

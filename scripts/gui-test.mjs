@@ -1292,12 +1292,30 @@ check('可玩层收到世界动作', Number(await playRoot.getAttribute('data-ac
 await page.keyboard.press('Enter');
 await page.waitForTimeout(300);
 check('Enter 打开极简动作列表', (await playRoot.getAttribute('data-action-open')) === 'true' && (await page.locator('[data-testid="string-actions"]').count()) === 1, String(await playRoot.getAttribute('data-action-open')));
+check('动作列表显示选中动作描述', (await playRoot.getAttribute('data-action-note')) === '松手。', String(await playRoot.getAttribute('data-action-note')));
 await page.keyboard.press('Enter');
 await page.waitForTimeout(1000);
 check('动作执行后淡显结局', (await playRoot.getAttribute('data-ending')) === '落点' && Number(await playRoot.getAttribute('data-action-count')) === 0, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);
 await page.keyboard.press('r');
 await page.waitForTimeout(1000);
 check('R 重开清结局并恢复动作', (await playRoot.getAttribute('data-ending')) === '' && Number(await playRoot.getAttribute('data-action-count')) === 1, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);
+
+// v3.1：F3 V 运行期只读叠加（relational 动态格）
+await page.goto(`${URL}?world=${encodeURIComponent('examples/relational.nro')}`, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await page.waitForTimeout(800);
+await page.keyboard.press('F3');
+await page.waitForTimeout(900);
+check('矩阵默认不是运行期只读叠加', (await matrixRoot.getAttribute('data-live-values')) === 'false', String(await matrixRoot.getAttribute('data-live-values')));
+await page.keyboard.press('v');
+await page.waitForTimeout(600);
+check('V 打开运行期只读叠加', (await matrixRoot.getAttribute('data-live-values')) === 'true', String(await matrixRoot.getAttribute('data-live-values')));
+await page.keyboard.press('Enter');
+await page.waitForTimeout(500);
+check('运行期只读模式禁止聚焦编辑', (await matrixRoot.getAttribute('data-focus')) === 'false', String(await matrixRoot.getAttribute('data-focus')));
+await page.keyboard.press('v');
+await page.waitForTimeout(500);
+check('V 关闭后恢复静态 editable 状态', (await matrixRoot.getAttribute('data-live-values')) === 'false', String(await matrixRoot.getAttribute('data-live-values')));
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
