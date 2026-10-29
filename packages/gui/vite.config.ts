@@ -77,7 +77,14 @@ function tunerSavePlugin(): Plugin {
   };
 }
 
+const ROOT_VERSION = (JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as { version?: string }).version ?? '0.0.0';
+
 export default defineConfig({
+  // v3.10：静态部署到子路径时用 NEUROU_BASE=/sub/ pnpm build。
+  base: process.env.NEUROU_BASE ?? '/',
+  define: {
+    __NEUROU_VERSION__: JSON.stringify(ROOT_VERSION),
+  },
   plugins: [react(), tunerSavePlugin()],
   build: {
     rollupOptions: {

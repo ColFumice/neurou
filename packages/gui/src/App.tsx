@@ -654,6 +654,7 @@ export function App() {
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
       data-seed={INITIAL_SEED}
+      data-version={__NEUROU_VERSION__}
       data-cue-audio={cueAudio}
       data-last-cue={lastCue}
       data-cue-assets={assetCues}

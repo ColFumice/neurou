@@ -5,3 +5,4 @@ dist/
 .acl-repair/
 .dsh-write-test.txt
 artifacts/
+release/
