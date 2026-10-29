@@ -36,6 +36,7 @@ const PLAY_WORLD_SOURCE = `世界 可玩层测试
 
 动作 松手
   当 信任 > 0
+  耗时 1
   效果
     信任 -= 80
   描述 "松手。"
@@ -1293,9 +1294,11 @@ await page.keyboard.press('Enter');
 await page.waitForTimeout(300);
 check('Enter 打开极简动作列表', (await playRoot.getAttribute('data-action-open')) === 'true' && (await page.locator('[data-testid="string-actions"]').count()) === 1, String(await playRoot.getAttribute('data-action-open')));
 check('动作列表显示选中动作描述', (await playRoot.getAttribute('data-action-note')) === '松手。', String(await playRoot.getAttribute('data-action-note')));
+check('动作列表显示动作耗时', (await playRoot.getAttribute('data-action-cost')) === '1', String(await playRoot.getAttribute('data-action-cost')));
 await page.keyboard.press('Enter');
 await page.waitForTimeout(1000);
 check('动作执行后淡显结局', (await playRoot.getAttribute('data-ending')) === '落点' && Number(await playRoot.getAttribute('data-action-count')) === 0, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);
+check('结局显示拍数与动作数', Number(await playRoot.getAttribute('data-ending-tick')) > 0 && Number(await playRoot.getAttribute('data-ending-actions')) === 1, `${await playRoot.getAttribute('data-ending-tick')}/${await playRoot.getAttribute('data-ending-actions')}`);
 await page.keyboard.press('r');
 await page.waitForTimeout(1000);
 check('R 重开清结局并恢复动作', (await playRoot.getAttribute('data-ending')) === '' && Number(await playRoot.getAttribute('data-action-count')) === 1, `${await playRoot.getAttribute('data-ending')}/${await playRoot.getAttribute('data-action-count')}`);

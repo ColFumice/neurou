@@ -2,7 +2,7 @@ import type { LExpr } from '@neurou/core';
 import { curveLocalPosition, sampleMatrixCurve, sampleSpectrum, type MatrixState, type RuntimeValue, type WorldState } from './state.js';
 
 /** v2.7：多矩阵联动——相位源可递归，编译器已保证无环；运行时仍留深度保护。 */
-function matrixTimePosition(name: string, state: WorldState, depth = 0): number {
+export function matrixTimePosition(name: string, state: WorldState, depth = 0): number {
   const matrix = state.matrices?.[name];
   if (!matrix || matrix.period === undefined) return 0;
   let phase = matrix.phase ?? 0;

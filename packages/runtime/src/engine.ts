@@ -10,7 +10,7 @@ import type {
   IRString,
   WorldIR,
 } from '@neurou/core';
-import { evalExpr, asNumber, truthy, matrixCellValue } from './eval.js';
+import { evalExpr, asNumber, truthy, matrixCellValue, matrixTimePosition } from './eval.js';
 import {
   type RuntimeValue,
   type SpectrumMode,
@@ -275,6 +275,12 @@ export class Universe {
   }
 
   // ---------- 操作 ----------
+
+  /** v3.2：矩阵当前时间位置 0..1（周期/速度/相位/相位源都参与）；未知矩阵返回 undefined。 */
+  getMatrixPosition(name: string): number | undefined {
+    if (!this.state.matrices?.[name]) return undefined;
+    return matrixTimePosition(name, this.state);
+  }
 
   /** 选择一个动作，它会在这个世界的下一拍生效。 */
   act(actionId: string): boolean {

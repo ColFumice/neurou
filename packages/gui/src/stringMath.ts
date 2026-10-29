@@ -534,12 +534,18 @@ export interface PlayActionView {
   id: string;
   name: string;
   note?: string;
+  /** v3.2：动作耗时拍数（0 表示立即）。 */
+  cost: number;
 }
 
 export interface WorldView {
   name: string;
   tick: number;
   ended: string | null;
+  /** v3.2：结局发生的拍数；未结束为 null。 */
+  endedTick: number | null;
+  /** v3.2：这一局已经执行过的动作次数。 */
+  actionsTaken: number;
   lanes: Lane[];
   /** 世界里的耦合关系（只用于画布上编辑强度）。 */
   couplings: CouplingLane[];

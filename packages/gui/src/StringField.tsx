@@ -474,7 +474,19 @@ export function StringField({
   const [actionSelected, setActionSelected] = useState(0);
   const [lastAction, setLastAction] = useState('');
   const safeActionSelected = actions.length > 0 ? Math.min(actionSelected, actions.length - 1) : 0;
-  const selectedActionNote = actions[safeActionSelected]?.note ?? '';
+  const selectedAction = actions[safeActionSelected];
+  const selectedActionNote = selectedAction?.note ?? '';
+  const selectedActionCost = selectedAction?.cost ?? 0;
+  const selectedActionDetail = [selectedActionNote, selectedActionCost > 0 ? `耗时 ${selectedActionCost} 拍` : '']
+    .filter(Boolean)
+    .join(' · ');
+  const endingTick = view.endedTick ?? view.tick;
+  const endingStats =
+    view.ended && view.actionsTaken > 0
+      ? `第 ${endingTick} 拍 · ${view.actionsTaken} 个动作`
+      : view.ended
+        ? `第 ${endingTick} 拍`
+        : '';
 
   const [mode, setMode] = useState<ViewMode>('strings');
   const [plucks, setPlucks] = useState(0);
@@ -2686,7 +2698,10 @@ export function StringField({
       data-action-selected={actionOpen ? String(safeActionSelected) : ''}
       data-last-action={lastAction}
       data-ending={view.ended ?? ''}
+      data-ending-tick={view.endedTick === null ? '' : view.endedTick}
+      data-ending-actions={view.actionsTaken}
       data-action-note={selectedActionNote}
+      data-action-cost={selectedActionCost}
     >
       <canvas ref={canvasRef} className="string-canvas" data-testid="string-canvas" />
       {actionOpen && !view.ended && mode === 'strings' ? (
@@ -2722,7 +2737,7 @@ export function StringField({
               {index + 1}. {action.name}
             </span>
           ))}
-          {selectedActionNote ? (
+          {selectedActionDetail ? (
             <div
               data-testid="string-action-note"
               style={{
@@ -2733,7 +2748,7 @@ export function StringField({
                 maxWidth: '46em',
               }}
             >
-              {selectedActionNote}
+              {selectedActionDetail}
             </div>
           ) : null}
         </div>
@@ -2745,18 +2760,24 @@ export function StringField({
             position: 'absolute',
             inset: 0,
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             pointerEvents: 'none',
             fontFamily: 'var(--serif)',
-            fontSize: '28px',
-            letterSpacing: '0.14em',
             color: 'var(--ink)',
-            opacity: 0.3,
             userSelect: 'none',
           }}
         >
-          {view.ended}
+          <div style={{ fontSize: '28px', letterSpacing: '0.14em', opacity: 0.3 }}>{view.ended}</div>
+          {endingStats ? (
+            <div
+              data-testid="string-ending-stats"
+              style={{ marginTop: '10px', fontSize: '12px', letterSpacing: '0.08em', opacity: 0.16 }}
+            >
+              {endingStats}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

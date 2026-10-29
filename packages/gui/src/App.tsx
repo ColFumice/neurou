@@ -572,11 +572,14 @@ export function App() {
     name: worldIR.name,
     tick: universe.state.tick,
     ended: universe.state.ended?.name ?? null,
+    endedTick: universe.state.ended?.tick ?? null,
+    actionsTaken: [...universe.stats.actionUsed.values()].reduce((sum, count) => sum + count, 0),
     lanes,
     couplings: couplingLanes(worldIR),
     actions: universe.availableActions().map((action) => ({
       id: action.id,
       name: action.name,
+      cost: action.cost,
       ...(action.note ? { note: action.note } : {}),
     })),
   };
@@ -601,7 +604,8 @@ export function App() {
     values: m.values.map((row) => [...row]),
     runtimeValues: m.rows.map((row) =>
       m.cols.map((col) => {
-        const value = universe.getMatrixCell(m.id, row, col);
+        const position = universe.getMatrixPosition(m.id);
+        const value = universe.getMatrixCell(m.id, row, col, position);
         return typeof value === 'number' && Number.isFinite(value) ? value : 0;
       }),
     ),
