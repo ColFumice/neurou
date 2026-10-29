@@ -36,7 +36,7 @@ import {
   type TimbreCurve,
   type WorldView,
 } from './stringMath.js';
-import { getStringAudio, type StringAudioState } from './stringAudio.js';
+import { KIND_AUDIO, getStringAudio, type StringAudioState } from './stringAudio.js';
 import './string-field.css';
 
 /* ------------------------------------------------------------------ *
@@ -101,8 +101,10 @@ const COUPLING_STEP = 0.05;
 const COUPLING_MAX = 2;
 const COUPLING_INSET_PX = 10;
 
-/** 按住绷弦：长按不动 ≥HOLD_MS 后把按住点钉成一个平滑的局部波峰。 */
+/** 按住绷弦：鼠标长按不动 ≥HOLD_MS 后钉成波峰。 */
 const HOLD_MS = 180;
+/** v5.35：键盘按下即显示拉弦，不再等长按计时。 */
+const KEYBOARD_HOLD_MS = 0;
 /** 平滑正弦峰的半宽（halfWidth）。 */
 const PIN_RADIUS_PX = 44;
 
@@ -399,6 +401,8 @@ declare global {
       };
       /** v5.34：持续型弦当前发声音数（验收用）。 */
       sustainedStrings: () => number;
+      /** v5.35：焦点弦当前显示波形的峰谷差（验收用）。 */
+      focusWaveSpread: () => number;
       /** 增删耦合的 link 目标（验收用）。 */
       linkTarget: () => { index: number; id: string; name: string; existing: boolean } | null;
       /** 当前所有可见 pin（鼠标 + 多键键盘，验收用）。 */
@@ -1125,8 +1129,28 @@ export function StringField({
       const count = u.length;
       const resonance = includeResonance && resonantNow;
       const geom = focusGeom();
+      const sustained = [...keyHolds.values()].find((hold) => hold.interaction === '持续');
+      const sustainedKind = kindOf(focusIdx);
+      const sustainedBrightness = KIND_AUDIO[sustainedKind].brightness;
+      const sustainedAmp = sustained
+        ? Math.max(18, Math.abs(pinAmplitudeAt(sustained.y)) * 0.85)
+        : 0;
+      const sustainedCycles = 3 + Math.round(sustainedBrightness * 3);
+      const sustainedPhase = (now / 1000) * (1.2 + sustainedBrightness * 2.4);
       for (let i = 0; i < count; i += 1) {
         const x01 = count > 1 ? i / (count - 1) : 0.5;
+        if (sustained) {
+          // v5.35：持续型弦的形状 = 持续音波形（正弦/三角），沿弦重复几个周期。
+          const phase = x01 * sustainedCycles * Math.PI * 2 + sustainedPhase;
+          const p = phase / (Math.PI * 2);
+          const wave =
+            sustainedBrightness > 0.7
+              ? 2 * Math.abs(2 * (p - Math.floor(p + 0.5))) - 1
+              : Math.sin(phase);
+          const envelope = Math.pow(Math.sin(Math.PI * x01), 0.45);
+          focusDispBuf[i] = sustainedAmp * wave * envelope;
+          continue;
+        }
         let value = u[i] ?? 0;
         value += standingOvertone(x01, now, 3) * FOCUS_JITTER_PX;
         if (resonance) value += standingOvertone(x01, now, 5) * RESONANCE_OVERTONE_PX;
@@ -2269,6 +2293,7 @@ export function StringField({
           );
           sustainedKeyVoices.set(event.code, id);
         }
+        updateHoldState(performance.now());
       }
     }
 
@@ -2410,7 +2435,7 @@ export function StringField({
       const nextPins: PinView[] = [];
       if (mouseHold) nextPins.push({ source: 'mouse', code: '', x: mouseHold.x, y: mouseHold.y });
       for (const hold of keyHolds.values()) {
-        if (now - hold.startedAt >= HOLD_MS) {
+        if (now - hold.startedAt >= KEYBOARD_HOLD_MS) {
           nextPins.push({ source: 'keyboard', code: hold.code, x: hold.x, y: hold.y });
         }
       }
@@ -2662,6 +2687,16 @@ export function StringField({
         };
       },
       sustainedStrings: () => audio.sustainedStringCount(),
+      focusWaveSpread: () => {
+        const disp = focusDisplayU(performance.now(), false);
+        let low = Number.POSITIVE_INFINITY;
+        let high = Number.NEGATIVE_INFINITY;
+        for (const value of disp) {
+          low = Math.min(low, value);
+          high = Math.max(high, value);
+        }
+        return high - low;
+      },
       pins: () =>
         pinsNow.map((pin) => {
           const signed = pinAmplitudeAt(pin.y);

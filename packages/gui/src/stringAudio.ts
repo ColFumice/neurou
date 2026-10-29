@@ -26,7 +26,7 @@ interface KindAudioProfile {
   gain: number;
 }
 
-const KIND_AUDIO: Record<StringKind, KindAudioProfile> = {
+export const KIND_AUDIO: Record<StringKind, KindAudioProfile> = {
   叙事: { octave: 1, brightness: 0.45, seconds: 2.4, gain: 0.3 },
   视觉: { octave: 2, brightness: 0.85, seconds: 1.5, gain: 0.24 },
   动画: { octave: 1.5, brightness: 0.65, seconds: 1.1, gain: 0.22 },

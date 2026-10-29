@@ -543,6 +543,7 @@ const sustainPlucks = Number(await attr('data-plucks'));
 await page.keyboard.down('a');
 await page.waitForTimeout(220);
 check('持续型：按下持续发声', (await page.evaluate(() => window.__neurouString.sustainedStrings())) === 1, 'sustained');
+check('持续型：弦形状显示持续音波形', (await page.evaluate(() => window.__neurouString.focusWaveSpread())) > 20, String(await page.evaluate(() => window.__neurouString.focusWaveSpread())));
 await page.keyboard.up('a');
 await page.waitForTimeout(220);
 check(
