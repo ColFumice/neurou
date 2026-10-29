@@ -81,6 +81,24 @@ export function GlslCanvas({
     const valueLocations = artifact.bindings.map((binding) => gl.getUniformLocation(program, binding.uniform));
     const start = performance.now();
     let raf = 0;
+    let disposed = false;
+
+    // v5.30：资产纹理异步加载；加载完成前保留程序化兜底纹理。
+    if (texture && artifact.textureSrc) {
+      const image = new Image();
+      image.onload = (): void => {
+        if (disposed || !texture) return;
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      };
+      image.src = /^data:/i.test(artifact.textureSrc) ? artifact.textureSrc : `/${artifact.textureSrc.replace(/^\/+/, '')}`;
+    }
 
     const draw = (now: number): void => {
       const width = canvas.clientWidth || 1;
@@ -108,6 +126,7 @@ export function GlslCanvas({
     raf = requestAnimationFrame(draw);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       gl.deleteProgram(program);
       gl.deleteShader(vertex);

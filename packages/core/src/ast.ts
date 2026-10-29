@@ -211,6 +211,8 @@ export interface PortDecl extends DeclBase {
   params: PortParam[];
   /** v5.29：视觉端口的程序化纹理。 */
   texture?: { pattern: string; scale: number; span: Span };
+  /** v5.30：视觉端口绑定的纹理资产名。 */
+  textureAsset?: string;
 }
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */
@@ -273,6 +275,13 @@ export interface EndingDecl extends DeclBase {
  */
 export interface AudioAssetDecl extends DeclBase {
   k: 'audio-asset';
+  name: string;
+  src: string;
+}
+
+/** v5.30：视觉纹理资产声明；路径由 Host 解析/加载。 */
+export interface TextureAssetDecl extends DeclBase {
+  k: 'texture-asset';
   name: string;
   src: string;
 }
@@ -378,6 +387,7 @@ export type Decl =
   | SpectrumDecl
   | MatrixDecl
   | AudioAssetDecl
+  | TextureAssetDecl
   | BgmDecl
   | SystemDecl
   | SceneDecl

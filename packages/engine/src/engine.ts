@@ -184,6 +184,7 @@ export class Engine {
         kind: port.kind,
         params,
         ...(port.texture ? { texture: port.texture } : {}),
+        ...(port.textureAsset ? { textureAsset: port.textureAsset } : {}),
       };
     }
     return {

@@ -15,6 +15,8 @@ export interface BackendPortFrame {
   params: Record<string, RuntimeValue>;
   /** v5.29：视觉端口的程序化纹理规格。 */
   texture?: IRPort['texture'];
+  /** v5.30：视觉端口绑定的纹理资产。 */
+  textureAsset?: IRPort['textureAsset'];
 }
 
 export type BackendCompileResult =

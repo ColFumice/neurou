@@ -718,6 +718,7 @@ export function App() {
         kind: port.kind,
         params,
         ...(port.texture ? { texture: port.texture } : {}),
+        ...(port.textureAsset ? { textureAsset: port.textureAsset } : {}),
       });
       if (compiled.artifact) artifacts.push(compiled.artifact);
       if (!compiled.result.ok) errors.push(`${port.name}: ${compiled.result.error}`);
@@ -1135,6 +1136,10 @@ export function App() {
       data-glsl-textures={(worldIR?.ports ?? [])
         .filter((port) => port.kind === '视觉')
         .map((port) => port.texture?.pattern ?? '棋盘')
+        .join(',')}
+      data-glsl-assets={(worldIR?.ports ?? [])
+        .filter((port) => port.kind === '视觉' && port.textureAsset)
+        .map((port) => port.textureAsset!.name)
         .join(',')}
       data-faust-status={faustStatus}
       data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}

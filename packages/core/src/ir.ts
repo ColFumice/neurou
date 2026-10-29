@@ -289,6 +289,15 @@ export interface IRPort {
   params: IRPortParam[];
   /** v5.29：视觉端口的程序化纹理；音频端口没有。 */
   texture?: { pattern: string; scale: number };
+  /** v5.30：视觉端口绑定的纹理资产。 */
+  textureAsset?: { name: string; src: string };
+}
+
+/** v5.30：视觉纹理资产。 */
+export interface IRTextureAsset {
+  id: string;
+  name: string;
+  src: string;
 }
 
 export interface IRScene {
@@ -336,6 +345,8 @@ export interface WorldIR {
   matrices: IRMatrix[];
   /** v3.7：信号音频 cue 可用的资产。 */
   audioAssets?: IRAudioAsset[];
+  /** v5.30：视觉端口可绑定的纹理资产。 */
+  textureAssets?: IRTextureAsset[];
   /** v3.8：世界循环配乐。 */
   bgm?: IRBgm;
   /** v5.1：运行层系统；不是世界本体。 */

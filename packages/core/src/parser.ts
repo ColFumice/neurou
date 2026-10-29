@@ -33,6 +33,7 @@ import type {
   StringKind,
   SystemDecl,
   SystemPhase,
+  TextureAssetDecl,
   WorldDecl,
 } from './ast.js';
 import { SYSTEM_PHASES } from './ast.js';
@@ -267,6 +268,7 @@ class Parser {
     if (kw === '谱') return this.parseSpectrum();
     if (kw === '关系谱') return this.parseMatrix();
     if (kw === '音频资产') return this.parseAudioAsset();
+    if (kw === '纹理资产') return this.parseTextureAsset();
     if (kw === '配乐') return this.parseBgm();
     if (kw === '系统') return this.parseSystem();
     if (kw === '场景') return this.parseScene();
@@ -304,6 +306,15 @@ class Parser {
     const src = this.readString('音频路径');
     this.finishLine();
     return { k: 'audio-asset', name, src, span: this.spanFrom(start) };
+  }
+
+  /** v5.30：视觉纹理资产声明。 */
+  private parseTextureAsset(): TextureAssetDecl {
+    const start = this.advance();
+    const name = this.readQualifiedName('纹理资产名');
+    const src = this.readString('纹理路径');
+    this.finishLine();
+    return { k: 'texture-asset', name, src, span: this.spanFrom(start) };
   }
 
   /** v5.1：系统是运行层调度单元，不是弦。 */
@@ -433,8 +444,11 @@ class Parser {
           if (!this.atLineEnd()) scale = this.readNumber('纹理尺度');
           decl.texture = { pattern, scale, span: this.spanFrom(textureStart) };
           this.finishLine();
+        } else if (key === '贴图') {
+          decl.textureAsset = this.readName('纹理资产名');
+          this.finishLine();
         } else {
-          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>。');
+          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>、贴图 <资产名>。');
           this.skipToLineEnd();
         }
       }

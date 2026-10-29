@@ -5,7 +5,7 @@
  * 运行：pnpm release
  * 产物：release/neurou/（可直接丢到任意静态文件服务器）
  */
-import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -20,6 +20,9 @@ const worlds = readdirSync(join(root, 'examples'))
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 cpSync(dist, out, { recursive: true });
+if (existsSync(join(root, 'textures'))) {
+  cpSync(join(root, 'textures'), join(out, 'textures'), { recursive: true });
+}
 
 const manifest = {
   name: 'neurou',

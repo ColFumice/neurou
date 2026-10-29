@@ -26,6 +26,7 @@ import type {
   StringDecl,
   StringKind,
   SystemDecl,
+  TextureAssetDecl,
   WorldDecl,
 } from './ast.js';
 import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
@@ -50,6 +51,7 @@ import type {
   IRSpectrum,
   IRString,
   IRSystem,
+  IRTextureAsset,
   LExpr,
   Value,
   WorldIR,
@@ -137,6 +139,8 @@ class Compiler {
   private readonly spectrumNames = new Set<string>();
   private readonly audioAssets: IRAudioAsset[] = [];
   private readonly audioAssetNames = new Set<string>();
+  private readonly textureAssets: IRTextureAsset[] = [];
+  private readonly textureAssetNames = new Set<string>();
   private bgmDecl: BgmDecl | undefined;
   private bgm: IRBgm | undefined;
   private readonly systemDecls: SystemDecl[] = [];
@@ -350,6 +354,9 @@ class Compiler {
         case 'audio-asset':
           this.declareAudioAsset(d);
           break;
+        case 'texture-asset':
+          this.declareTextureAsset(d);
+          break;
         case 'bgm':
           if (this.bgmDecl) {
             this.error('NRO2004', '世界只能声明一段「配乐」。', d.span);
@@ -500,6 +507,22 @@ class Compiler {
     }
     this.audioAssetNames.add(d.name);
     this.audioAssets.push({ id: d.name, name: d.name, src });
+  }
+
+  private declareTextureAsset(d: TextureAssetDecl): void {
+    if (this.textureAssetNames.has(d.name)) {
+      this.error('NRO2004', `纹理资产「${d.name}」重复声明。`, d.span);
+      return;
+    }
+    const src = d.src.trim().replace(/^\/+/, '');
+    if (!/^textures\/[A-Za-z0-9._-]+\.(png|jpe?g|webp|svg)$/i.test(src)) {
+      this.error('NRO2108', `纹理资产「${d.name}」的路径「${d.src}」无效。`, d.span, {
+        hint: '只允许 textures/ 下一层的 .png/.jpg/.webp/.svg，例如 "textures/rain.svg"。',
+      });
+      return;
+    }
+    this.textureAssetNames.add(d.name);
+    this.textureAssets.push({ id: d.name, name: d.name, src });
   }
 
   private declareSpectrum(d: SpectrumDecl): void {
@@ -2059,6 +2082,7 @@ class Compiler {
         params.push({ name: param.name, string: id });
       }
       let texture: IRPort['texture'];
+      let textureAsset: IRPort['textureAsset'];
       if (d.texture) {
         if (d.kind !== '视觉') {
           this.error('NRO2003', `音频端口「${d.name}」不能声明纹理。`, d.texture.span);
@@ -2072,12 +2096,27 @@ class Compiler {
           texture = { pattern: d.texture.pattern, scale: d.texture.scale };
         }
       }
+      if (d.textureAsset) {
+        if (d.kind !== '视觉') {
+          this.error('NRO2003', `音频端口「${d.name}」不能绑定纹理资产。`, d.span);
+        } else {
+          const asset = this.textureAssets.find((item) => item.name === d.textureAsset);
+          if (!asset) {
+            this.error('NRO2101', `端口「${d.name}」引用了不存在的纹理资产「${d.textureAsset}」。`, d.span, {
+              hint: '先写「纹理资产 名字 "textures/xxx.svg"」，再写「贴图 名字」。',
+            });
+          } else {
+            textureAsset = { name: asset.name, src: asset.src };
+          }
+        }
+      }
       this.ports.push({
         id: `port:${d.kind}:${d.name}`,
         name: d.name,
         kind: d.kind,
         params,
         ...(texture ? { texture } : {}),
+        ...(textureAsset ? { textureAsset } : {}),
       });
     }
   }
@@ -2370,6 +2409,7 @@ class Compiler {
       spectra: this.spectra,
       matrices: this.matrices,
       ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
+      ...(this.textureAssets.length > 0 ? { textureAssets: this.textureAssets } : {}),
       ...(this.bgm ? { bgm: this.bgm } : {}),
       ...(this.systems.length > 0 ? { systems: this.systems } : {}),
       ...(this.scenes.length > 0 ? { scenes: this.scenes } : {}),

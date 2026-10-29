@@ -316,6 +316,7 @@ function portBlock(w: Writer, port: IRPort): void {
   w.line(0, `${port.kind}端口 ${port.name}`);
   for (const param of port.params) w.line(1, `参数 ${param.name} ${param.string}`);
   if (port.texture) w.line(1, `纹理 ${port.texture.pattern} ${numberText(port.texture.scale)}`);
+  if (port.textureAsset) w.line(1, `贴图 ${port.textureAsset.name}`);
   w.blank();
 }
 
@@ -454,7 +455,10 @@ export function serialize(ir: WorldIR): string {
   for (const asset of ir.audioAssets ?? []) {
     w.line(0, `音频资产 ${asset.name} "${asset.src}"`);
   }
-  if ((ir.audioAssets ?? []).length > 0) w.blank();
+  for (const asset of ir.textureAssets ?? []) {
+    w.line(0, `纹理资产 ${asset.name} "${asset.src}"`);
+  }
+  if ((ir.audioAssets ?? []).length > 0 || (ir.textureAssets ?? []).length > 0) w.blank();
   if (ir.bgm) {
     w.line(0, `配乐 ${ir.bgm.asset} 音量 ${numberText(ir.bgm.volume)} 循环 ${ir.bgm.loop ? '是' : '否'}`);
     w.blank();
