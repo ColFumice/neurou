@@ -63,6 +63,27 @@ export class Engine {
     return this.universe.number(id);
   }
 
+  /** Host 的只读状态投影；不要在这里改运行时内部结构。 */
+  get state(): Readonly<WorldState> {
+    return this.universe.state;
+  }
+
+  get stats(): typeof this.universe.stats {
+    return this.universe.stats;
+  }
+
+  inject(id: string, value: RuntimeValue): number {
+    return this.universe.inject(id, value);
+  }
+
+  getMatrixPosition(name: string): number | undefined {
+    return this.universe.getMatrixPosition(name);
+  }
+
+  getMatrixCell(name: string, row: string, col: string, position?: number): number | undefined {
+    return this.universe.getMatrixCell(name, row, col, position);
+  }
+
   /** 选择动作；真正的效果在下一拍 step 中结算。 */
   dispatch(actionId: string): boolean {
     return this.universe.act(actionId);

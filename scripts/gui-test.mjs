@@ -1605,6 +1605,21 @@ await graphPage.waitForTimeout(250);
 check('Esc 关闭章节路线图', (await graphApp.getAttribute('data-chapter-graph-open')) === 'false', String(await graphApp.getAttribute('data-chapter-graph-open')));
 await graphPage.close();
 
+// v5.4：Space 现象层预览蒙版
+const previewPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await previewPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await previewPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await previewPage.waitForTimeout(700);
+const previewApp = previewPage.locator('[data-testid="ink-app"]');
+await previewPage.keyboard.press('Space');
+await previewPage.waitForTimeout(250);
+check('Space 打开现象层蒙版', (await previewApp.getAttribute('data-preview-open')) === 'true' && (await previewPage.locator('[data-testid="preview-mask"]').count()) === 1, String(await previewApp.getAttribute('data-preview-open')));
+check('现象层显示章节', (await previewPage.locator('[data-testid="preview-scene"]').textContent()) === '温室', String(await previewPage.locator('[data-testid="preview-scene"]').textContent()));
+await previewPage.keyboard.press('Space');
+await previewPage.waitForTimeout(250);
+check('再按 Space 关闭现象层', (await previewApp.getAttribute('data-preview-open')) === 'false', String(await previewApp.getAttribute('data-preview-open')));
+await previewPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

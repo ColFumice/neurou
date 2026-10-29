@@ -53,7 +53,7 @@ off();
 
 ## 3. 还没做
 
-- GUI 仍直接持有 `Universe`（v5.3 迁移为 Host）；
+- GUI 已迁到 `Engine` 门面（v5.4）；现象层预览蒙版已接入；
 - 没有预览蒙版 / hot swap；
 - 没有多 scenes 的 GUI 切换入口；
 - `Engine` 还在 `@neurou/runtime` 包内，未拆独立 `@neurou/engine`；

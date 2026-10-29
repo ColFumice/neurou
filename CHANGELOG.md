@@ -1,7 +1,14 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v5.3**（DSL 运行层 + Engine 门面 + 场景切换；弦网络仍是唯一本体）。
+> 当前：**v5.4**（DSL 运行层 + Engine 门面 + 现象层预览蒙版；弦网络仍是唯一本体）。
+
+## v5.4 现象层预览蒙版
+
+- GUI 迁到 Engine 门面（createEngine/step/dispatch/snapshot）；
+- 八弦视图 Space 打开半透明灰阶预览蒙版：场景/拍/系统/最近 cue；
+- 蒙版 pointer-events:none，编辑器仍在下面可操作；
+- 版本 5.4.0；单元 328 / GUI 264。
 
 ## v5.3 场景切换 DSL
 

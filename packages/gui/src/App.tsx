@@ -27,7 +27,7 @@ import {
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
-import { Universe } from '@neurou/runtime';
+import { Engine, createEngine, type EmittedCue } from '@neurou/runtime';
 import type { WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -153,6 +153,12 @@ const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 function chapterLabel(file: string): string {
   const node = CHAPTER_GRAPH.find((item) => item.file === file);
   return node?.title || node?.name || file.replace(/^examples\//, '').replace(/\.nro$/, '');
+}
+
+function previewCueText(cue: EmittedCue['cue']): string {
+  if (cue.k === '台词') return `${cue.speaker ? `${cue.speaker}：` : ''}${cue.text ?? ''}`;
+  if (cue.k === '视觉' || cue.k === '音频') return `${cue.k} ${cue.param} ${cue.value ?? ''}`;
+  return cue.text ?? cue.k;
 }
 
 function bundledSourceFor(file: string): string {
@@ -298,7 +304,7 @@ function useWorldSource(file: string): {
 export function App() {
   const { source, rev, reload, apply } = useWorldSource(WORLD_FILE);
   const compiled = useMemo(() => (source ? compileText(source, WORLD_FILE) : null), [source, rev]);
-  const [universe, setUniverse] = useState<Universe | null>(null);
+  const [universe, setUniverse] = useState<Engine | null>(null);
   /** 编辑后的图（阈值等结构编辑在它上面生效），写回以它为准。 */
   const [worldIR, setWorldIR] = useState<WorldIR | null>(null);
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
@@ -328,6 +334,9 @@ export function App() {
   const [choiceSelected, setChoiceSelected] = useState(0);
   /** v4.6：F9 章节路线图。 */
   const [chapterGraphOpen, setChapterGraphOpen] = useState(false);
+  /** v5.4：现象层预览蒙版；Space 切换，与编辑器同屏。 */
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewCues, setPreviewCues] = useState<string[]>([]);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -390,7 +399,7 @@ export function App() {
   useEffect(() => {
     if (!compiled?.ok) return;
     applyWorldIR(compiled.ir);
-    const nextUniverse = new Universe(compiled.ir, { seed: INITIAL_SEED });
+    const nextUniverse = createEngine(compiled.ir, { seed: INITIAL_SEED });
     if (!bootedRef.current) {
       bootedRef.current = true;
       const params = new URLSearchParams(window.location.search);
@@ -430,7 +439,10 @@ export function App() {
     const timer = window.setInterval(() => {
       if (transitionRef.current) return; // 缓动期间暂停逐拍
       if (universe.state.ended) return;
-      const result = universe.tick();
+      const result = universe.step();
+      if (result.cues.length > 0) {
+        setPreviewCues(result.cues.map((item) => previewCueText(item.cue)).slice(-4));
+      }
       // v3.5/v3.7：把世界信号的「音频」cue 接到本地声音层。
       // 优先级：音频资产（外部文件） > 同名的谱（合成音色） > 名字哈希。
       for (const emitted of result.cues) {
@@ -646,6 +658,19 @@ export function App() {
     return () => window.removeEventListener('keydown', onGraphKey, true);
   }, [chapterGraphOpen]);
 
+  // v5.4：Space 切换现象层预览蒙版；蒙版不拦截指针，编辑器仍可操作。
+  useEffect(() => {
+    const onPreviewKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (screenRef.current !== 'strings') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setPreviewOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onPreviewKey, true);
+    return () => window.removeEventListener('keydown', onPreviewKey, true);
+  }, []);
+
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
     const audio = getStringAudio();
@@ -821,7 +846,7 @@ export function App() {
     if (!universe || !worldIRRef.current || transitionRef.current) return false;
     const targetCompiled = compileText(text, `${WORLD_FILE}.${dir}`);
     if (!targetCompiled.ok) return false;
-    const targetUniverse = new Universe(targetCompiled.ir, { seed: INITIAL_SEED });
+    const targetUniverse = createEngine(targetCompiled.ir, { seed: INITIAL_SEED });
     const to = collectLanes(targetUniverse, targetCompiled.ir, selected);
     const next: UndoTransition = {
       dir,
@@ -940,6 +965,9 @@ export function App() {
       data-chapter-choice-selected={chapterChoices.length > 1 ? choiceSelected : ''}
       data-chapter-graph-open={chapterGraphOpen ? 'true' : 'false'}
       data-chapter-graph-nodes={CHAPTER_GRAPH.length}
+      data-preview-open={previewOpen ? 'true' : 'false'}
+      data-preview-scene={universe?.sceneName ?? ''}
+      data-preview-tick={universe?.state.tick ?? 0}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
@@ -1015,6 +1043,22 @@ export function App() {
               ) : null}
             </div>
           ))}
+        </div>
+      ) : null}
+      {previewOpen && screen === 'strings' ? (
+        <div className="preview-mask" data-testid="preview-mask">
+          <div className="preview-scene" data-testid="preview-scene">
+            {universe?.sceneName || chapterTitle || worldIR?.name || ''}
+          </div>
+          <div className="preview-meta">
+            {universe ? `第 ${universe.state.tick} 拍` : ''}
+            {universe && universe.activeSystems().length > 0 ? ` · ${universe.activeSystems().join(' / ')}` : ''}
+          </div>
+          <div className="preview-cues">
+            {previewCues.map((cue, index) => (
+              <span key={`${index}-${cue}`}>{cue}</span>
+            ))}
+          </div>
         </div>
       ) : null}
       {slotMenuOpen ? (
@@ -1119,14 +1163,14 @@ export function App() {
   /** v3.0：可玩层——把动作排队到下一拍；GUI 只发意图，规则由运行时执行。 */
   const performAction = (id: string): void => {
     if (transitionRef.current || !universe) return;
-    if (universe.act(id)) setVersion((v) => v + 1);
+    if (universe.dispatch(id)) setVersion((v) => v + 1);
   };
 
   /** v3.0：结局后重开当前世界（不写回，只重建运行时）。 */
   const restartWorld = (): void => {
     const ir = worldIRRef.current ?? worldIR;
     if (!ir) return;
-    setUniverse(new Universe(ir, { seed: INITIAL_SEED }));
+    setUniverse(createEngine(ir, { seed: INITIAL_SEED }));
     setPlayReset((n) => n + 1);
     setVersion((v) => v + 1);
   };
@@ -1200,7 +1244,7 @@ export function App() {
 
   /** 弦结构变化后重建 Universe（保留仍在的弦的当前值；新弦从基线开始）。 */
   const rebuildUniverse = (ir: WorldIR): void => {
-    const next = new Universe(ir, { seed: INITIAL_SEED });
+    const next = createEngine(ir, { seed: INITIAL_SEED });
     for (const string of ir.strings) {
       const value = universe.get(string.id);
       if (typeof value === 'number') next.inject(string.id, value);

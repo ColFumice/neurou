@@ -1,5 +1,5 @@
 import { KIND_ORDER, type IRString, type StringKind, type WorldIR } from '@neurou/core';
-import type { Universe } from '@neurou/runtime';
+import type { Engine } from '@neurou/runtime';
 import { clamp, type CouplingLane, type Lane } from './stringMath.js';
 
 /**
@@ -31,10 +31,10 @@ export function numericStringsByKind(ir: WorldIR): Record<StringKind, IRString[]
   return groups;
 }
 
-function laneOf(universe: Universe, string: IRString, spectra: WorldIR['spectra']): Lane {
+function laneOf(engine: Engine, string: IRString, spectra: WorldIR['spectra']): Lane {
   const [min, max] = laneRange(string);
   const span = max - min || 1;
-  const raw = universe.get(string.id);
+  const raw = engine.get(string.id);
   const value = typeof raw === 'number' ? raw : min;
   const norm = clamp((value - min) / span, 0, 1);
   const lane: Lane = { kind: string.kind, id: string.id, name: string.name, value, min, max, norm };
@@ -66,7 +66,7 @@ function laneOf(universe: Universe, string: IRString, spectra: WorldIR['spectra'
  * lanes 顺序 = KIND_ORDER；缺类的世界自然少几根。
  */
 export function collectLanes(
-  universe: Universe,
+  engine: Engine,
   ir: WorldIR,
   selected: Partial<Record<StringKind, number>> = {},
 ): Lane[] {
@@ -76,7 +76,7 @@ export function collectLanes(
     const candidates = groups[kind];
     if (candidates.length === 0) continue;
     const index = ((selected[kind] ?? 0) % candidates.length + candidates.length) % candidates.length;
-    lanes.push(laneOf(universe, candidates[index]!, ir.spectra));
+    lanes.push(laneOf(engine, candidates[index]!, ir.spectra));
   }
   return lanes;
 }
@@ -86,12 +86,12 @@ export function collectLanes(
  * 刷新后世界从这里开始。只改数值弦；其它类型的基线保持原样。
  * 注意：同类多根弦时，所有候选都会冻结（不只界面上选中的那根）。
  */
-export function withCurrentBaselines(ir: WorldIR, universe: Universe): WorldIR {
+export function withCurrentBaselines(ir: WorldIR, engine: Engine): WorldIR {
   return {
     ...ir,
     strings: ir.strings.map((string) => {
       if (string.domain.type !== 'number') return string;
-      const raw = universe.get(string.id);
+      const raw = engine.get(string.id);
       if (typeof raw !== 'number') return string;
       const baseline = Math.round(raw * 1000) / 1000;
       return baseline === string.baseline ? string : { ...string, baseline };
