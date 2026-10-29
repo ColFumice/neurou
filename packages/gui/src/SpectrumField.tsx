@@ -417,9 +417,14 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       return clamp((value - spectrum.min) / spectrumSpan(spectrum), 0, 1);
     }
 
-    /** v5.37：F2 试听不再由谱曲线决定，而由全部持续型弦的波形合奏决定。 */
-    function audioBandsFor(_spectrum: SpectrumView, _values: readonly number[]): readonly number[] {
-      return sustainedWaves.ensemble();
+    /** 谱曲线自身的试听波形（拖点/映射键/单击）。 */
+    function audioBandsFor(spectrum: SpectrumView, values: readonly number[]): readonly number[] {
+      if (spectrum.interpolation !== '阶跃' || values.length < 2) return values;
+      const expanded: number[] = [];
+      for (const value of values) {
+        for (let repeat = 0; repeat < 12; repeat += 1) expanded.push(value);
+      }
+      return expanded;
     }
 
     function audioSmooth(spectrum: SpectrumView): boolean {
@@ -437,9 +442,27 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       );
     }
 
+    /** v5.38：只有 F2 按住 ↑/↓ 连续调音时，才使用全部持续型弦的合奏波形。 */
+    function startArrowVoice(spectrum: SpectrumView, band: number, value: number): number {
+      void audio.ensureStarted();
+      return audio.startSustainedSpectrum(
+        sustainedWaves.ensemble(),
+        nodeXNorm(spectrum, band),
+        nodeYNorm(spectrum, value),
+        true,
+        true,
+      );
+    }
+
     function updateNodeVoice(id: number, spectrum: SpectrumView, band: number, value: number): void {
       if (id <= 0) return;
       audio.updateSustainedSpectrum(id, audioBandsFor(spectrum, displayed), audioSmooth(spectrum), spectrum.loop);
+      audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
+    }
+
+    function updateArrowVoice(id: number, spectrum: SpectrumView, band: number, value: number): void {
+      if (id <= 0) return;
+      audio.updateSustainedSpectrum(id, sustainedWaves.ensemble(), true, true);
       audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
     }
 
@@ -517,7 +540,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         updateNodeVoice(drag.voiceId, spectrum, band, targets[band] ?? spectrum.min);
       }
       if (arrowTune && arrowTune.voiceId > 0) {
-        updateNodeVoice(arrowTune.voiceId, spectrum, arrowTune.band, targets[arrowTune.band] ?? spectrum.min);
+        updateArrowVoice(arrowTune.voiceId, spectrum, arrowTune.band, targets[arrowTune.band] ?? spectrum.min);
       }
       void now;
     }
@@ -1116,7 +1139,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
             arrowTune.spectrumId = spectrum.id;
             arrowTune.startValue = targets[next] ?? spectrum.min;
             arrowTune.velocity = 0;
-            arrowTune.voiceId = startNodeVoice(spectrum, next, targets[next] ?? spectrum.min);
+            arrowTune.voiceId = startArrowVoice(spectrum, next, targets[next] ?? spectrum.min);
             setLastBand(next);
           }
         }
@@ -1133,7 +1156,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         arrowTune.held = true;
         arrowTune.spectrumId = spectrum.id;
         if (arrowTune.voiceId <= 0) {
-          arrowTune.voiceId = startNodeVoice(spectrum, bandIndex, targets[bandIndex] ?? spectrum.min);
+          arrowTune.voiceId = startArrowVoice(spectrum, bandIndex, targets[bandIndex] ?? spectrum.min);
         }
       } else {
         if (arrowTune) finalizeArrowTune(true);
@@ -1144,7 +1167,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
           velocity: 0,
           held: true,
           startValue: targets[bandIndex] ?? spectrum.min,
-          voiceId: startNodeVoice(spectrum, bandIndex, targets[bandIndex] ?? spectrum.min),
+          voiceId: startArrowVoice(spectrum, bandIndex, targets[bandIndex] ?? spectrum.min),
         };
       }
       setLastBand(bandIndex);
