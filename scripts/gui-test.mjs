@@ -67,6 +67,9 @@ const GLSL_WORLD_SOURCE = `世界 GLSL端口
 
 视觉端口 雨幕
   参数 强度 雨量
+
+视觉端口 雾
+  参数 浓度 雨量
 `;
 const FAUST_WORLD_SOURCE = `世界 Faust端口
   版本 0.1
@@ -1664,11 +1667,11 @@ await glslPage.goto(`${URL}?world=${encodeURIComponent(TEMP_GLSL)}&fresh=1`, { w
 await glslPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await glslPage.waitForTimeout(700);
 const glslApp = glslPage.locator('[data-testid="ink-app"]');
-check('视觉端口进入 GLSL 后端', Number(await glslApp.getAttribute('data-glsl-ports')) === 1, String(await glslApp.getAttribute('data-glsl-ports')));
+check('视觉端口进入 GLSL 后端', Number(await glslApp.getAttribute('data-glsl-ports')) === 2, String(await glslApp.getAttribute('data-glsl-ports')));
 check('GLSL 编译成功', (await glslApp.getAttribute('data-glsl-status')) === 'ok', String(await glslApp.getAttribute('data-glsl-error')));
 await glslPage.keyboard.press('Space');
 await glslPage.waitForTimeout(300);
-check('预览蒙版出现 GLSL canvas', (await glslPage.locator('[data-testid="preview-glsl"]').count()) === 1, String(await glslPage.locator('[data-testid="preview-glsl"]').count()));
+check('预览蒙版出现多端口 GLSL canvas', (await glslPage.locator('[data-testid="preview-glsl"]').count()) === 2, String(await glslPage.locator('[data-testid="preview-glsl"]').count()));
 await glslPage.close();
 
 // v5.8：音频端口 → Faust 源码适配

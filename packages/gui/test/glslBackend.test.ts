@@ -18,6 +18,9 @@ describe('GLSL 后端（v5.7）', () => {
       { uniform: 'u1', param: '色温', string: '' },
       { uniform: 'u2', param: '名字', string: 'x' },
     ]);
-    expect(artifact.vertexSource).toContain('aPosition');
+    expect(artifact.fragmentSource).toContain('uniform float uTime;');
+    expect(artifact.fragmentSource).toContain('uniform sampler2D uTexture;');
+    expect(artifact.fragmentSource).toContain('texture(uTexture');
+    expect(artifact.vertexSource).toContain('out vec2 vUv;');
   });
 });

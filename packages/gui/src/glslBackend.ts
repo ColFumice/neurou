@@ -17,11 +17,15 @@ export interface GlslArtifact {
   vertexSource: string;
   fragmentSource: string;
   bindings: GlslBinding[];
+  timeUniform: string;
+  textureUniform: string;
 }
 
 const VERTEX_SOURCE = `#version 300 es
 in vec2 aPosition;
+out vec2 vUv;
 void main() {
+  vUv = aPosition * 0.5 + 0.5;
   gl_Position = vec4(aPosition, 0.0, 1.0);
 }
 `;
@@ -33,12 +37,16 @@ export function buildGlslArtifact(port: BackendPortFrame): GlslArtifact {
   const lines = [
     '#version 300 es',
     'precision highp float;',
+    'in vec2 vUv;',
+    'uniform float uTime;',
+    'uniform sampler2D uTexture;',
     ...uniforms.map((uniform) => `uniform float ${uniform};`),
     'out vec4 outColor;',
     'void main() {',
     '  float v = 0.0;',
     ...uniforms.map((uniform, index) => (index === 0 ? `  v += ${uniform};` : `  v += ${uniform} * 0.35;`)),
-    '  v = clamp(v, 0.0, 1.0);',
+    '  float tex = texture(uTexture, vec2(vUv.x + uTime * 0.02, vUv.y)).r;',
+    '  v = clamp(v * 0.75 + tex * 0.25, 0.0, 1.0);',
     '  outColor = vec4(vec3(0.09 + v * 0.26), 0.55);',
     '}',
     '',
@@ -51,6 +59,8 @@ export function buildGlslArtifact(port: BackendPortFrame): GlslArtifact {
       param,
       string: typeof value === 'string' ? value : '',
     })),
+    timeUniform: 'uTime',
+    textureUniform: 'uTexture',
   };
 }
 

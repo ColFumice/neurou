@@ -367,7 +367,7 @@ export function App() {
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
   const [sceneSelected, setSceneSelected] = useState(0);
   /** v5.7：GLSL 后端端口编译结果。 */
-  const [glslArtifact, setGlslArtifact] = useState<GlslArtifact | null>(null);
+  const [glslArtifacts, setGlslArtifacts] = useState<GlslArtifact[]>([]);
   const [glslStatus, setGlslStatus] = useState('');
   const [glslError, setGlslError] = useState('');
   /** v5.8：音频端口 → Faust 源码适配（不含实际 Faust 编译）。 */
@@ -695,27 +695,27 @@ export function App() {
     return () => window.removeEventListener('keydown', onGraphKey, true);
   }, [chapterGraphOpen]);
 
-  // v5.7：视觉端口 → GLSLBackend 最小闭环；编译失败只显示状态，不影响世界。
+  // v5.7/v5.27：视觉端口 → GLSLBackend；多个端口各编译一个 canvas。
   useEffect(() => {
     const visualPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '视觉');
     if (visualPorts.length === 0 || !universe) {
-      setGlslArtifact(null);
+      setGlslArtifacts([]);
       setGlslStatus('');
       setGlslError('');
       return;
     }
-    const first = visualPorts[0]!;
-    const params: Record<string, ReturnType<typeof universe.get>> = {};
-    for (const param of first.params) params[param.name] = universe.get(param.string);
-    const compiled = compileGlsl({
-      id: first.id,
-      name: first.name,
-      kind: first.kind,
-      params,
-    });
-    setGlslArtifact(compiled.artifact ?? null);
-    setGlslStatus(compiled.result.ok ? 'ok' : 'error');
-    setGlslError(compiled.result.ok ? '' : compiled.result.error);
+    const artifacts: GlslArtifact[] = [];
+    const errors: string[] = [];
+    for (const port of visualPorts) {
+      const params: Record<string, ReturnType<typeof universe.get>> = {};
+      for (const param of port.params) params[param.name] = universe.get(param.string);
+      const compiled = compileGlsl({ id: port.id, name: port.name, kind: port.kind, params });
+      if (compiled.artifact) artifacts.push(compiled.artifact);
+      if (!compiled.result.ok) errors.push(`${port.name}: ${compiled.result.error}`);
+    }
+    setGlslArtifacts(artifacts);
+    setGlslStatus(errors.length === 0 ? 'ok' : 'error');
+    setGlslError(errors.join('; '));
   }, [worldIR, universe]);
 
   // v5.8：音频端口 → Faust 源码；只生成源码，真正编译/发声由未来 Host 服务负责。
@@ -1192,15 +1192,18 @@ export function App() {
       ) : null}
       {previewOpen && screen === 'strings' ? (
         <div className="preview-mask" data-testid="preview-mask">
-          {glslStatus === 'ok' && glslArtifact ? (
-            <GlslCanvas
-              artifact={glslArtifact}
-              values={glslArtifact.bindings.map((binding) => {
-                const value = universe?.get(binding.string);
-                return typeof value === 'number' ? value : 0;
-              })}
-            />
-          ) : null}
+          {glslStatus === 'ok'
+            ? glslArtifacts.map((artifact, index) => (
+                <GlslCanvas
+                  key={`${index}-${artifact.bindings.map((binding) => binding.uniform).join(',')}`}
+                  artifact={artifact}
+                  values={artifact.bindings.map((binding) => {
+                    const value = universe?.get(binding.string);
+                    return typeof value === 'number' ? value : 0;
+                  })}
+                />
+              ))
+            : null}
           <div className="preview-scene" data-testid="preview-scene">
             {universe?.sceneName || chapterTitle || worldIR?.name || ''}
           </div>
