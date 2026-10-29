@@ -1703,6 +1703,19 @@ await scenesPage.waitForTimeout(300);
 check('Enter 切到昼场景', (await scenesApp.getAttribute('data-preview-scene')) === '昼', String(await scenesApp.getAttribute('data-preview-scene')));
 await scenesPage.close();
 
+// v5.16：多文件模块世界在 GUI 中只读打开，依赖可观测
+const modularPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await modularPage.goto(`${URL}?world=${encodeURIComponent('examples/modular.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await modularPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await modularPage.waitForTimeout(800);
+const modularApp = modularPage.locator('[data-testid="ink-app"]');
+check('模块世界标记为项目', (await modularApp.getAttribute('data-project')) === 'true', String(await modularApp.getAttribute('data-project')));
+check('模块世界可观测依赖', (await modularApp.getAttribute('data-project-modules'))?.includes('examples/modules/rain.nro') === true, String(await modularApp.getAttribute('data-project-modules')));
+await modularPage.keyboard.press('Space');
+await modularPage.waitForTimeout(300);
+check('现象层显示模块依赖', (await modularPage.locator('[data-testid="preview-modules"] span').count()) === 2, String(await modularPage.locator('[data-testid="preview-modules"] span').count()));
+await modularPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

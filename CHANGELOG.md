@@ -1,7 +1,14 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v5.15**（模块依赖图；弦网络仍是唯一本体）。
+> 当前：**v5.16**（GUI 模块打包；弦网络仍是唯一本体）。
+
+## v5.16 GUI 模块打包
+
+- 构建期内联 `examples/**/*.nro`，入口含 `引入` 时用 `compileProjectFromFiles`；
+- 模块世界只读：不 PATCH 入口，依赖在现象层淡显示；
+- 新增 `examples/modular.nro` + `examples/modules/rain.nro`；
+- 版本 5.16.0；单元 347 / GUI 276。
 
 ## v5.15 模块依赖图
 

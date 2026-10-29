@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compileText } from '../src/index.js';
+import { compileProject, compileText } from '../src/index.js';
 
 const EXAMPLES = join(process.cwd(), 'examples');
 
@@ -17,7 +17,10 @@ describe('examples：所有示例世界都能编译（v2.17.1）', () => {
   for (const file of files) {
     it(`${file} 编译无错误`, () => {
       const source = readFileSync(join(EXAMPLES, file), 'utf8');
-      const result = compileText(source, file);
+      const relative = `examples/${file}`;
+      const result = /^\s*引入\s+/m.test(source)
+        ? compileProject(relative, (path) => readFileSync(path, 'utf8'))
+        : compileText(source, relative);
       if (!result.ok) {
         throw new Error(`${file}: ${result.diagnostics.errors.map((e) => `${e.code} ${e.message}`).join('; ')}`);
       }

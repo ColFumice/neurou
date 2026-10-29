@@ -2,9 +2,11 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } 
 import {
   addCoupling,
   addString,
+  compileProjectFromFiles,
   compileText,
   findCoupling,
   patchWorldText,
+  projectGraph,
   removeCoupling,
   removeString,
   serialize,
@@ -137,19 +139,23 @@ function audioLevel(pref: AudioPref): number {
 }
 
 /**
- * v3.4：所有示例世界在构建时内联，生产包也能用 `?world=examples/xxx.nro` 打开。
- * 每个世界 raw 文本约 0.7–9KB，总量小于 30KB；tuner 仍保留独立 raw 导入作为兜底。
+ * v3.4/v5.16：所有示例世界与模块在构建时内联；入口仍按 `?world=examples/xxx.nro`。
+ * 嵌套文件只作为模块，不进入世界选择。
  */
-const BUNDLED_WORLD_MODULES = import.meta.glob('../../../examples/*.nro', {
+const BUNDLED_PROJECT_MODULES = import.meta.glob('../../../examples/**/*.nro', {
   eager: true,
   query: '?raw',
   import: 'default',
 }) as Record<string, string>;
+const BUNDLED_PROJECT: Record<string, string> = Object.fromEntries(
+  Object.entries(BUNDLED_PROJECT_MODULES).map(([path, text]) => {
+    const marker = path.lastIndexOf('/examples/');
+    const relative = marker >= 0 ? path.slice(marker + '/examples/'.length) : path;
+    return [`examples/${relative}`, text];
+  }),
+);
 const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
-  Object.entries(BUNDLED_WORLD_MODULES).map(([path, text]) => [
-    `examples/${path.slice(path.lastIndexOf('/') + 1)}`,
-    text,
-  ]),
+  Object.entries(BUNDLED_PROJECT).filter(([file]) => /^examples\/[^/]+\.nro$/.test(file)),
 );
 const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 
@@ -165,7 +171,7 @@ function previewCueText(cue: EmittedCue['cue']): string {
 }
 
 function bundledSourceFor(file: string): string {
-  return BUNDLED_WORLDS[file] ?? bundledSource;
+  return BUNDLED_PROJECT[file] ?? bundledSource;
 }
 
 /**
@@ -306,7 +312,24 @@ function useWorldSource(file: string): {
  */
 export function App() {
   const { source, rev, reload, apply } = useWorldSource(WORLD_FILE);
-  const compiled = useMemo(() => (source ? compileText(source, WORLD_FILE) : null), [source, rev]);
+  /** v5.16：含 `引入` 的入口按多文件项目编译；模块源来自构建期内联。 */
+  const projectMode = useMemo(() => /^\s*引入\s+/m.test(source ?? ''), [source]);
+  const projectSources = useMemo(
+    () => ({ ...BUNDLED_PROJECT, [WORLD_FILE]: source ?? '' }),
+    [source],
+  );
+  const compiled = useMemo(
+    () => (source ? (projectMode ? compileProjectFromFiles(WORLD_FILE, projectSources) : compileText(source, WORLD_FILE)) : null),
+    [source, rev, projectMode, projectSources],
+  );
+  const projectModules = useMemo(() => {
+    if (!projectMode) return [];
+    try {
+      return projectGraph(WORLD_FILE, (path) => projectSources[path] ?? '');
+    } catch {
+      return [];
+    }
+  }, [projectMode, projectSources]);
   const [universe, setUniverse] = useState<Engine | null>(null);
   /** 编辑后的图（阈值等结构编辑在它上面生效），写回以它为准。 */
   const [worldIR, setWorldIR] = useState<WorldIR | null>(null);
@@ -860,6 +883,10 @@ export function App() {
 
   /** 写回闸门：先尝试行级 patch（保注释/排版），失败回退规范序列化；结果必须编译通过。 */
   const doSave = async (): Promise<void> => {
+    if (projectMode) {
+      setSaveState('disabled');
+      return;
+    }
     if (!DEV) {
       setSaveState('disabled');
       return;
@@ -919,6 +946,10 @@ export function App() {
   };
 
   const scheduleSave = (): void => {
+    if (projectMode) {
+      setSaveState('disabled');
+      return;
+    }
     if (!DEV) {
       setSaveState('disabled');
       return;
@@ -1036,6 +1067,8 @@ export function App() {
       className="ink-app"
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
+      data-project={projectMode ? 'true' : 'false'}
+      data-project-modules={projectModules.map((module) => module.path).join(',')}
       data-seed={INITIAL_SEED}
       data-version={__NEUROU_VERSION__}
       data-cue-audio={cueAudio}
@@ -1184,6 +1217,13 @@ export function App() {
             <div className="preview-audio" data-testid="preview-audio">
               音频 {faustArtifact.name} ·{' '}
               {faustArtifact.bindings.map((binding) => `${binding.param} ${binding.control}`).join(' / ')}
+            </div>
+          ) : null}
+          {projectMode ? (
+            <div className="preview-modules" data-testid="preview-modules">
+              {projectModules.map((module) => (
+                <span key={module.path}>{module.path.replace(/^examples\//, '')}</span>
+              ))}
             </div>
           ) : null}
         </div>

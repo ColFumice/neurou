@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compileText } from '@neurou/core';
+import { compileProject, compileText } from '@neurou/core';
 import { simulate } from '../src/index.js';
 
 const EXAMPLES = join(process.cwd(), 'examples');
@@ -13,7 +13,10 @@ describe('examples：所有示例世界都能小规模模拟（v2.17.2）', () =
   for (const file of files) {
     it(`${file} 模拟不崩`, () => {
       const source = readFileSync(join(EXAMPLES, file), 'utf8');
-      const compiled = compileText(source, file);
+      const relative = `examples/${file}`;
+      const compiled = /^\s*引入\s+/m.test(source)
+        ? compileProject(relative, (path) => readFileSync(path, 'utf8'))
+        : compileText(source, relative);
       if (!compiled.ok) throw new Error(`${file} 编译失败`);
       const result = simulate(compiled.ir, {
         runs: 2,

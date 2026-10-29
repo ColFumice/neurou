@@ -262,3 +262,17 @@ body {
   letter-spacing: 0.14em;
   font-size: 14px;
 }
+
+/* v5.16：模块世界的只读依赖清单，只在现象层淡显示。 */
+.preview-modules {
+  position: absolute;
+  left: 8%;
+  bottom: 8%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--serif);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.28;
+}
