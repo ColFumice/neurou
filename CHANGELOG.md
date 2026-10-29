@@ -1,7 +1,13 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v5.12**（全声明命名空间 + 模块/场景/后端；弦网络仍是唯一本体）。
+> 当前：**v5.13**（独立 `@neurou/engine` 包；弦网络仍是唯一本体）。
+
+## v5.13 独立 `@neurou/engine` 包
+
+- Engine/SceneFrame/BackendAdapter 从 runtime 拆到独立包；
+- CLI/GUI 改为依赖 `@neurou/engine`，runtime 只保留 Universe 执行；
+- 版本 5.13.0；单元 343。
 
 ## v5.12 全声明命名空间
 

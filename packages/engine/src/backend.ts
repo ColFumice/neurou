@@ -5,7 +5,7 @@
  * 这样后端不会把着色器图/音频图写回弦网络本体。
  */
 import type { IRPort } from '@neurou/core';
-import type { RuntimeValue } from './state.js';
+import type { RuntimeValue } from '@neurou/runtime';
 
 export interface BackendPortFrame {
   id: string;

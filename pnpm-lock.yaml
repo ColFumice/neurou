@@ -11,6 +11,9 @@ importers:
       '@neurou/core':
         specifier: workspace:*
         version: link:packages/core
+      '@neurou/engine':
+        specifier: workspace:*
+        version: link:packages/engine
       '@neurou/runtime':
         specifier: workspace:*
         version: link:packages/runtime
@@ -35,17 +38,32 @@ importers:
       '@neurou/core':
         specifier: workspace:*
         version: link:../core
+      '@neurou/engine':
+        specifier: workspace:*
+        version: link:../engine
       '@neurou/runtime':
         specifier: workspace:*
         version: link:../runtime
 
   packages/core: {}
 
+  packages/engine:
+    dependencies:
+      '@neurou/core':
+        specifier: workspace:*
+        version: link:../core
+      '@neurou/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+
   packages/gui:
     dependencies:
       '@neurou/core':
         specifier: workspace:*
         version: link:../core
+      '@neurou/engine':
+        specifier: workspace:*
+        version: link:../engine
       '@neurou/runtime':
         specifier: workspace:*
         version: link:../runtime

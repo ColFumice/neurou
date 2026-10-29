@@ -4,7 +4,7 @@
  * 这里**不**假装有 Faust 编译器：只把音频端口生成为合法 Faust DSP 源码，
  * 交给未来的 Host 编译服务。runtime 仍然只提供端口帧。
  */
-import type { BackendAdapter, BackendCompileResult, BackendPortFrame } from '@neurou/runtime';
+import type { BackendAdapter, BackendCompileResult, BackendPortFrame } from '@neurou/engine';
 
 export interface FaustBinding {
   control: string;

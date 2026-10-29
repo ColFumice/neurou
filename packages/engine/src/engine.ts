@@ -5,8 +5,16 @@
  * 预览、CLI、未来的 player 共享同一套 step/dispatch/observe 语义。
  */
 import type { IRRule, WorldIR } from '@neurou/core';
-import { Universe, type EmittedCue, type TickResult, type UniverseOptions } from './engine.js';
-import { cloneState, initialValues, type RuntimeValue, type WorldState } from './state.js';
+import {
+  Universe,
+  cloneState,
+  initialValues,
+  type EmittedCue,
+  type RuntimeValue,
+  type TickResult,
+  type UniverseOptions,
+  type WorldState,
+} from '@neurou/runtime';
 import type { BackendPortFrame } from './backend.js';
 
 export interface SceneFrame {

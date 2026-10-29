@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@neurou/core": "workspace:*",
-    "@neurou/runtime": "workspace:*"
+    "@neurou/runtime": "workspace:*",
+    "@neurou/engine": "workspace:*"
   },
   "scripts": {
     "check": "tsc -b --pretty false"

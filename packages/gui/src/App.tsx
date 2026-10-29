@@ -27,8 +27,8 @@ import {
   type StringKind,
   type WorldIR,
 } from '@neurou/core';
-import { Engine, createEngine, type EmittedCue } from '@neurou/runtime';
-import type { WorldState } from '@neurou/runtime';
+import { Engine, createEngine } from '@neurou/engine';
+import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
 import type { MatrixView } from './MatrixField.js';

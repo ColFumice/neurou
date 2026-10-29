@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/core" },
     { "path": "./packages/runtime" },
+    { "path": "./packages/engine" },
     { "path": "./packages/cli" }
   ]
 }

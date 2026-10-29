@@ -15,17 +15,6 @@ export {
   type SpectrumTarget,
   type SpectrumResult,
 } from './engine.js';
-export {
-  Engine,
-  createEngine,
-  type SceneFrame,
-  type EngineListener,
-} from './engine-facade.js';
-export {
-  type BackendAdapter,
-  type BackendPortFrame,
-  type BackendCompileResult,
-} from './backend.js';
 export { evalExpr, asNumber, truthy, equalValues, compareValues } from './eval.js';
 export {
   type RuntimeValue,

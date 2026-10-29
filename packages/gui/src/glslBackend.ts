@@ -5,7 +5,7 @@
  *   参数 → uniform → 纯灰度片元 → Host 预览 canvas。
  * GLSL 编译器属于 Host；runtime 仍只提供端口帧。
  */
-import type { BackendAdapter, BackendCompileResult, BackendPortFrame } from '@neurou/runtime';
+import type { BackendAdapter, BackendCompileResult, BackendPortFrame } from '@neurou/engine';
 
 export interface GlslBinding {
   uniform: string;

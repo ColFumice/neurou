@@ -1,5 +1,5 @@
 import { KIND_ORDER, type IRString, type StringKind, type WorldIR } from '@neurou/core';
-import type { Engine } from '@neurou/runtime';
+import type { Engine } from '@neurou/engine';
 import { clamp, type CouplingLane, type Lane } from './stringMath.js';
 
 /**

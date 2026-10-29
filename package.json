@@ -1,7 +1,7 @@
 {
   "name": "neurou",
   "private": true,
-  "version": "5.12.0",
+  "version": "5.13.0",
   "type": "module",
   "description": "neurou（雨若）— 世界弦语言与调律运行时",
   "scripts": {
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@neurou/core": "workspace:*",
     "@neurou/runtime": "workspace:*",
+    "@neurou/engine": "workspace:*",
     "@types/node": "^22.10.0",
     "playwright": "^1.64.1",
     "tsx": "^4.19.2",

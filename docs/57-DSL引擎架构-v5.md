@@ -219,7 +219,7 @@ engine.subscribe(listener)
 - **v5.3**：场景切换 DSL（初始场景、切换场景、收尾生效）；
 - **v5.4**：GUI 改为 Host：调律台 + Space 现象层蒙版（已完成；结构编辑仍是重建 Engine，真正保 tick 热替换后置）；
 - **v5.5**：保 tick 热替换（已完成）；模块/命名空间/用户函数（语言层，不与场景混在一起）；
-- **v5.12**：全声明命名空间（已完成：限定名 + 点号解析；导出表/私有性后置）；
+- **v5.13**：独立 `@neurou/engine` 包（已完成：Host 只依赖 Engine，runtime 保留 Universe）；
 
 ## 11. 后端 DSL 适配层（GLSL / Faust，v5.6+）
 

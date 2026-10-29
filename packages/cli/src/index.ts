@@ -4,10 +4,9 @@ import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { compileProject, ProjectError, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
+import { Engine, createEngine } from '@neurou/engine';
 import {
   ANSI,
-  Engine,
-  createEngine,
   modelLabel,
   padDisplay,
   renderBatchReport,
