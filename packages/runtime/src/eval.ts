@@ -97,6 +97,32 @@ export function evalExpr(
           return Math.max(asNumber(args[0] ?? null), asNumber(args[1] ?? null));
         case '绝对值':
           return Math.abs(asNumber(args[0] ?? null));
+        case '正弦':
+          return Math.sin(asNumber(args[0] ?? null));
+        case '余弦':
+          return Math.cos(asNumber(args[0] ?? null));
+        case '平方根':
+          return Math.sqrt(Math.max(0, asNumber(args[0] ?? null)));
+        case '向下取整':
+          return Math.floor(asNumber(args[0] ?? null));
+        case '向上取整':
+          return Math.ceil(asNumber(args[0] ?? null));
+        case '四舍五入':
+          return Math.round(asNumber(args[0] ?? null));
+        case '幂':
+          return Math.pow(asNumber(args[0] ?? null), asNumber(args[1] ?? null));
+        case '夹紧': {
+          const value = asNumber(args[0] ?? null);
+          const low = asNumber(args[1] ?? null);
+          const high = asNumber(args[2] ?? null);
+          return Math.min(Math.max(value, low), high);
+        }
+        case '插值': {
+          const a = asNumber(args[0] ?? null);
+          const b = asNumber(args[1] ?? null);
+          const t = asNumber(args[2] ?? null);
+          return a + (b - a) * t;
+        }
         case '存在':
           return args[0] !== null && args[0] !== undefined;
         case '此刻':

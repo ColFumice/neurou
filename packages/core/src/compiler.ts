@@ -1186,6 +1186,23 @@ class Compiler {
           case '绝对值':
             if (args.length !== 1 || (argTypes[0] !== 'number' && argTypes[0] !== 'any')) return fail('一个数字');
             return { expr: { k: 'call', fn: '绝对值', args: l }, type: 'number' };
+          case '正弦':
+          case '余弦':
+          case '平方根':
+          case '向下取整':
+          case '向上取整':
+          case '四舍五入':
+            if (args.length !== 1 || (argTypes[0] !== 'number' && argTypes[0] !== 'any')) return fail('一个数字');
+            return { expr: { k: 'call', fn: e.name, args: l }, type: 'number' };
+          case '幂':
+            if (args.length !== 2 || argTypes.some((t) => t !== 'number' && t !== 'any')) return fail('两个数字');
+            return { expr: { k: 'call', fn: e.name, args: l }, type: 'number' };
+          case '插值':
+            if (args.length !== 3 || argTypes.some((t) => t !== 'number' && t !== 'any')) return fail('三个数字');
+            return { expr: { k: 'call', fn: e.name, args: l }, type: 'number' };
+          case '夹紧':
+            if (args.length !== 3 || argTypes.some((t) => t !== 'number' && t !== 'any')) return fail('三个数字');
+            return { expr: { k: 'call', fn: '夹紧', args: l }, type: 'number' };
           case '存在':
             if (argTypes[0] !== 'ref' && argTypes[0] !== 'any') return fail('一个引用');
             return { expr: { k: 'call', fn: '存在', args: l }, type: 'boolean' };
@@ -1396,7 +1413,29 @@ class Compiler {
             };
           }
           default: {
-            const hint = suggestName(e.name, ['数量', '包含', '空', '最小', '最大', '绝对值', '存在', '此刻', '查谱', '查关系谱', '谱位', '当前谱值']);
+            const hint = suggestName(e.name, [
+              '数量',
+              '包含',
+              '空',
+              '最小',
+              '最大',
+              '绝对值',
+              '正弦',
+              '余弦',
+              '平方根',
+              '向下取整',
+              '向上取整',
+              '四舍五入',
+              '幂',
+              '夹紧',
+              '插值',
+              '存在',
+              '此刻',
+              '查谱',
+              '查关系谱',
+              '谱位',
+              '当前谱值',
+            ]);
             this.error('NRO2007', `不认识函数「${e.name}」。`, e.span, hint ? { hint: `你是不是想用「${hint}」？` } : undefined);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
