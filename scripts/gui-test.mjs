@@ -1341,6 +1341,16 @@ await mobilePage.waitForTimeout(1100);
 check('移动端点击动作执行并出现结局', (await mobileRoot.getAttribute('data-ending')) === '落点' && Number(await mobileRoot.getAttribute('data-action-count')) === 0, `${await mobileRoot.getAttribute('data-ending')}/${await mobileRoot.getAttribute('data-action-count')}`);
 await mobileContext.close();
 
+// v3.4：生产同款 URL world/seed 选择（dev 也验证）
+const worldPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await worldPage.goto(`${URL}?world=${encodeURIComponent('examples/relational.nro')}&seed=42`, { waitUntil: 'networkidle' });
+await worldPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await worldPage.waitForTimeout(700);
+const worldApp = worldPage.locator('[data-testid="ink-app"]');
+check('URL 选择世界（data-world-file）', (await worldApp.getAttribute('data-world-file')) === 'examples/relational.nro', String(await worldApp.getAttribute('data-world-file')));
+check('URL seed 复现（data-seed）', (await worldApp.getAttribute('data-seed')) === '42', String(await worldApp.getAttribute('data-seed')));
+await worldPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

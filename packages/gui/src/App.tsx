@@ -45,17 +45,44 @@ const SAVE_DEBOUNCE_MS = 700;
 const DEV = import.meta.env.DEV;
 
 /**
- * 用 `?world=examples/xxx.nro` 打开任意示例世界（仅 dev；生产包固定默认世界）。
+ * v3.4：所有示例世界在构建时内联，生产包也能用 `?world=examples/xxx.nro` 打开。
+ * 每个世界 raw 文本约 0.7–9KB，总量小于 30KB；tuner 仍保留独立 raw 导入作为兜底。
+ */
+const BUNDLED_WORLD_MODULES = import.meta.glob('../../../examples/*.nro', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+}) as Record<string, string>;
+const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
+  Object.entries(BUNDLED_WORLD_MODULES).map(([path, text]) => [
+    `examples/${path.slice(path.lastIndexOf('/') + 1)}`,
+    text,
+  ]),
+);
+
+function bundledSourceFor(file: string): string {
+  return BUNDLED_WORLDS[file] ?? bundledSource;
+}
+
+/**
+ * 用 `?world=examples/xxx.nro` 打开任意示例世界；dev 支持文件系统，生产只认内联世界。
  * 只认 examples/ 下的一层 .nro，避免路径穿越。
  */
 function worldFileFromUrl(): string {
-  if (!DEV) return DEFAULT_WORLD_FILE;
   const raw = new URLSearchParams(window.location.search).get('world');
-  if (raw && /^examples\/[^/\\]+\.nro$/.test(raw)) return raw;
+  if (raw && /^examples\/[^/\\]+\.nro$/.test(raw) && (DEV || raw in BUNDLED_WORLDS)) return raw;
   return DEFAULT_WORLD_FILE;
 }
 
+/** v3.4：`?seed=42` 复现同一局；默认仍是 7。 */
+function seedFromUrl(): number {
+  const raw = new URLSearchParams(window.location.search).get('seed');
+  const value = raw === null ? Number.NaN : Number(raw);
+  return Number.isInteger(value) && value >= 0 && value <= 2147483647 ? value : 7;
+}
+
 const WORLD_FILE = worldFileFromUrl();
+const INITIAL_SEED = seedFromUrl();
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 
@@ -133,7 +160,7 @@ function useWorldSource(file: string): {
   reload: () => Promise<void>;
   apply: (text: string) => void;
 } {
-  const [source, setSource] = useState<string | null>(DEV ? null : bundledSource);
+  const [source, setSource] = useState<string | null>(DEV ? null : bundledSourceFor(file));
   const [rev, setRev] = useState(0);
   useEffect(() => {
     if (!DEV) return;
@@ -143,7 +170,7 @@ function useWorldSource(file: string): {
         if (alive) setSource(text);
       })
       .catch(() => {
-        if (alive) setSource(bundledSource);
+        if (alive) setSource(bundledSourceFor(file));
       });
     return () => {
       alive = false;
@@ -245,7 +272,7 @@ export function App() {
   useEffect(() => {
     if (!compiled?.ok) return;
     applyWorldIR(compiled.ir);
-    setUniverse(new Universe(compiled.ir, { seed: 7 }));
+    setUniverse(new Universe(compiled.ir, { seed: INITIAL_SEED }));
     setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
     if (source) {
@@ -417,7 +444,7 @@ export function App() {
     if (!universe || !worldIRRef.current || transitionRef.current) return false;
     const targetCompiled = compileText(text, `${WORLD_FILE}.${dir}`);
     if (!targetCompiled.ok) return false;
-    const targetUniverse = new Universe(targetCompiled.ir, { seed: 7 });
+    const targetUniverse = new Universe(targetCompiled.ir, { seed: INITIAL_SEED });
     const to = collectLanes(targetUniverse, targetCompiled.ir, selected);
     const next: UndoTransition = {
       dir,
@@ -517,6 +544,7 @@ export function App() {
       className="ink-app"
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
+      data-seed={INITIAL_SEED}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}
@@ -645,7 +673,7 @@ export function App() {
   const restartWorld = (): void => {
     const ir = worldIRRef.current ?? worldIR;
     if (!ir) return;
-    setUniverse(new Universe(ir, { seed: 7 }));
+    setUniverse(new Universe(ir, { seed: INITIAL_SEED }));
     setPlayReset((n) => n + 1);
     setVersion((v) => v + 1);
   };
@@ -719,7 +747,7 @@ export function App() {
 
   /** 弦结构变化后重建 Universe（保留仍在的弦的当前值；新弦从基线开始）。 */
   const rebuildUniverse = (ir: WorldIR): void => {
-    const next = new Universe(ir, { seed: 7 });
+    const next = new Universe(ir, { seed: INITIAL_SEED });
     for (const string of ir.strings) {
       const value = universe.get(string.id);
       if (typeof value === 'number') next.inject(string.id, value);
