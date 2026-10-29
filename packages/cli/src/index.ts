@@ -6,7 +6,8 @@ import { stdin, stdout } from 'node:process';
 import { SourceFile, compile, formatDiagnostic, serialize, type WorldIR } from '@neurou/core';
 import {
   ANSI,
-  Universe,
+  Engine,
+  createEngine,
   modelLabel,
   padDisplay,
   renderBatchReport,
@@ -279,7 +280,7 @@ async function main(): Promise<void> {
 }
 
 async function play(ir: WorldIR, color: boolean): Promise<void> {
-  const u = new Universe(ir, { seed: Number(1), log: false });
+  const engine = createEngine(ir, { seed: Number(1), log: false });
   const rl = createInterface({ input: stdin, output: stdout });
   console.log('');
   console.log(paint(color, ANSI.bold + ANSI.cyan, `  ${ir.name}`) + paint(color, ANSI.gray, `   ${String(ir.meta['调性'] ?? '')}`));
@@ -288,14 +289,14 @@ async function play(ir: WorldIR, color: boolean): Promise<void> {
 
   let pending: string[] = [];
   try {
-    while (!u.ended) {
+    while (!engine.ended) {
       const cues = pending.length > 0 ? pending : [];
       pending = [];
-      const actions = u.availableActions();
+      const actions = engine.availableActions();
       console.log(
-        paint(color, ANSI.gray, `  ── 第 ${u.state.tick} 拍${u.phaseName ? ` · ${u.phaseName}` : ''} ──`),
+        paint(color, ANSI.gray, `  ── 第 ${engine.tick} 拍${engine.phaseName ? ` · ${engine.phaseName}` : ''}${engine.sceneName ? ` · ${engine.sceneName}` : ''} ──`),
       );
-      for (const line of renderState(u)) console.log(line);
+      for (const line of renderState(engine)) console.log(line);
       for (const cue of cues) console.log(`  ${paint(color, ANSI.magenta, '♪')} ${cue}`);
 
       if (actions.length === 0) {
@@ -310,10 +311,10 @@ async function play(ir: WorldIR, color: boolean): Promise<void> {
       const n = Number(answer);
       if (Number.isInteger(n) && n >= 1 && n <= actions.length) {
         const action = actions[n - 1]!;
-        u.act(action.id);
+        engine.dispatch(action.id);
         console.log(paint(color, ANSI.gray, `  …${action.name}`));
       }
-      const result = u.tick();
+      const result = engine.step();
       for (const cue of result.cues) pending.push(cueText(cue.cue));
       if (result.ending) {
         console.log('');
@@ -321,8 +322,8 @@ async function play(ir: WorldIR, color: boolean): Promise<void> {
         break;
       }
     }
-    if (!u.state.ended) {
-      console.log(paint(color, ANSI.gray, `  你在第 ${u.state.tick} 拍离开了这场谈判。`));
+    if (!engine.ended) {
+      console.log(paint(color, ANSI.gray, `  你在第 ${engine.tick} 拍离开了这场谈判。`));
     }
   } finally {
     rl.close();
@@ -337,10 +338,10 @@ function cueText(cue: { k: string; speaker?: string; text?: string; param?: stri
   return `[${cue.k}] ${cue.text ?? ''}`;
 }
 
-function renderState(u: Universe): string[] {
+function renderState(engine: Engine): string[] {
   const lines: string[] = [];
-  for (const s of u.ir.strings) {
-    const v = u.get(s.id);
+  for (const s of engine.ir.strings) {
+    const v = engine.get(s.id);
     if (typeof v === 'number') {
       const min = s.domain.type === 'number' ? (s.domain.min ?? 0) : 0;
       const max = s.domain.type === 'number' ? (s.domain.max ?? 100) : 100;

@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest';
+import { compileText } from '@neurou/core';
+import { createEngine, type SceneFrame } from '../src/index.js';
+
+const WORLD = `世界 门面测试
+  版本 0.1
+
+叙事弦 能量
+  类型 数值 0..100
+  基线 0
+
+系统 潮汐
+  阶段 传导
+  效果
+    能量 += 2
+
+场景 夜
+  启用 系统 潮汐
+  进入
+    能量 += 5
+
+场景 昼
+  启用 系统 潮汐
+  进入
+    能量 += 1
+`;
+
+describe('Engine facade（v5.2）', () => {
+  it('通过 facade 驱动、观测与订阅', () => {
+    const result = compileText(WORLD, 'engine-facade.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    const frames: SceneFrame[] = [];
+    const unsubscribe = engine.subscribe((frame) => frames.push(frame));
+
+    expect(engine.sceneName).toBe('夜');
+    expect(engine.get('能量')).toBe(5);
+    engine.step();
+    expect(engine.get('能量')).toBe(7);
+    expect(engine.observe().activeSystems).toEqual(['潮汐']);
+    expect(engine.observe().scene).toBe('夜');
+    expect(frames).toHaveLength(1);
+    unsubscribe();
+    engine.step();
+    expect(frames).toHaveLength(1);
+  });
+
+  it('通过 facade 切换场景并恢复快照', () => {
+    const result = compileText(WORLD, 'engine-facade-scene.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    const snapshot = engine.snapshot();
+    expect(engine.transitionScene('昼')).toBe(true);
+    expect(engine.sceneName).toBe('昼');
+    expect(engine.get('能量')).toBe(6); // 5 + 1
+    engine.restore(snapshot);
+    expect(engine.sceneName).toBe('夜');
+    expect(engine.get('能量')).toBe(5);
+  });
+});

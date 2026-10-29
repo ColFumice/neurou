@@ -1,7 +1,13 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v5.1**（DSL 运行层：场景/系统；弦网络仍是唯一本体）。
+> 当前：**v5.2**（DSL 运行层 + Engine 门面；弦网络仍是唯一本体）。
+
+## v5.2 Engine 门面
+
+- Host 唯一入口 `createEngine/step/dispatch/transitionScene/observe/subscribe`；
+- CLI `neurou run` 迁到门面，拍头显示场景；
+- 版本 5.2.0；单元 325。
 
 ## v5.1 运行层：场景与系统
 
