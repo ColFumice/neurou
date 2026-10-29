@@ -20,8 +20,8 @@ const worlds = readdirSync(join(root, 'examples'))
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 cpSync(dist, out, { recursive: true });
-if (existsSync(join(root, 'textures'))) {
-  cpSync(join(root, 'textures'), join(out, 'textures'), { recursive: true });
+for (const folder of ['textures', 'audio']) {
+  if (existsSync(join(root, folder))) cpSync(join(root, folder), join(out, folder), { recursive: true });
 }
 
 const manifest = {
