@@ -98,4 +98,29 @@ describe('运行层：系统/场景 IR（v5.1）', () => {
     const result = compileText(source, 'runtime-layer-bad-scene-effect.nro');
     expect(result.ok).toBe(false);
   });
+
+  it('解析视觉/音频端口并序列化', () => {
+    const source = `${WORLD}\n视觉端口 雨幕\n  参数 强度 能量\n  参数 浓度 能量\n\n音频端口 潮声\n  参数 潮位 能量\n`;
+    const result = compileText(source, 'runtime-layer-ports.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.ports?.map((port) => [port.kind, port.name])).toEqual([
+      ['视觉', '雨幕'],
+      ['音频', '潮声'],
+    ]);
+    expect(result.ir.ports?.[0]?.params.map((param) => [param.name, param.string])).toEqual([
+      ['强度', '能量'],
+      ['浓度', '能量'],
+    ]);
+    const text = serialize(result.ir);
+    expect(text).toContain('视觉端口 雨幕');
+    expect(text).toContain('音频端口 潮声');
+    expect(compileText(text, 'runtime-layer-ports-roundtrip.nro').ok).toBe(true);
+  });
+
+  it('拒绝绑定不存在弦的端口', () => {
+    const source = `${WORLD}\n视觉端口 雨幕\n  参数 强度 不存在\n`;
+    const result = compileText(source, 'runtime-layer-bad-port.nro');
+    expect(result.ok).toBe(false);
+  });
 });

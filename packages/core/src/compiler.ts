@@ -20,6 +20,7 @@ import type {
   SceneDecl,
   SignalDecl,
   SpectrumDecl,
+  PortDecl,
   StringDecl,
   StringKind,
   SystemDecl,
@@ -38,6 +39,7 @@ import type {
   IRLoop,
   IRMatrix,
   IRPhase,
+  IRPort,
   IRRule,
   IRScene,
   IRSignal,
@@ -121,6 +123,8 @@ class Compiler {
   private readonly sceneDecls: SceneDecl[] = [];
   private readonly systems: IRSystem[] = [];
   private readonly scenes: IRScene[] = [];
+  private readonly portDecls: PortDecl[] = [];
+  private readonly ports: IRPort[] = [];
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
 
@@ -141,6 +145,7 @@ class Compiler {
     this.buildRules();
     this.buildSystems();
     this.buildScenes();
+    this.buildPorts();
     this.buildAxioms();
     this.buildSignals();
     this.buildEndings();
@@ -200,6 +205,9 @@ class Compiler {
           break;
         case 'scene':
           this.sceneDecls.push(d);
+          break;
+        case 'port':
+          this.portDecls.push(d);
           break;
         case 'audio-asset':
           this.declareAudioAsset(d);
@@ -1637,6 +1645,37 @@ class Compiler {
     }
   }
 
+  /** v5.6：端口只绑定已有弦，不创造新状态。 */
+  private buildPorts(): void {
+    const seen = new Set<string>();
+    for (const d of this.portDecls) {
+      const key = `${d.kind}:${d.name}`;
+      if (seen.has(key)) {
+        this.error('NRO2004', `${d.kind}端口「${d.name}」重复声明。`, d.span);
+        continue;
+      }
+      seen.add(key);
+      const paramNames = new Set<string>();
+      const params: IRPort['params'] = [];
+      for (const param of d.params) {
+        if (paramNames.has(param.name)) {
+          this.error('NRO2004', `端口「${d.name}」的参数「${param.name}」重复。`, d.span);
+          continue;
+        }
+        paramNames.add(param.name);
+        const id = this.resolve(param.string.split('.'), d.span, {});
+        if (!id) continue;
+        params.push({ name: param.name, string: id });
+      }
+      this.ports.push({
+        id: `port:${d.kind}:${d.name}`,
+        name: d.name,
+        kind: d.kind,
+        params,
+      });
+    }
+  }
+
   private buildAxioms(): void {
     for (const d of this.axiomDecls) {
       const lowered = this.lower(d.expr, {});
@@ -1928,6 +1967,7 @@ class Compiler {
       ...(this.bgm ? { bgm: this.bgm } : {}),
       ...(this.systems.length > 0 ? { systems: this.systems } : {}),
       ...(this.scenes.length > 0 ? { scenes: this.scenes } : {}),
+      ...(this.ports.length > 0 ? { ports: this.ports } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,

@@ -1,7 +1,14 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v5.5**（DSL 运行层 + Engine 门面 + 现象层预览 + 热替换；弦网络仍是唯一本体）。
+> 当前：**v5.6**（DSL 运行层 + Engine 门面 + 预览 + 热替换 + 后端端口契约；弦网络仍是唯一本体）。
+
+## v5.6 视觉/音频端口与 BackendAdapter 契约
+
+- DSL 新增 `视觉端口` / `音频端口`，参数绑定已有弦；
+- `Engine.observe().ports` 投影当拍参数；
+- runtime 提供 BackendAdapter 只读编译契约，GLSL/Faust 由 Host 接入；
+- 版本 5.6.0；单元 332。
 
 ## v5.5 保 tick 热替换
 

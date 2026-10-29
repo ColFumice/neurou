@@ -9,6 +9,7 @@ import type {
   IRLoop,
   IRMatrix,
   IRPhase,
+  IRPort,
   IRRule,
   IRScene,
   IRSignal,
@@ -303,6 +304,12 @@ function sceneBlock(w: Writer, scene: IRScene): void {
   w.blank();
 }
 
+function portBlock(w: Writer, port: IRPort): void {
+  w.line(0, `${port.kind}端口 ${port.name}`);
+  for (const param of port.params) w.line(1, `参数 ${param.name} ${param.string}`);
+  w.blank();
+}
+
 // ---------- 规则 ----------
 
 function effectLine(e: IREffect): string {
@@ -445,6 +452,7 @@ export function serialize(ir: WorldIR): string {
   for (const matrix of ir.matrices) matrixBlock(w, matrix);
   for (const system of ir.systems ?? []) systemBlock(w, system);
   for (const scene of ir.scenes ?? []) sceneBlock(w, scene);
+  for (const port of ir.ports ?? []) portBlock(w, port);
 
   const byId = new Map(ir.couplings.map((c) => [c.id, c]));
   const loopCouplingIds = new Set(ir.couplings.filter((c) => c.loop).map((c) => c.id));

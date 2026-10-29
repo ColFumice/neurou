@@ -24,6 +24,8 @@ import type {
   SceneDecl,
   SignalDecl,
   SpectrumDecl,
+  PortDecl,
+  PortParam,
   StringDecl,
   StringKind,
   SystemDecl,
@@ -265,6 +267,8 @@ class Parser {
     if (kw === '配乐') return this.parseBgm();
     if (kw === '系统') return this.parseSystem();
     if (kw === '场景') return this.parseScene();
+    if (kw === '视觉端口') return this.parsePort('视觉');
+    if (kw === '音频端口') return this.parsePort('音频');
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -391,6 +395,41 @@ class Parser {
         }
       }
       this.exitBlock();
+    }
+    return decl;
+  }
+
+  /** v5.6：后端端口；参数绑定到已有弦，不创造新状态。 */
+  private parsePort(kind: '视觉' | '音频'): PortDecl {
+    const start = this.advance();
+    const name = this.readName('端口名');
+    const decl: PortDecl = { k: 'port', kind, name, params: [], span: this.spanFrom(start) };
+    this.finishLine();
+    if (this.enterBlock('端口声明')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('字段名');
+        if (key === '参数') {
+          const paramStart = this.peek();
+          const param: PortParam = {
+            name: this.readName('参数名'),
+            string: this.readPath('绑定的弦').join('.'),
+            span: this.spanFrom(paramStart),
+          };
+          decl.params.push(param);
+          this.finishLine();
+        } else {
+          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>。');
+          this.skipToLineEnd();
+        }
+      }
+      this.exitBlock();
+    }
+    if (decl.params.length === 0) {
+      this.fail(`端口「${name}」没有参数。`, decl.span, '端口至少要绑定一根弦，例如「参数 强度 雨量」。');
     }
     return decl;
   }

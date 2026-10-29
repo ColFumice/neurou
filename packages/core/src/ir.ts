@@ -265,6 +265,20 @@ export interface IRSystem {
 }
 
 /** v5.1：运行层场景。 */
+export interface IRPortParam {
+  name: string;
+  /** 已解析的弦 id。 */
+  string: string;
+}
+
+/** v5.6：后端端口契约；GLSL/Faust 只消费这些类型化参数。 */
+export interface IRPort {
+  id: string;
+  name: string;
+  kind: '视觉' | '音频';
+  params: IRPortParam[];
+}
+
 export interface IRScene {
   id: string;
   name: string;
@@ -290,6 +304,8 @@ export interface WorldIR {
   systems?: IRSystem[];
   /** v5.1：运行层场景；按声明顺序，第一个是默认场景。 */
   scenes?: IRScene[];
+  /** v5.6：视觉/音频后端端口；不是弦网络本体。 */
+  ports?: IRPort[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];

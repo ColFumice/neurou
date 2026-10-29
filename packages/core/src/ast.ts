@@ -194,6 +194,20 @@ export interface SceneDecl extends DeclBase {
   exit: EffectAst[];
 }
 
+/** v5.6：后端端口（GLSL/Faust 只消费端口，不进入弦网络本体）。 */
+export interface PortParam {
+  name: string;
+  string: string;
+  span: Span;
+}
+
+export interface PortDecl extends DeclBase {
+  k: 'port';
+  kind: '视觉' | '音频';
+  name: string;
+  params: PortParam[];
+}
+
 export interface PhaseAst {
   name: string;
   duration: number;
@@ -329,7 +343,8 @@ export type Decl =
   | AudioAssetDecl
   | BgmDecl
   | SystemDecl
-  | SceneDecl;
+  | SceneDecl
+  | PortDecl;
 
 export interface Program {
   decls: Decl[];
@@ -357,6 +372,8 @@ export const DECL_KEYWORDS = [
   '动作',
   '系统',
   '场景',
+  '视觉端口',
+  '音频端口',
   '曲式',
   '结局',
   '谱',

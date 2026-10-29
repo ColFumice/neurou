@@ -78,4 +78,14 @@ describe('Engine facade（v5.2）', () => {
     expect(engine.get('新弦')).toBe(7);
     expect(engine.sceneName).toBe('夜');
   });
+
+  it('observe 投影视觉/音频端口值', () => {
+    const source = `${WORLD}\n视觉端口 雨幕\n  参数 强度 能量\n\n音频端口 潮声\n  参数 潮位 能量\n`;
+    const result = compileText(source, 'engine-facade-ports.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    const frame = engine.observe();
+    expect(frame.ports['port:视觉:雨幕']?.params['强度']).toBe(5);
+    expect(frame.ports['port:音频:潮声']?.params['潮位']).toBe(5);
+  });
 });

@@ -7,6 +7,7 @@
 import type { IRRule, WorldIR } from '@neurou/core';
 import { Universe, type EmittedCue, type TickResult, type UniverseOptions } from './engine.js';
 import { cloneState, initialValues, type RuntimeValue, type WorldState } from './state.js';
+import type { BackendPortFrame } from './backend.js';
 
 export interface SceneFrame {
   scene?: string;
@@ -15,6 +16,7 @@ export interface SceneFrame {
   values: Record<string, RuntimeValue>;
   cues: EmittedCue[];
   activeSystems: string[];
+  ports: Record<string, BackendPortFrame>;
   ended: { id: string; name: string; tick: number } | null;
 }
 
@@ -155,6 +157,12 @@ export class Engine {
 
   observe(): SceneFrame {
     const state = this.universe.snapshot();
+    const ports: Record<string, BackendPortFrame> = {};
+    for (const port of this.ir.ports ?? []) {
+      const params: Record<string, RuntimeValue> = {};
+      for (const param of port.params) params[param.name] = state.values[param.string] ?? null;
+      ports[port.id] = { id: port.id, name: port.name, kind: port.kind, params };
+    }
     return {
       scene: this.sceneName,
       tick: state.tick,
@@ -162,6 +170,7 @@ export class Engine {
       values: state.values,
       cues: this.lastCues.map((cue) => ({ ...cue })),
       activeSystems: this.activeSystems(),
+      ports,
       ended: state.ended,
     };
   }
