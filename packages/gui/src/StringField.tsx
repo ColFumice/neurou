@@ -559,6 +559,11 @@ export function StringField({
     const audio = getStringAudio();
     const keys = layoutKeyboard();
     const focusDispBuf = new Float32Array(STRING_N);
+    /** v5.39：持续波形平滑显示缓存 + 拖尾帧。 */
+    const sustainedDisplayWaves = new Map<StringKind, Float32Array>();
+    const sustainedDrawTrail: Float32Array[] = [];
+    let sustainedTrailKind: StringKind | null = null;
+    let sustainedWaveFrameAt = 0;
     const trailDispBuf = new Float32Array(STRING_N);
     const curveBufs: number[][] = [];
     let sims: StringSim[] = [];
@@ -1138,17 +1143,40 @@ export function StringField({
       const geom = focusGeom();
       const sustainedFocus = interactionOf(focusIdx) === '持续';
       const sustainedKind = kindOf(focusIdx);
-      const sustainedWave = sustainedWaves.get(sustainedKind);
       const sustainedProfile = profileOf(focusIdx);
+      let sustainedWave: readonly number[] | Float32Array = sustainedWaves.get(sustainedKind);
+      if (sustainedFocus) {
+        let display = sustainedDisplayWaves.get(sustainedKind);
+        if (!display) {
+          display = new Float32Array(sustainedWave.length);
+          display.set(sustainedWave);
+          sustainedDisplayWaves.set(sustainedKind, display);
+        }
+        if (now - sustainedWaveFrameAt > 8) {
+          const dt = Math.min(0.1, Math.max(0.008, (now - sustainedWaveFrameAt) / 1000));
+          sustainedWaveFrameAt = now;
+          const ease = 1 - Math.exp(-dt * 9);
+          for (let i = 0; i < display.length; i += 1) {
+            display[i] = (display[i] ?? 0.5) + ((sustainedWave[i] ?? 0.5) - (display[i] ?? 0.5)) * ease;
+          }
+        }
+        sustainedWave = display;
+      }
+      const smoothSample = (wave: ArrayLike<number>, x: number): number => {
+        const position = x * (wave.length - 1);
+        const index = Math.floor(position);
+        const t = position - index;
+        const p0 = wave[Math.max(0, index - 1)] ?? 0.5;
+        const p1 = wave[index] ?? 0.5;
+        const p2 = wave[Math.min(wave.length - 1, index + 1)] ?? 0.5;
+        const p3 = wave[Math.min(wave.length - 1, index + 2)] ?? 0.5;
+        return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
+      };
       for (let i = 0; i < count; i += 1) {
         const x01 = count > 1 ? i / (count - 1) : 0.5;
         if (sustainedFocus) {
-          // v5.37：持续型弦显示可编辑波形本身；按键/鼠标写入后保持静止。
-          const position = x01 * (sustainedWave.length - 1);
-          const left = Math.floor(position);
-          const right = Math.min(sustainedWave.length - 1, left + 1);
-          const fraction = position - left;
-          const sample = (sustainedWave[left] ?? 0.5) * (1 - fraction) + (sustainedWave[right] ?? 0.5) * fraction;
+          // v5.37/v5.39：持续型弦显示可编辑波形；Catmull-Rom 平滑连接 + 缓动变形。
+          const sample = smoothSample(sustainedWave, x01);
           const envelope = Math.pow(Math.sin(Math.PI * x01), 0.45);
           focusDispBuf[i] = (sample - 0.5) * 2 * sustainedProfile.maxPull * 0.62 * envelope;
           continue;
@@ -1566,7 +1594,26 @@ export function StringField({
         strokeFocus(ctx, disp, 1 - progress, false);
       } else {
         const disp = focusDisplayU(now, true);
-        if (pinsNow.length > 0) {
+        const sustainedDraw = interactionOf(focusIdx) === '持续';
+        if (sustainedDraw) {
+          const kind = kindOf(focusIdx);
+          if (sustainedTrailKind !== kind) {
+            sustainedDrawTrail.length = 0;
+            sustainedTrailKind = kind;
+          }
+          sustainedDrawTrail.unshift(disp.slice());
+          if (sustainedDrawTrail.length > 9) sustainedDrawTrail.pop();
+          ctx.save();
+          for (let i = Math.min(7, sustainedDrawTrail.length - 1); i >= 1; i -= 1) {
+            const trail = sustainedDrawTrail[i];
+            if (!trail) continue;
+            ctx.filter = `blur(${2 + i * 1.4}px)`;
+            strokeFocus(ctx, trail, 0.075 * (1 - i / 9), false);
+          }
+          ctx.filter = 'none';
+          strokeFocus(ctx, disp, 1, false);
+          ctx.restore();
+        } else if (pinsNow.length > 0) {
           // 按住期间：整条焦点弦单一路径、常态宽度；只留峰顶圆点。
           strokeFocusUniform(disp);
           drawPinDots();
