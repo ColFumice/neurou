@@ -306,6 +306,7 @@ function sceneBlock(w: Writer, scene: IRScene): void {
 // ---------- 规则 ----------
 
 function effectLine(e: IREffect): string {
+  if (e.k === 'scene') return `切换场景 ${e.scene}`;
   if (e.k === 'apply') {
     const name = e.chord.startsWith('chord:') ? e.chord.slice('chord:'.length) : e.chord;
     return `施加 ${name}`;
@@ -374,7 +375,7 @@ function phasesBlock(w: Writer, phases: IRPhase[]): void {
 
 // ---------- 入口 ----------
 
-const META_ORDER = ['版本', '调性', '种子', '作者', '描述', '章节', '上一章', '下一章'] as const;
+const META_ORDER = ['版本', '调性', '种子', '作者', '描述', '章节', '上一章', '下一章', '初始场景'] as const;
 
 function worldHeader(w: Writer, ir: WorldIR): void {
   w.line(0, `# 由 neurou 序列化器生成：${ir.name}`);
@@ -387,7 +388,7 @@ function worldHeader(w: Writer, ir: WorldIR): void {
       w.line(1, typeof value === 'number' ? `${key} ${numberText(value)}` : `${key} ${String(value)}`);
     } else if (key === '调性') {
       w.line(1, `${key} ${String(value)}`);
-    } else if (key === '作者' || key === '描述' || key === '章节' || key === '上一章' || key === '下一章') {
+    } else if (key === '作者' || key === '描述' || key === '章节' || key === '上一章' || key === '下一章' || key === '初始场景') {
       w.line(1, `${key} ${stringText(String(value))}`);
     } else {
       throw new Error(`serialize: 世界里未知的元数据字段「${key}」`);

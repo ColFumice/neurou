@@ -49,10 +49,12 @@ export type DomainAst =
   | { type: 'ref'; entityKind?: string };
 
 export interface EffectAst {
-  k: 'set' | 'add' | 'sub' | 'apply';
+  k: 'set' | 'add' | 'sub' | 'apply' | 'scene';
   target?: string[];
   value?: Expr;
   chord?: string;
+  /** v5.3：切换运行场景。 */
+  scene?: string;
   /** v2.17：直接改关系谱标量格；target 为空。 */
   matrix?: { name: string; row: string; col: string };
   span: Span;

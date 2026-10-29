@@ -37,7 +37,9 @@ export type LExpr =
 export type IREffect =
   | { k: 'set' | 'add' | 'sub'; id: string; value: LExpr }
   | { k: 'matrixSet' | 'matrixAdd' | 'matrixSub'; matrix: string; row: string; col: string; value: LExpr }
-  | { k: 'apply'; chord: string };
+  | { k: 'apply'; chord: string }
+  /** v5.3：在当前 tick 收尾时切换场景。 */
+  | { k: 'scene'; scene: string };
 
 export interface IREntity {
   id: string;

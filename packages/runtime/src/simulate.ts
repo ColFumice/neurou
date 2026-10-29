@@ -165,6 +165,7 @@ function bucket(s: IRString, v: unknown): string {
 export function scoreEffects(u: Universe, effects: readonly IREffect[], depth = 0): number {
   let score = 0;
   for (const e of effects) {
+    if (e.k === 'scene') continue;
     if (e.k === 'apply') {
       if (depth > 3) continue;
       const chord = u.chords.get(e.chord);

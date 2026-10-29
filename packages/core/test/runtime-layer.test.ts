@@ -60,4 +60,42 @@ describe('运行层：系统/场景 IR（v5.1）', () => {
     expect(sceneResult.ok).toBe(false);
     expect(stageResult.ok).toBe(false);
   });
+
+  it('支持初始场景与切换场景效果', () => {
+    const source = `世界 切换场景测试
+  版本 0.1
+  初始场景 "夜"
+
+叙事弦 标记
+  类型 数值 0..10
+  基线 0
+
+系统 换景
+  阶段 收尾
+  效果
+    切换场景 昼
+
+场景 夜
+  启用 系统 换景
+
+场景 昼
+`;
+    const result = compileText(source, 'runtime-layer-scene-effect.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ir.meta['初始场景']).toBe('夜');
+    expect(result.ir.systems?.[0]?.effects[0]).toEqual({ k: 'scene', scene: '昼' });
+    const text = serialize(result.ir);
+    expect(text).toContain('切换场景 昼');
+    expect(compileText(text, 'runtime-layer-scene-effect-roundtrip.nro').ok).toBe(true);
+  });
+
+  it('拒绝不存在的切换场景目标', () => {
+    const source = WORLD.replace(
+      '    能量 += 2',
+      '    能量 += 2\n    切换场景 不存在',
+    );
+    const result = compileText(source, 'runtime-layer-bad-scene-effect.nro');
+    expect(result.ok).toBe(false);
+  });
 });

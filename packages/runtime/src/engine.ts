@@ -117,6 +117,8 @@ export class Universe {
   private readonly systemsById = new Map<string, IRSystem>();
   private readonly systemsByPhase = new Map<string, IRSystem[]>();
   private readonly scenesById = new Map<string, IRScene>();
+  /** v5.3：本拍收尾时切换到的场景。 */
+  private pendingScene: string | undefined;
   private readonly actionList: IRRule[];
 
   private queuedAction: string | undefined;
@@ -173,6 +175,11 @@ export class Universe {
       list.push(system);
       this.systemsByPhase.set(system.phase, list);
     }
+    const requestedScene = typeof world.meta['初始场景'] === 'string' ? String(world.meta['初始场景']) : '';
+    const requested = requestedScene
+      ? [...this.scenesById.values()].find((scene) => scene.name === requestedScene || scene.id === requestedScene)
+      : undefined;
+    if (requested) this.state.sceneId = requested.id;
     if (this.scenesById.size > 0 && !this.state.sceneId) {
       this.state.sceneId = [...this.scenesById.keys()][0];
     }
@@ -623,6 +630,12 @@ export class Universe {
 
     this.runSystems('收尾', deltas, fired);
 
+    if (this.pendingScene) {
+      const scene = this.pendingScene;
+      this.pendingScene = undefined;
+      this.transitionScene(scene);
+    }
+
     this.stats.ticks++;
     this.state.tick = t + 1;
 
@@ -849,6 +862,10 @@ export class Universe {
     fired: string[],
   ): void {
     for (const e of effects) {
+      if (e.k === 'scene') {
+        this.pendingScene = e.scene;
+        continue;
+      }
       if (e.k === 'apply') {
         const chord = this.chords.get(e.chord);
         if (!chord) continue;

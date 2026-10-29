@@ -67,4 +67,32 @@ describe('运行层：场景/系统运行时（v5.1）', () => {
     restored.restore(universe.snapshot());
     expect(restored.sceneName).toBe('昼');
   });
+
+  it('系统效果在本拍收尾切换场景', () => {
+    const source = `世界 切换场景运行时
+  版本 0.1
+  初始场景 "夜"
+
+叙事弦 标记
+  类型 数值 0..10
+  基线 0
+
+系统 换景
+  阶段 收尾
+  效果
+    切换场景 昼
+
+场景 夜
+  启用 系统 换景
+
+场景 昼
+`;
+    const result = compileText(source, 'runtime-layer-scene-switch.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const universe = new Universe(result.ir, { seed: 1 });
+    expect(universe.sceneName).toBe('夜');
+    universe.tick();
+    expect(universe.sceneName).toBe('昼');
+    expect(universe.activeSystems()).toEqual([]);
+  });
 });

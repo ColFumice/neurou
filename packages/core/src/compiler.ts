@@ -1425,6 +1425,15 @@ class Compiler {
   private lowerEffects(effects: EffectAst[], scope: Scope): IREffect[] {
     const out: IREffect[] = [];
     for (const e of effects) {
+      if (e.k === 'scene') {
+        if (!e.scene) continue;
+        if (!this.sceneDecls.some((scene) => scene.name === e.scene)) {
+          this.error('NRO2101', `找不到叫「${e.scene}」的场景。`, e.span);
+          continue;
+        }
+        out.push({ k: 'scene', scene: e.scene });
+        continue;
+      }
       if (e.k === 'apply') {
         if (!e.chord) continue;
         if (!this.chordDecls.has(e.chord)) {

@@ -464,7 +464,14 @@ class Parser {
             }
           }
           meta.push({ key, value: words.join(' ') });
-        } else if (key === '作者' || key === '描述' || key === '章节' || key === '上一章' || key === '下一章') {
+        } else if (
+          key === '作者' ||
+          key === '描述' ||
+          key === '章节' ||
+          key === '上一章' ||
+          key === '下一章' ||
+          key === '初始场景'
+        ) {
           const v = this.peek();
           if (v.kind === 'string') {
             this.advance();
@@ -473,7 +480,7 @@ class Parser {
             meta.push({ key, value: this.readName('值') });
           }
         } else {
-          this.fail(`世界里不认识「${key}」这个字段。`, this.peek().span, '可用字段：版本、调性、种子、作者、描述。');
+          this.fail(`世界里不认识「${key}」这个字段。`, this.peek().span, '可用字段：版本、调性、种子、作者、描述、章节、上一章、下一章、初始场景。');
           this.skipToLineEnd();
           continue;
         }
@@ -1466,6 +1473,10 @@ class Parser {
       this.advance();
       const chord = this.readName('和弦名');
       return { k: 'apply', chord, span: this.spanFrom(start) };
+    }
+    if (this.atIdent('切换场景')) {
+      this.advance();
+      return { k: 'scene', scene: this.readName('场景名'), span: this.spanFrom(start) };
     }
     if (this.atIdent('关系谱')) {
       this.advance();
