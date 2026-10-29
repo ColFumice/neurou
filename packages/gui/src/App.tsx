@@ -340,6 +340,9 @@ export function App() {
   /** v5.4：现象层预览蒙版；Space 切换，与编辑器同屏。 */
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewCues, setPreviewCues] = useState<string[]>([]);
+  /** v5.10：F8 场景列表。 */
+  const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
+  const [sceneSelected, setSceneSelected] = useState(0);
   /** v5.7：GLSL 后端端口编译结果。 */
   const [glslArtifact, setGlslArtifact] = useState<GlslArtifact | null>(null);
   const [glslStatus, setGlslStatus] = useState('');
@@ -722,6 +725,42 @@ export function App() {
     return () => window.removeEventListener('keydown', onPreviewKey, true);
   }, []);
 
+  // v5.10：F8 切换运行场景；只在世界有多个场景时生效。
+  useEffect(() => {
+    const onSceneKey = (event: KeyboardEvent): void => {
+      if (!universe) return;
+      const scenes = universe.scenes();
+      if (event.code === 'F8' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        if (scenes.length === 0) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (sceneMenuOpen) {
+          setSceneMenuOpen(false);
+        } else {
+          const current = scenes.findIndex((scene) => scene.id === universe.currentSceneId);
+          setSceneSelected(Math.max(0, current));
+          setSceneMenuOpen(true);
+        }
+        return;
+      }
+      if (!sceneMenuOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.code === 'Escape') {
+        setSceneMenuOpen(false);
+      } else if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        const step = event.code === 'ArrowDown' ? 1 : -1;
+        setSceneSelected((current) => (current + step + scenes.length) % scenes.length);
+      } else if (event.code === 'Enter') {
+        const scene = scenes[sceneSelected];
+        if (scene && universe.transitionScene(scene.id)) setVersion((value) => value + 1);
+        setSceneMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onSceneKey, true);
+    return () => window.removeEventListener('keydown', onSceneKey, true);
+  }, [sceneMenuOpen, sceneSelected, universe]);
+
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
     const audio = getStringAudio();
@@ -1019,6 +1058,9 @@ export function App() {
       data-preview-open={previewOpen ? 'true' : 'false'}
       data-preview-scene={universe?.sceneName ?? ''}
       data-preview-tick={universe?.state.tick ?? 0}
+      data-scene-menu-open={sceneMenuOpen ? 'true' : 'false'}
+      data-scene-menu-selected={sceneMenuOpen ? sceneSelected : ''}
+      data-scene-count={universe?.scenes().length ?? 0}
       data-glsl-status={glslStatus}
       data-glsl-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉').length}
       data-glsl-error={glslError}
@@ -1099,6 +1141,19 @@ export function App() {
                 <span className="chapter-graph-next">→ {node.next.map((file) => chapterLabel(file)).join(' / ')}</span>
               ) : null}
             </div>
+          ))}
+        </div>
+      ) : null}
+      {sceneMenuOpen ? (
+        <div className="scene-menu" data-testid="scene-menu">
+          {universe?.scenes().map((scene, index) => (
+            <span
+              key={scene.id}
+              className={`scene-row${index === sceneSelected ? ' scene-row--selected' : ''}`}
+              data-scene-row={scene.id}
+            >
+              {scene.name}
+            </span>
           ))}
         </div>
       ) : null}

@@ -234,3 +234,31 @@ body {
   letter-spacing: 0.08em;
   opacity: 0.28;
 }
+
+/* v5.10：场景切换淡列表，只在多场景世界按 F8 出现。 */
+.scene-menu {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.scene-row {
+  opacity: 0.28;
+  transition: opacity 140ms ease, letter-spacing 140ms ease;
+}
+
+.scene-row--selected {
+  opacity: 0.88;
+  letter-spacing: 0.14em;
+  font-size: 14px;
+}

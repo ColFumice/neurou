@@ -29,7 +29,8 @@ const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
 const TEMP_CHOICES = 'examples/_acceptance-choices.nro';
 const TEMP_GLSL = 'examples/_acceptance-glsl.nro';
 const TEMP_FAUST = 'examples/_acceptance-faust.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES, TEMP_GLSL, TEMP_FAUST];
+const TEMP_SCENES = 'examples/_acceptance-scenes.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES, TEMP_GLSL, TEMP_FAUST, TEMP_SCENES];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
   下一章 "examples/garden.nro"
@@ -77,6 +78,18 @@ const FAUST_WORLD_SOURCE = `世界 Faust端口
 
 音频端口 潮声
   参数 强度 潮位
+`;
+const SCENES_WORLD_SOURCE = `世界 场景切换
+  版本 0.1
+  初始场景 "夜"
+
+叙事弦 值
+  类型 数值 0..10
+  基线 0
+
+场景 夜
+
+场景 昼
 `;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1
@@ -1671,6 +1684,24 @@ await faustPage.keyboard.press('Space');
 await faustPage.waitForTimeout(300);
 check('现象层显示音频端口状态', (await faustPage.locator('[data-testid="preview-audio"]').count()) === 1, String(await faustPage.locator('[data-testid="preview-audio"]').count()));
 await faustPage.close();
+
+// v5.10：F8 场景切换
+writeFileSync(TEMP_SCENES, SCENES_WORLD_SOURCE, 'utf8');
+const scenesPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await scenesPage.goto(`${URL}?world=${encodeURIComponent(TEMP_SCENES)}&fresh=1`, { waitUntil: 'networkidle' });
+await scenesPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await scenesPage.waitForTimeout(700);
+const scenesApp = scenesPage.locator('[data-testid="ink-app"]');
+check('场景世界有两场景', Number(await scenesApp.getAttribute('data-scene-count')) === 2 && (await scenesApp.getAttribute('data-preview-scene')) === '夜', `${await scenesApp.getAttribute('data-scene-count')}/${await scenesApp.getAttribute('data-preview-scene')}`);
+await scenesPage.keyboard.press('F8');
+await scenesPage.waitForTimeout(250);
+check('F8 打开场景列表', (await scenesApp.getAttribute('data-scene-menu-open')) === 'true' && (await scenesPage.locator('[data-testid="scene-menu"] .scene-row').count()) === 2, String(await scenesPage.locator('[data-testid="scene-menu"] .scene-row').count()));
+await scenesPage.keyboard.press('ArrowDown');
+await scenesPage.waitForTimeout(120);
+await scenesPage.keyboard.press('Enter');
+await scenesPage.waitForTimeout(300);
+check('Enter 切到昼场景', (await scenesApp.getAttribute('data-preview-scene')) === '昼', String(await scenesApp.getAttribute('data-preview-scene')));
+await scenesPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

@@ -51,6 +51,15 @@ export class Engine {
     return this.universe.sceneName;
   }
 
+  /** v5.10：Host 的场景列表；没有场景时为空。 */
+  scenes(): Array<{ id: string; name: string }> {
+    return (this.ir.scenes ?? []).map((scene) => ({ id: scene.id, name: scene.name }));
+  }
+
+  get currentSceneId(): string | undefined {
+    return this.universe.state.sceneId;
+  }
+
   activeSystems(): string[] {
     return this.universe.activeSystems();
   }

@@ -88,4 +88,17 @@ describe('Engine facade（v5.2）', () => {
     expect(frame.ports['port:视觉:雨幕']?.params['强度']).toBe(5);
     expect(frame.ports['port:音频:潮声']?.params['潮位']).toBe(5);
   });
+
+  it('列出场景并暴露当前场景 id', () => {
+    const result = compileText(WORLD, 'engine-facade-scenes.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    expect(engine.scenes()).toEqual([
+      { id: 'scene:夜', name: '夜' },
+      { id: 'scene:昼', name: '昼' },
+    ]);
+    expect(engine.currentSceneId).toBe('scene:夜');
+    engine.transitionScene('昼');
+    expect(engine.currentSceneId).toBe('scene:昼');
+  });
 });
