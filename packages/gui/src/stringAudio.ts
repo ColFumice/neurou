@@ -12,6 +12,9 @@ import type { TimbreCurve } from './stringMath.js';
 
 export type StringAudioState = 'off' | 'running' | 'suspended' | 'unavailable';
 
+/** v3.6：master 基础增益；有效增益 = 0.4 × volume（muted 时 0）。 */
+const BASE_MASTER_GAIN = 0.4;
+
 interface KindAudioProfile {
   /** 相对五声音阶基准（110–880Hz）的八度倍数。 */
   octave: number;
@@ -74,9 +77,57 @@ export class StringAudioEngine {
   private sources = new Set<AudioBufferSourceNode>();
   private voices = new Map<number, SustainedVoice>();
   private voiceSeq = 0;
+  /** v3.6：用户音量 0..1 / 静音；context 未建时先存值，创建时应用。 */
+  private volume = 1;
+  private muted = false;
 
   getState(): StringAudioState {
     return this.status;
+  }
+
+  getVolume(): number {
+    return this.volume;
+  }
+
+  setVolume(value: number): void {
+    const next = Number.isFinite(value) ? clamp(value, 0, 1) : this.volume;
+    this.volume = next;
+    this.applyMasterGain();
+  }
+
+  getMuted(): boolean {
+    return this.muted;
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = Boolean(muted);
+    this.applyMasterGain();
+  }
+
+  /** 切换静音，返回切换后的状态。 */
+  toggleMuted(): boolean {
+    this.muted = !this.muted;
+    this.applyMasterGain();
+    return this.muted;
+  }
+
+  private effectiveGain(): number {
+    return this.muted ? 0 : BASE_MASTER_GAIN * this.volume;
+  }
+
+  /** setTargetAtTime 平滑到目标增益；context 未建时只存值。 */
+  private applyMasterGain(): void {
+    const ctx = this.ctx;
+    const master = this.master;
+    if (!ctx || !master) return;
+    const target = this.effectiveGain();
+    const now = ctx.currentTime;
+    try {
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(target, now, 0.02);
+    } catch {
+      master.gain.value = target;
+    }
   }
 
   subscribe(listener: (state: StringAudioState) => void): () => void {
@@ -144,7 +195,7 @@ export class StringAudioEngine {
     };
 
     const master = ctx.createGain();
-    master.gain.value = 0.4;
+    master.gain.value = this.effectiveGain();
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -20;
     compressor.knee.value = 18;

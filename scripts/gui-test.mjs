@@ -1393,6 +1393,31 @@ check('世界音频 cue 被 GUI 消费', Number(await audioApp.getAttribute('dat
 check('音频 cue 命中谱名', (await audioApp.getAttribute('data-last-cue')) === '钟:0.8', String(await audioApp.getAttribute('data-last-cue')));
 await audioPage.close();
 
+// v3.6：F4 四档音量 + localStorage 持久化
+const audioControlPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await audioControlPage.goto(URL, { waitUntil: 'networkidle' });
+await audioControlPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await audioControlPage.evaluate(() => window.localStorage.removeItem('neurou.audio.level'));
+await audioControlPage.reload({ waitUntil: 'networkidle' });
+await audioControlPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await audioControlPage.waitForTimeout(500);
+const audioControlApp = audioControlPage.locator('[data-testid="ink-app"]');
+check('默认音量档 1', (await audioControlApp.getAttribute('data-audio-level')) === '1' && (await audioControlApp.getAttribute('data-audio-muted')) === 'false', String(await audioControlApp.getAttribute('data-audio-level')));
+await audioControlPage.keyboard.press('F4');
+await audioControlPage.waitForTimeout(150);
+check('F4 降到 0.6 档', (await audioControlApp.getAttribute('data-audio-level')) === '0.6', String(await audioControlApp.getAttribute('data-audio-level')));
+await audioControlPage.keyboard.press('F4');
+await audioControlPage.keyboard.press('F4');
+await audioControlPage.waitForTimeout(150);
+check('F4 降到静音档', (await audioControlApp.getAttribute('data-audio-level')) === '0' && (await audioControlApp.getAttribute('data-audio-muted')) === 'true', `${await audioControlApp.getAttribute('data-audio-level')}/${await audioControlApp.getAttribute('data-audio-muted')}`);
+await audioControlPage.keyboard.press('F4');
+await audioControlPage.keyboard.press('F4');
+await audioControlPage.reload({ waitUntil: 'networkidle' });
+await audioControlPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await audioControlPage.waitForTimeout(400);
+check('音量档 localStorage 持久化', (await audioControlApp.getAttribute('data-audio-level')) === '0.6', String(await audioControlApp.getAttribute('data-audio-level')));
+await audioControlPage.close();
+
 // v3.5：F3 S 关系谱听音开关
 const listenPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await listenPage.goto(`${URL}?world=${encodeURIComponent('examples/soundscape.nro')}`, { waitUntil: 'networkidle' });

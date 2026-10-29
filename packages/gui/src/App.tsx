@@ -45,6 +45,32 @@ const DEFAULT_WORLD_FILE = 'examples/tuner.nro';
 const SAVE_DEBOUNCE_MS = 700;
 const DEV = import.meta.env.DEV;
 
+/** v3.6：F4 循环四档音量；0 档即静音。 */
+const AUDIO_LEVELS = [1, 0.6, 0.3, 0] as const;
+const AUDIO_PREF_KEY = 'neurou.audio.level';
+
+interface AudioPref {
+  volume: number;
+  muted: boolean;
+}
+
+function loadAudioPref(): AudioPref {
+  try {
+    const raw = window.localStorage.getItem(AUDIO_PREF_KEY);
+    const value = raw === null ? 1 : Number(raw);
+    if (AUDIO_LEVELS.some((level) => Math.abs(level - value) < 0.001)) {
+      return value === 0 ? { volume: 1, muted: true } : { volume: value, muted: false };
+    }
+  } catch {
+    /* 隐私模式/无 localStorage */
+  }
+  return { volume: 1, muted: false };
+}
+
+function audioLevel(pref: AudioPref): number {
+  return pref.muted ? 0 : pref.volume;
+}
+
 /**
  * v3.4：所有示例世界在构建时内联，生产包也能用 `?world=examples/xxx.nro` 打开。
  * 每个世界 raw 文本约 0.7–9KB，总量小于 30KB；tuner 仍保留独立 raw 导入作为兜底。
@@ -214,6 +240,8 @@ export function App() {
   /** v3.5：已播放的世界音频 cue 数/最近一条（仅用于可观测验收）。 */
   const [cueAudio, setCueAudio] = useState(0);
   const [lastCue, setLastCue] = useState('');
+  /** v3.6：F4 音量档位，localStorage 持久化。 */
+  const [audioPref, setAudioPref] = useState<AudioPref>(loadAudioPref);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -321,6 +349,34 @@ export function App() {
     }, TICK_MS);
     return () => window.clearInterval(timer);
   }, [universe]);
+
+  // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
+  useEffect(() => {
+    const audio = getStringAudio();
+    audio.setVolume(audioPref.volume);
+    audio.setMuted(audioPref.muted);
+    try {
+      window.localStorage.setItem(AUDIO_PREF_KEY, String(audioLevel(audioPref)));
+    } catch {
+      /* 隐私模式 */
+    }
+  }, [audioPref]);
+
+  useEffect(() => {
+    const onAudioKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'F4' || event.altKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setAudioPref((previous) => {
+        const current = audioLevel(previous);
+        const index = AUDIO_LEVELS.findIndex((level) => Math.abs(level - current) < 0.001);
+        const next = AUDIO_LEVELS[(index + 1 + AUDIO_LEVELS.length) % AUDIO_LEVELS.length] ?? 1;
+        return next === 0 ? { volume: 1, muted: true } : { volume: next, muted: false };
+      });
+    };
+    window.addEventListener('keydown', onAudioKey, true);
+    return () => window.removeEventListener('keydown', onAudioKey, true);
+  }, []);
 
   // 首屏稳定后预取 F2/F3 组件：主包首屏更轻，按键时已经加载好。
   useEffect(() => {
@@ -572,6 +628,9 @@ export function App() {
       data-seed={INITIAL_SEED}
       data-cue-audio={cueAudio}
       data-last-cue={lastCue}
+      data-audio-volume={audioPref.volume}
+      data-audio-muted={audioPref.muted ? 'true' : 'false'}
+      data-audio-level={audioLevel(audioPref)}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}
