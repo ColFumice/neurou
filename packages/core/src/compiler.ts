@@ -137,6 +137,9 @@ class Compiler {
   private readonly functionBodies = new Map<string, LExpr>();
   private readonly functions: IRFunction[] = [];
   private readonly expandingFunctions = new Set<string>();
+  /** v5.21：调用图；'<world>' 代表规则/动作/系统等世界级调用者。 */
+  private readonly functionCalls = new Map<string, Set<string>>();
+  private currentFunction: string | undefined;
   private readonly ports: IRPort[] = [];
   private readonly matrices: IRMatrix[] = [];
   private readonly matrixByName = new Map<string, IRMatrix>();
@@ -166,6 +169,7 @@ class Compiler {
     this.buildEndings();
     this.buildPhases();
     this.analyze();
+    this.diagnoseFunctionReachability();
 
     const ir = this.assemble();
     return {
@@ -1072,6 +1076,7 @@ class Compiler {
           }
           const body = this.ensureFunctionBody(user.name, e.span);
           if (!body) return { expr: { k: 'const', v: null }, type: 'any' };
+          this.recordFunctionCall(this.currentFunction ?? '<world>', user.name);
           return {
             expr: {
               k: 'call',
@@ -1338,6 +1343,8 @@ class Compiler {
       return undefined;
     }
     this.expandingFunctions.add(name);
+    const previousFunction = this.currentFunction;
+    this.currentFunction = name;
     try {
       const body = this.lower(decl.body, { params: new Set(decl.params) }).expr;
       this.functionBodies.set(name, body);
@@ -1345,7 +1352,36 @@ class Compiler {
       if (irFunction) irFunction.body = body;
       return body;
     } finally {
+      this.currentFunction = previousFunction;
       this.expandingFunctions.delete(name);
+    }
+  }
+
+  /** v5.21：记录调用边，用于未使用函数诊断。 */
+  private recordFunctionCall(caller: string, callee: string): void {
+    const set = this.functionCalls.get(caller) ?? new Set<string>();
+    set.add(callee);
+    this.functionCalls.set(caller, set);
+  }
+
+  /** v5.21：从世界级调用者出发做可达性分析；不可达函数给 warning。 */
+  private diagnoseFunctionReachability(): void {
+    const reachable = new Set<string>();
+    const queue = ['<world>'];
+    while (queue.length > 0) {
+      const current = queue.pop()!;
+      for (const callee of this.functionCalls.get(current) ?? []) {
+        if (reachable.has(callee)) continue;
+        reachable.add(callee);
+        queue.push(callee);
+      }
+    }
+    for (const [name, decl] of this.functionDecls) {
+      if (!reachable.has(name)) {
+        this.warn('NRO3307', `函数「${name}」没有被任何规则/动作/系统调用。`, decl.span, {
+          hint: '删掉它，或从一个会被执行的效果/条件里调用它。',
+        });
+      }
     }
   }
 

@@ -82,4 +82,14 @@ describe('用户纯函数（v5.17）', () => {
     universe.tick();
     expect(universe.number('值')).toBe(50);
   });
+
+  it('未被世界调用的函数给 warning', () => {
+    const source = `${WORLD}\n函数 废弃\n  参数 x\n  返回 x + 1\n`;
+    const result = compileText(source, 'function-unused.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const warnings = result.diagnostics.all().filter((warning) => warning.severity === 'warning' && warning.code === 'NRO3307');
+    expect(warnings.map((warning) => warning.message).join(' ')).toContain('废弃');
+    expect(warnings.map((warning) => warning.message).join(' ')).not.toContain('夹紧');
+  });
 });
