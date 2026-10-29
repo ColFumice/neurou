@@ -1489,6 +1489,26 @@ await prevPage.waitForTimeout(1200);
 check('结局后 B 回到上一章', (await prevApp.getAttribute('data-world-file')) === 'examples/tuner.nro', String(await prevApp.getAttribute('data-world-file')));
 await prevPage.close();
 
+// v4.2：结局点击右半屏切下一章 + 章节标题短暂浮现
+const clickChapterPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await clickChapterPage.goto(`${URL}?world=${encodeURIComponent(TEMP_CHAPTER)}&fresh=1`, { waitUntil: 'networkidle' });
+await clickChapterPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await clickChapterPage.waitForTimeout(1100);
+const clickChapterApp = clickChapterPage.locator('[data-testid="ink-app"]');
+await clickChapterPage.mouse.click(1100, 450);
+await clickChapterPage.waitForTimeout(1200);
+check('结局点击右半屏切下一章', (await clickChapterApp.getAttribute('data-world-file')) === 'examples/tuner.nro', String(await clickChapterApp.getAttribute('data-world-file')));
+await clickChapterPage.close();
+
+const introPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await introPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await introPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await introPage.waitForSelector('[data-testid="chapter-intro"]', { timeout: 2500 });
+check('章节标题短暂浮现', (await introPage.locator('[data-testid="chapter-intro"]').textContent()) === '温室', String(await introPage.locator('[data-testid="chapter-intro"]').textContent()));
+await introPage.waitForTimeout(2100);
+check('章节标题不常驻', (await introPage.locator('[data-testid="chapter-intro"]').count()) === 0, String(await introPage.locator('[data-testid="chapter-intro"]').count()));
+await introPage.close();
+
 const savePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await savePage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await savePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });

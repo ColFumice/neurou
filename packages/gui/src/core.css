@@ -48,3 +48,35 @@ body {
   background: #0a0a0a;
   color: #f5f5f5;
 }
+
+/* v4.2：章节标题短暂浮现，不常驻。 */
+.chapter-intro {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--serif);
+  font-size: 18px;
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  animation: chapter-intro 1.8s cubic-bezier(0.22, 0.8, 0.2, 1) both;
+}
+
+@keyframes chapter-intro {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 4px));
+  }
+  18% {
+    opacity: 0.32;
+    transform: translate(-50%, -50%);
+  }
+  72% {
+    opacity: 0.28;
+  }
+  100% {
+    opacity: 0;
+  }
+}

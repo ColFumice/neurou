@@ -297,6 +297,8 @@ export function App() {
   const saveRunRef = useRef<() => void>(() => {});
   const [resumed, setResumed] = useState(false);
   const [savedTick, setSavedTick] = useState(0);
+  /** v4.2：章节标题的短暂淡入。 */
+  const [chapterIntro, setChapterIntro] = useState(false);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -490,6 +492,15 @@ export function App() {
     typeof prevChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(prevChapterRaw) ? prevChapterRaw : '';
   const chapterTitle = typeof worldIR?.meta['章节'] === 'string' ? String(worldIR.meta['章节']) : '';
   useEffect(() => {
+    if (!chapterTitle) {
+      setChapterIntro(false);
+      return;
+    }
+    setChapterIntro(true);
+    const timer = window.setTimeout(() => setChapterIntro(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [chapterTitle]);
+  useEffect(() => {
     const onChapterKey = (event: KeyboardEvent): void => {
       const target = event.code === 'KeyN' ? nextChapter : event.code === 'KeyB' ? prevChapter : '';
       if (!target || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -503,6 +514,25 @@ export function App() {
     };
     window.addEventListener('keydown', onChapterKey, true);
     return () => window.removeEventListener('keydown', onChapterKey, true);
+  }, [nextChapter, prevChapter, universe]);
+
+  // v4.2：触控/鼠标结局点击——右半屏下一章、左半屏上一章（桌面 N/B 仍保留）。
+  useEffect(() => {
+    const onClickChapter = (event: MouseEvent): void => {
+      if (!universe?.state.ended || screenRef.current !== 'strings') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-testid="matrix-field"], [data-testid="spectrum-field"]')) return;
+      const chapter = event.clientX >= window.innerWidth / 2 ? nextChapter : prevChapter;
+      if (!chapter) return;
+      event.preventDefault();
+      event.stopPropagation();
+      saveRunRef.current();
+      window.location.assign(
+        `${window.location.pathname}?world=${encodeURIComponent(chapter)}&seed=${INITIAL_SEED}&slot=${RUN_SLOT}`,
+      );
+    };
+    window.addEventListener('click', onClickChapter, true);
+    return () => window.removeEventListener('click', onClickChapter, true);
   }, [nextChapter, prevChapter, universe]);
 
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
@@ -796,6 +826,7 @@ export function App() {
       data-next-chapter={nextChapter}
       data-prev-chapter={prevChapter}
       data-chapter-title={chapterTitle}
+      data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-resumed={resumed ? 'true' : 'false'}
       data-save-tick={savedTick}
       data-slot={RUN_SLOT}
@@ -831,6 +862,11 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
+      {chapterIntro && chapterTitle ? (
+        <div className="chapter-intro" data-testid="chapter-intro">
+          {chapterTitle}
+        </div>
+      ) : null}
     </div>
   );
 
