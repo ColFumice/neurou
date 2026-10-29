@@ -450,6 +450,8 @@ export function StringField({
   const removeStringRef = useRef(onRemoveString);
   const performActionRef = useRef(onPerformAction);
   const restartRef = useRef(onRestart);
+  const performActionUiRef = useRef<(index: number) => void>(() => {});
+  const closeActionsUiRef = useRef<() => void>(() => {});
   const resetSignalRef = useRef<number | undefined>(resetSignal);
   viewRef.current = view;
   injectRef.current = onInject;
@@ -470,6 +472,9 @@ export function StringField({
   const focusKind = focusLane ? focusLane.kind : '叙事';
 
   const actions = view.actions ?? [];
+  const [touchMode, setTouchMode] = useState(false);
+  const touchModeRef = useRef(false);
+  touchModeRef.current = touchMode;
   const [actionOpen, setActionOpen] = useState(false);
   const [actionSelected, setActionSelected] = useState(0);
   const [lastAction, setLastAction] = useState('');
@@ -506,6 +511,25 @@ export function StringField({
   const [heldAmplitude, setHeldAmplitude] = useState(0);
   const [heldCount, setHeldCount] = useState(0);
   const [linkTargetName, setLinkTargetName] = useState('');
+
+  // v3.3：粗指针/触控检测（手机底部 16% 长按动作层、触控列表点击）。
+  useEffect(() => {
+    const update = (): void => {
+      const coarse = window.matchMedia('(pointer: coarse)').matches;
+      const next = coarse || navigator.maxTouchPoints > 0;
+      touchModeRef.current = next;
+      setTouchMode(next);
+    };
+    update();
+    const media = window.matchMedia('(pointer: coarse)');
+    const onChange = (): void => update();
+    media.addEventListener?.('change', onChange);
+    window.addEventListener('resize', update);
+    return () => {
+      media.removeEventListener?.('change', onChange);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   useEffect(() => {
     const hostElement = hostRef.current;
@@ -591,6 +615,9 @@ export function StringField({
     let actionSelectedNow = 0;
     let lastActionAt = 0;
     let lastResetSignal = resetSignalRef.current;
+    /** v3.3：触控底部 16% 长按动作层。 */
+    let touchHoldTimer = 0;
+    let touchHoldStart: { pointerId: number; x: number; y: number } | null = null;
     let lastFrame = 0;
     let requestId = 0;
 
@@ -1833,13 +1860,41 @@ export function StringField({
     }
 
     /* —— 输入 —— */
+    function cancelTouchHold(): void {
+      if (touchHoldTimer) {
+        window.clearTimeout(touchHoldTimer);
+        touchHoldTimer = 0;
+      }
+      touchHoldStart = null;
+    }
+
     function onPointerDown(event: PointerEvent): void {
       if (event.pointerType === 'mouse' && event.button !== 0) return;
       if (drag !== null) return;
       const point = pointToLogical(event.clientX, event.clientY);
       pointerNow = point;
-      // 点击画布即收起动作列表（不打断这次拖弦/点击本身）。
-      if (actionsOpenNow) closeActions();
+      const isTouch = touchModeRef.current && event.pointerType === 'touch';
+      // 点击画布即收起动作列表（触控点列表外只关闭，不拨弦）。
+      if (actionsOpenNow) {
+        closeActions();
+        if (isTouch) return;
+      }
+      // v3.3 触控：底部 16% 区域长按 ≥650ms 打开动作列表；该区域不拨弦/不绷弦。
+      if (isTouch && modeNow === 'strings' && !dualNow && point.y >= LOGICAL_H * 0.84) {
+        event.preventDefault();
+        cancelTouchHold();
+        touchHoldStart = { pointerId: event.pointerId, x: point.x, y: point.y };
+        try {
+          canvas.setPointerCapture(event.pointerId);
+        } catch {
+          /* ignore */
+        }
+        touchHoldTimer = window.setTimeout(() => {
+          touchHoldTimer = 0;
+          if (touchHoldStart && modeNow === 'strings' && !dualNow && !viewRef.current.ended) openActions();
+        }, 650);
+        return;
+      }
       if (modeNow === 'overview') {
         selectOverviewRow(point.y);
         return;
@@ -1904,6 +1959,12 @@ export function StringField({
     function onPointerMove(event: PointerEvent): void {
       const point = pointToLogical(event.clientX, event.clientY);
       pointerNow = point;
+      // 底部 16% 长按期间移动超过阈值 → 取消长按（仍不拨弦）。
+      if (touchHoldStart && event.pointerId === touchHoldStart.pointerId) {
+        const distance = Math.hypot(point.x - touchHoldStart.x, point.y - touchHoldStart.y);
+        if (distance > TAP_MOVE_PX) cancelTouchHold();
+        return;
+      }
       // 绷住后 pin 跟着指针走（不转成取值拖动）。
       if (mouseHold && event.pointerId === mouseHold.pointerId) {
         mouseHold.x = point.x;
@@ -1941,6 +2002,15 @@ export function StringField({
     }
 
     function onPointerUp(event: PointerEvent): void {
+      if (touchHoldStart && event.pointerId === touchHoldStart.pointerId) {
+        cancelTouchHold();
+        try {
+          if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       if (!drag || event.pointerId !== drag.pointerId) return;
       const current = drag;
       drag = null;
@@ -2598,6 +2668,8 @@ export function StringField({
       rms: () => audio.rms(),
     };
     window.__neurouString = debugApi;
+    performActionUiRef.current = performActionAt;
+    closeActionsUiRef.current = closeActions;
 
     readTheme();
     resize();
@@ -2702,11 +2774,13 @@ export function StringField({
       data-ending-actions={view.actionsTaken}
       data-action-note={selectedActionNote}
       data-action-cost={selectedActionCost}
+      data-touch={touchMode ? 'true' : 'false'}
     >
       <canvas ref={canvasRef} className="string-canvas" data-testid="string-canvas" />
       {actionOpen && !view.ended && mode === 'strings' ? (
         <div
           data-testid="string-actions"
+          className="string-actions"
           style={{
             position: 'absolute',
             left: '50%',
@@ -2717,21 +2791,30 @@ export function StringField({
             alignItems: 'center',
             textAlign: 'center',
             gap: '9px',
-            pointerEvents: 'none',
+            pointerEvents: touchMode ? 'auto' : 'none',
             fontFamily: 'var(--serif)',
             fontSize: '13px',
             letterSpacing: '0.06em',
             lineHeight: 1.55,
             color: 'var(--ink)',
           }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeActionsUiRef.current();
+          }}
         >
           {actions.map((action, index) => (
             <span
               key={action.id}
+              className={`string-action-row${index === safeActionSelected ? ' string-action-row--selected' : ''}`}
               style={{
                 opacity: index === safeActionSelected ? 0.9 : 0.35,
                 fontSize: index === safeActionSelected ? '14px' : '13px',
                 letterSpacing: index === safeActionSelected ? '0.12em' : '0.06em',
+                pointerEvents: touchMode ? 'auto' : 'none',
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                performActionUiRef.current(index);
               }}
             >
               {index + 1}. {action.name}
@@ -2740,6 +2823,7 @@ export function StringField({
           {selectedActionDetail ? (
             <div
               data-testid="string-action-note"
+              className="string-action-note"
               style={{
                 opacity: 0.2,
                 fontSize: '11px',
@@ -2773,6 +2857,7 @@ export function StringField({
           {endingStats ? (
             <div
               data-testid="string-ending-stats"
+              className="string-ending-stats"
               style={{ marginTop: '10px', fontSize: '12px', letterSpacing: '0.08em', opacity: 0.16 }}
             >
               {endingStats}

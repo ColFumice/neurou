@@ -1320,6 +1320,27 @@ await page.keyboard.press('v');
 await page.waitForTimeout(500);
 check('V 关闭后恢复静态 editable 状态', (await matrixRoot.getAttribute('data-live-values')) === 'false', String(await matrixRoot.getAttribute('data-live-values')));
 
+// v3.3：移动端 390×844 触控——底部 16% 长按打开动作、点选执行
+const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, deviceScaleFactor: 2 });
+const mobilePage = await mobileContext.newPage();
+await mobilePage.goto(`${URL}?world=${encodeURIComponent(TEMP_PLAY)}`, { waitUntil: 'networkidle' });
+await mobilePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await mobilePage.waitForTimeout(900);
+const mobileRoot = mobilePage.locator('[data-testid="string-field"]');
+check('移动端标记 data-touch=true', (await mobileRoot.getAttribute('data-touch')) === 'true', String(await mobileRoot.getAttribute('data-touch')));
+check('移动端无横向滚动', await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '');
+const mobileClient = await mobileContext.newCDPSession(mobilePage);
+await mobileClient.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 195, y: 790, radiusX: 1, radiusY: 1, force: 1 }] });
+await mobilePage.waitForTimeout(760);
+await mobileClient.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+await mobilePage.waitForTimeout(350);
+check('移动端底部 16% 长按打开动作列表', (await mobileRoot.getAttribute('data-action-open')) === 'true', String(await mobileRoot.getAttribute('data-action-open')));
+const mobileAction = mobilePage.locator('[data-testid="string-actions"] .string-action-row').first();
+await mobileAction.tap();
+await mobilePage.waitForTimeout(1100);
+check('移动端点击动作执行并出现结局', (await mobileRoot.getAttribute('data-ending')) === '落点' && Number(await mobileRoot.getAttribute('data-action-count')) === 0, `${await mobileRoot.getAttribute('data-ending')}/${await mobileRoot.getAttribute('data-action-count')}`);
+await mobileContext.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
