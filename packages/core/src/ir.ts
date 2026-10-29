@@ -313,6 +313,8 @@ export interface IRFunction {
   paramTypes?: (string | null)[];
   /** v5.22：返回类型标注；null/缺省表示未标注。 */
   returnType?: string | null;
+  /** v5.23：局部变量源码（作者结构；运行时已展开）。 */
+  locals?: { name: string; source: string }[];
   bodySource: string;
   /** v5.20：lower 后的函数体（含 param 节点），运行时按函数表查找。 */
   body?: LExpr;

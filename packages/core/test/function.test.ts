@@ -119,4 +119,21 @@ describe('用户纯函数（v5.17）', () => {
     const badReturn = typed.replace('返回 最大(lo, 最小(x, hi))', '返回 "不是数字"');
     expect(compileText(badReturn, 'function-bad-return.nro').ok).toBe(false);
   });
+
+  it('局部变量与条件表达式可序列化', () => {
+    const source = WORLD.replace(
+      '函数 夹紧\n  参数 x, lo, hi\n  返回 最大(lo, 最小(x, hi))',
+      '函数 夹紧\n  参数 x: 数值, lo: 数值, hi: 数值\n  返回类型 数值\n  局部 下限 = lo\n  局部 上限 = hi\n  返回 如果 x < 下限 那么 下限 否则 如果 x > 上限 那么 上限 否则 x',
+    );
+    const result = compileText(source, 'function-block.nro');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const text = serialize(result.ir);
+    expect(text).toContain('局部 下限 = lo');
+    expect(text).toContain('如果 x < 下限 那么 下限');
+    expect(compileText(text, 'function-block-roundtrip.nro').ok).toBe(true);
+    const universe = new Universe(result.ir, { seed: 1 });
+    universe.tick();
+    expect(universe.number('值')).toBe(50);
+  });
 });

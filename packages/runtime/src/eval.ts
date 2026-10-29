@@ -97,6 +97,8 @@ export function evalExpr(
           return args[0] !== null && args[0] !== undefined;
         case '此刻':
           return state.tick;
+        case '选择':
+          return truthy(args[0] ?? null) ? (args[1] ?? null) : (args[2] ?? null);
         case '查谱': {
           // 第一个参数在编译期已保证是谱名字符串；运行时只按状态采样。
           // 未知谱 / 非有限位置返回 0，让规则与结局保持数值语义。

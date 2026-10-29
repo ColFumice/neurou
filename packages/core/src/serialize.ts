@@ -125,6 +125,9 @@ function exprText(expr: LExpr, parentPrec = 0): string {
   }
   if (expr.k === 'call') {
     const fn = expr.fn.startsWith('用户:') ? expr.fn.slice('用户:'.length) : expr.fn;
+    if (fn === '选择' && expr.args.length === 3) {
+      return `如果 ${exprText(expr.args[0]!)} 那么 ${exprText(expr.args[1]!)} 否则 ${exprText(expr.args[2]!)}`;
+    }
     return `${fn}(${expr.args.map((a) => exprText(a)).join(', ')})`;
   }
   if (expr.k === 'un') {
@@ -323,6 +326,7 @@ function functionBlock(w: Writer, fn: IRFunction): void {
   });
   w.line(1, `参数 ${params.join(', ')}`);
   if (fn.returnType) w.line(1, `返回类型 ${fn.returnType}`);
+  for (const local of fn.locals ?? []) w.line(1, `局部 ${local.name} = ${local.source}`);
   w.line(1, `返回 ${fn.bodySource}`);
   w.blank();
 }

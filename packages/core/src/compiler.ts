@@ -299,6 +299,10 @@ class Compiler {
               params: [...d.params],
               paramTypes: [...d.paramTypes],
               returnType: d.returnType,
+              locals: d.locals.map((local) => ({
+                name: local.name,
+                source: this.source.text.slice(local.expr.span.start.offset, local.expr.span.end.offset),
+              })),
               bodySource: this.source.text.slice(d.body.span.start.offset, d.body.span.end.offset),
             });
           }
@@ -1083,6 +1087,25 @@ class Compiler {
         if (r.type !== 'number' && r.type !== 'any') this.error('NRO2003', `「${e.op}」的右边应该是数字。`, e.right.span);
         return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'number' };
       }
+      case 'if': {
+        const cond = this.lower(e.cond, scope);
+        if (cond.type !== 'boolean' && cond.type !== 'any') {
+          this.error('NRO2003', `「如果」的条件应该是真假判断，这里是${typeLabel(cond.type)}。`, e.cond.span);
+        }
+        const then = this.lower(e.then, scope);
+        const otherwise = this.lower(e.otherwise, scope);
+        let type: TypeName = then.type;
+        if (then.type !== 'any' && otherwise.type !== 'any' && then.type !== otherwise.type) {
+          this.error('NRO2003', `「如果」两个分支类型不一致：${typeLabel(then.type)} 与 ${typeLabel(otherwise.type)}。`, e.span);
+          type = 'any';
+        } else if (then.type === 'any') {
+          type = otherwise.type;
+        }
+        return {
+          expr: { k: 'call', fn: '选择', args: [cond.expr, then.expr, otherwise.expr] },
+          type,
+        };
+      }
       case 'call': {
         const args = e.args.map((a) => this.lower(a, scope));
         const user = this.functionDecls.get(e.name);
@@ -1388,7 +1411,7 @@ class Compiler {
           params.set(decl.params[index]!, type ?? 'any');
         }
       }
-      const lowered = this.lower(decl.body, { params });
+      const lowered = this.lower(this.expandLocals(decl), { params });
       const declaredReturn = decl.returnType ? resolveFunctionType(decl.returnType) : undefined;
       if (decl.returnType && !declaredReturn) {
         this.error('NRO2003', `函数「${name}」的返回类型「${decl.returnType}」无效。`, decl.span, {
@@ -1435,6 +1458,46 @@ class Compiler {
           hint: '删掉它，或从一个会被执行的效果/条件里调用它。',
         });
       }
+    }
+  }
+
+  /** v5.23：按顺序展开局部变量，再代入返回表达式；运行时无局部节点。 */
+  private expandLocals(decl: FunctionDecl): Expr {
+    const values = new Map<string, Expr>();
+    for (const local of decl.locals) {
+      values.set(local.name, this.substituteLocalExpr(local.expr, values));
+    }
+    return this.substituteLocalExpr(decl.body, values);
+  }
+
+  private substituteLocalExpr(expr: Expr, values: Map<string, Expr>): Expr {
+    switch (expr.k) {
+      case 'path': {
+        if (expr.parts.length === 1) {
+          const replacement = values.get(expr.parts[0]!);
+          if (replacement) return replacement;
+        }
+        return expr;
+      }
+      case 'bin':
+        return {
+          ...expr,
+          left: this.substituteLocalExpr(expr.left, values),
+          right: this.substituteLocalExpr(expr.right, values),
+        };
+      case 'un':
+        return { ...expr, operand: this.substituteLocalExpr(expr.operand, values) };
+      case 'if':
+        return {
+          ...expr,
+          cond: this.substituteLocalExpr(expr.cond, values),
+          then: this.substituteLocalExpr(expr.then, values),
+          otherwise: this.substituteLocalExpr(expr.otherwise, values),
+        };
+      case 'call':
+        return { ...expr, args: expr.args.map((arg) => this.substituteLocalExpr(arg, values)) };
+      default:
+        return expr;
     }
   }
 

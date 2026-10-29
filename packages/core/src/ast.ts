@@ -38,6 +38,7 @@ export type Expr =
   | { k: 'path'; parts: string[]; span: Span }
   | { k: 'bin'; op: BinOp; left: Expr; right: Expr; span: Span }
   | { k: 'un'; op: '-' | '+' | '非'; operand: Expr; span: Span }
+  | { k: 'if'; cond: Expr; then: Expr; otherwise: Expr; span: Span }
   | { k: 'call'; name: string; args: Expr[]; span: Span };
 
 export type DomainAst =
@@ -212,6 +213,12 @@ export interface PortDecl extends DeclBase {
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */
 /** v5.17：用户定义纯函数；编译期内联，不进入运行时状态。 */
+export interface FunctionLocal {
+  name: string;
+  expr: Expr;
+  span: Span;
+}
+
 export interface FunctionDecl extends DeclBase {
   k: 'function';
   name: string;
@@ -220,6 +227,8 @@ export interface FunctionDecl extends DeclBase {
   paramTypes: (string | null)[];
   /** v5.22：返回类型；未标注为 null。 */
   returnType: string | null;
+  /** v5.23：函数局部变量，按声明顺序。 */
+  locals: FunctionLocal[];
   body: Expr;
 }
 

@@ -493,6 +493,7 @@ class Parser {
     const name = this.readQualifiedName('函数名');
     const params: string[] = [];
     const paramTypes: (string | null)[] = [];
+    const locals: FunctionDecl['locals'] = [];
     let returnType: string | null = null;
     let body: Expr | undefined;
     this.finishLine();
@@ -521,11 +522,18 @@ class Parser {
         } else if (key === '返回类型') {
           returnType = this.readName('返回类型');
           this.finishLine();
+        } else if (key === '局部') {
+          const localStart = this.peek();
+          const localName = this.readName('局部变量名');
+          if (!this.eat('op', '=')) this.fail('局部变量需要一个「=」。', this.peek().span);
+          const expr = this.parseExpr();
+          locals.push({ name: localName, expr, span: this.spanFrom(localStart) });
+          this.finishLine();
         } else if (key === '返回') {
           body = this.parseExpr();
           this.finishLine();
         } else {
-          this.fail(`函数里不认识「${key}」。`, this.peek().span, '可用：参数、返回类型、返回。');
+          this.fail(`函数里不认识「${key}」。`, this.peek().span, '可用：参数、返回类型、局部、返回。');
           this.skipToLineEnd();
         }
       }
@@ -535,7 +543,7 @@ class Parser {
       this.fail(`函数「${name}」没有「返回」。`, start.span, '纯函数必须返回一个表达式。');
       throw new ParseError('unreachable');
     }
-    return { k: 'function', name, params, paramTypes, returnType, body, span: this.spanFrom(start) };
+    return { k: 'function', name, params, paramTypes, returnType, locals, body, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */
@@ -1908,7 +1916,20 @@ class Parser {
   // ---------- 表达式 ----------
 
   parseExpr(): Expr {
+    if (this.atIdent('如果')) return this.parseIfExpr();
     return this.parseOr();
+  }
+
+  private parseIfExpr(): Expr {
+    const start = this.advance();
+    const cond = this.parseExpr();
+    if (!this.atIdent('那么')) this.fail('「如果」后面需要「那么」。', this.peek().span);
+    else this.advance();
+    const then = this.parseExpr();
+    if (!this.atIdent('否则')) this.fail('「如果」需要「否则」。', this.peek().span);
+    else this.advance();
+    const otherwise = this.parseExpr();
+    return { k: 'if', cond, then, otherwise, span: this.spanFrom(start) };
   }
 
   private parseOr(): Expr {
