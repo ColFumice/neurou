@@ -296,6 +296,14 @@ export interface IRNamespace {
   exports: string[];
 }
 
+/** v5.18：纯函数作者结构；运行时调用已内联，IR 保留它用于序列化/工具。 */
+export interface IRFunction {
+  id: string;
+  name: string;
+  params: string[];
+  bodySource: string;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -316,6 +324,8 @@ export interface WorldIR {
   ports?: IRPort[];
   /** v5.14：命名空间导出清单。 */
   namespaces?: IRNamespace[];
+  /** v5.18：用户定义纯函数（编译期内联，IR 保留作者结构）。 */
+  functions?: IRFunction[];
   couplings: IRCoupling[];
   loops: IRLoop[];
   rules: IRRule[];

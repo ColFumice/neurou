@@ -27,6 +27,11 @@ describe('用户纯函数（v5.17）', () => {
     const result = compileText(WORLD, 'function.nro');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.ir.functions?.[0]).toMatchObject({
+      name: '夹紧',
+      params: ['x', 'lo', 'hi'],
+    });
+    expect(serialize(result.ir)).toContain('函数 夹紧');
     const universe = new Universe(result.ir, { seed: 1 });
     universe.tick();
     expect(universe.number('值')).toBe(50);
@@ -63,6 +68,8 @@ describe('用户纯函数（v5.17）', () => {
     const result = compileText(WORLD, 'function-serialize.nro');
     if (!result.ok) throw new Error('compile failed');
     const text = serialize(result.ir);
+    expect(text).toContain('参数 x, lo, hi');
+    expect(text).toContain('返回 最大(lo, 最小(x, hi))');
     const roundtrip = compileText(text, 'function-serialize-roundtrip.nro');
     expect(roundtrip.ok).toBe(true);
     if (!roundtrip.ok) return;

@@ -9,6 +9,7 @@ import type {
   IRLoop,
   IRMatrix,
   IRPhase,
+  IRFunction,
   IRPort,
   IRRule,
   IRScene,
@@ -310,6 +311,13 @@ function portBlock(w: Writer, port: IRPort): void {
   w.blank();
 }
 
+function functionBlock(w: Writer, fn: IRFunction): void {
+  w.line(0, `函数 ${fn.name}`);
+  w.line(1, `参数 ${fn.params.join(', ')}`);
+  w.line(1, `返回 ${fn.bodySource}`);
+  w.blank();
+}
+
 // ---------- 规则 ----------
 
 function effectLine(e: IREffect): string {
@@ -426,6 +434,7 @@ export function serialize(ir: WorldIR): string {
     w.line(0, `配乐 ${ir.bgm.asset} 音量 ${numberText(ir.bgm.volume)} 循环 ${ir.bgm.loop ? '是' : '否'}`);
     w.blank();
   }
+  for (const fn of ir.functions ?? []) functionBlock(w, fn);
 
   const stringsByOwner = new Map<string, IRString[]>();
   const stringsByNamespace = new Map<string, IRString[]>();

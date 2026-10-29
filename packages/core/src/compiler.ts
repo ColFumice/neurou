@@ -41,6 +41,7 @@ import type {
   IRLoop,
   IRMatrix,
   IRPhase,
+  IRFunction,
   IRNamespace,
   IRPort,
   IRRule,
@@ -131,6 +132,7 @@ class Compiler {
   private readonly namespaces: IRNamespace[] = [];
   private readonly exportedQualified = new Set<string>();
   private readonly functionDecls = new Map<string, FunctionDecl>();
+  private readonly functions: IRFunction[] = [];
   private readonly expandingFunctions = new Set<string>();
   private readonly ports: IRPort[] = [];
   private readonly matrices: IRMatrix[] = [];
@@ -268,6 +270,12 @@ class Compiler {
             this.error('NRO2004', `函数「${d.name}」重复声明。`, d.span);
           } else {
             this.functionDecls.set(d.name, d);
+            this.functions.push({
+              id: `function:${d.name}`,
+              name: d.name,
+              params: [...d.params],
+              bodySource: this.source.text.slice(d.body.span.start.offset, d.body.span.end.offset),
+            });
           }
           break;
         case 'spectrum':
@@ -2101,6 +2109,7 @@ class Compiler {
       ...(this.scenes.length > 0 ? { scenes: this.scenes } : {}),
       ...(this.ports.length > 0 ? { ports: this.ports } : {}),
       ...(this.namespaces.length > 0 ? { namespaces: this.namespaces } : {}),
+      ...(this.functions.length > 0 ? { functions: this.functions } : {}),
       couplings: this.couplings,
       loops: this.loops,
       rules: this.rules,
