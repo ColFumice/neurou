@@ -589,6 +589,8 @@ export function StringField({
     let pointerNow: { x: number; y: number } | null = null;
     /** 按住绷弦：鼠标 pin 与按 keyCode 独立的多枚键盘 pin 共存。 */
     let mouseHold: MouseHold | null = null;
+    /** v5.36：鼠标持续型弦的声源 id。 */
+    let mouseSustainId: number | null = null;
     const keyHolds = new Map<string, KeyboardHold>();
     /** v5.34：持续型弦按住期间的声音 id。 */
     const sustainedKeyVoices = new Map<string, number>();
@@ -750,6 +752,10 @@ export function StringField({
     /** 清掉所有按住 pin（切焦点/总览/对偶/复位时调用）。 */
     function clearHold(): void {
       mouseHold = null;
+      if (mouseSustainId !== null) {
+        audio.stopSustainedString(mouseSustainId);
+        mouseSustainId = null;
+      }
       keyHolds.clear();
       for (const id of sustainedKeyVoices.values()) audio.stopSustainedString(id);
       sustainedKeyVoices.clear();
@@ -1132,15 +1138,16 @@ export function StringField({
       const sustained = [...keyHolds.values()].find((hold) => hold.interaction === '持续');
       const sustainedKind = kindOf(focusIdx);
       const sustainedBrightness = KIND_AUDIO[sustainedKind].brightness;
-      const sustainedAmp = sustained
-        ? Math.max(18, Math.abs(pinAmplitudeAt(sustained.y)) * 0.85)
+      const sustainedPin = sustained ?? (mouseSustainId !== null ? mouseHold : null);
+      const sustainedAmp = sustainedPin
+        ? Math.max(18, Math.abs(pinAmplitudeAt(sustainedPin.y)) * 0.85)
         : 0;
       const sustainedCycles = 3 + Math.round(sustainedBrightness * 3);
       const sustainedPhase = (now / 1000) * (1.2 + sustainedBrightness * 2.4);
       for (let i = 0; i < count; i += 1) {
         const x01 = count > 1 ? i / (count - 1) : 0.5;
         if (sustained) {
-          // v5.35：持续型弦的形状 = 持续音波形（正弦/三角），沿弦重复几个周期。
+          // v5.35/v5.36：持续型弦的形状 = 持续音波形（正弦/三角），沿弦重复几个周期。
           const phase = x01 * sustainedCycles * Math.PI * 2 + sustainedPhase;
           const p = phase / (Math.PI * 2);
           const wave =
@@ -1987,8 +1994,28 @@ export function StringField({
         drag = { ...common, kind: 'value', side: 1 };
         return;
       }
-      // 4) 其它位置：点触 = 拨弦。
+      // 4) 其它位置：点触 = 拨弦；按弦类别分为头判/持续/尾判。
+      const interaction = interactionOf(focusIdx);
+      if (interaction === '头判') {
+        pluckFocus(point.x, point.y, '', '', true, true, true);
+        return;
+      }
       drag = { ...common, kind: 'pluck', side: 1 };
+      if (interaction === '持续') {
+        mouseHold = {
+          pointerId: event.pointerId,
+          x: point.x,
+          y: point.y,
+          startedAt: performance.now(),
+        };
+        mouseSustainId = audio.startSustainedString(
+          kindOf(focusIdx),
+          clamp(point.x / LOGICAL_W, 0, 1),
+          clamp(point.y / LOGICAL_H, 0, 1),
+          0.55,
+        );
+        updateHoldState(performance.now());
+      }
     }
 
     function onPointerMove(event: PointerEvent): void {
@@ -2004,6 +2031,9 @@ export function StringField({
       if (mouseHold && event.pointerId === mouseHold.pointerId) {
         mouseHold.x = point.x;
         mouseHold.y = point.y;
+        if (mouseSustainId !== null) {
+          audio.updateSustainedString(mouseSustainId, clamp(point.x / LOGICAL_W, 0, 1), clamp(point.y / LOGICAL_H, 0, 1));
+        }
         updateHeldState();
         return;
       }
@@ -2055,6 +2085,15 @@ export function StringField({
         /* ignore */
       }
       setPullingUi(false);
+      // v5.36：持续型鼠标松手只停止持续声源，不做拨弦判定。
+      if (mouseSustainId !== null) {
+        audio.stopSustainedString(mouseSustainId);
+        mouseSustainId = null;
+        mouseHold = null;
+        pinsNow = pinsNow.filter((pin) => pin.source !== 'mouse');
+        updateHeldState();
+        return;
+      }
       // 鼠标松手：若已绷住则以 pin 当前位移拨一次；键盘 pin 不受影响（共存）。
       if (mouseHold && mouseHold.pointerId === current.pointerId) {
         const session = mouseHold;
