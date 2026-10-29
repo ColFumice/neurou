@@ -21,6 +21,7 @@ import type {
   SignalDecl,
   SpectrumDecl,
   PortDecl,
+  NamespaceDecl,
   StringDecl,
   StringKind,
   SystemDecl,
@@ -193,6 +194,9 @@ class Compiler {
           break;
         case 'string':
           this.declareString(d, undefined);
+          break;
+        case 'namespace':
+          for (const string of d.strings) this.declareString(string, undefined, d.name);
           break;
         case 'spectrum':
           this.declareSpectrum(d);
@@ -704,8 +708,8 @@ class Compiler {
     }
   }
 
-  private declareString(d: StringDecl, owner: string | undefined): void {
-    const id = owner ? `${owner}.${d.name}` : d.name;
+  private declareString(d: StringDecl, owner: string | undefined, namespace?: string): void {
+    const id = owner ? `${owner}.${d.name}` : namespace ? `${namespace}.${d.name}` : d.name;
     if (this.strings.has(id)) {
       this.error('NRO2004', `弦「${id}」重复声明。`, d.span, { hint: '同一个实体下不能有两根同名的弦。' });
       return;
@@ -769,6 +773,7 @@ class Compiler {
       baseline,
       response: d.response ?? '线性',
       owner,
+      ...(namespace ? { namespace } : {}),
       target: d.target,
       ...(d.timbre ? { timbre: d.timbre } : {}),
       note: d.note,

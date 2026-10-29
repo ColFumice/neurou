@@ -208,6 +208,13 @@ export interface PortDecl extends DeclBase {
   params: PortParam[];
 }
 
+/** v5.11：字符串命名空间；第一版只允许七类弦（不含实体）。 */
+export interface NamespaceDecl extends DeclBase {
+  k: 'namespace';
+  name: string;
+  strings: StringDecl[];
+}
+
 export interface PhaseAst {
   name: string;
   duration: number;
@@ -344,7 +351,8 @@ export type Decl =
   | BgmDecl
   | SystemDecl
   | SceneDecl
-  | PortDecl;
+  | PortDecl
+  | NamespaceDecl;
 
 export interface Program {
   decls: Decl[];
@@ -374,6 +382,7 @@ export const DECL_KEYWORDS = [
   '场景',
   '视觉端口',
   '音频端口',
+  '命名空间',
   '曲式',
   '结局',
   '谱',

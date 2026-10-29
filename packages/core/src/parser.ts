@@ -26,6 +26,7 @@ import type {
   SpectrumDecl,
   PortDecl,
   PortParam,
+  NamespaceDecl,
   StringDecl,
   StringKind,
   SystemDecl,
@@ -269,6 +270,7 @@ class Parser {
     if (kw === '场景') return this.parseScene();
     if (kw === '视觉端口') return this.parsePort('视觉');
     if (kw === '音频端口') return this.parsePort('音频');
+    if (kw === '命名空间') return this.parseNamespace();
     if (isStringKeyword(kw)) return this.parseStringDecl(STRING_KEYWORDS[kw]!, undefined);
     if (kw === '耦合') return this.parseCoupling();
     if (kw === '回路') return this.parseLoop();
@@ -432,6 +434,42 @@ class Parser {
       this.fail(`端口「${name}」没有参数。`, decl.span, '端口至少要绑定一根弦，例如「参数 强度 雨量」。');
     }
     return decl;
+  }
+
+  /** v5.11：字符串命名空间；第一版只接纳七类弦。 */
+  private parseNamespace(): NamespaceDecl {
+    const start = this.advance();
+    const name = this.readName('命名空间名');
+    const strings: StringDecl[] = [];
+    this.finishLine();
+    if (this.enterBlock('命名空间')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        if (this.at('indent')) {
+          const token = this.advance();
+          this.fail('命名空间里多了一层缩进。', token.span);
+          this.skipBlock();
+          this.skipNewlines();
+          continue;
+        }
+        const keyword = this.peek();
+        if (keyword.kind === 'ident' && isStringKeyword(keyword.text)) {
+          strings.push(this.parseStringDecl(STRING_KEYWORDS[keyword.text]!, undefined));
+          this.skipNewlines();
+          continue;
+        }
+        this.fail('命名空间里只允许声明七类弦。', keyword.span, '实体/规则/系统等仍写在命名空间外。');
+        this.skipToLineEnd();
+      }
+      this.exitBlock();
+    }
+    if (strings.length === 0) {
+      this.fail(`命名空间「${name}」里没有弦。`, start.span);
+    }
+    return { k: 'namespace', name, strings, span: this.spanFrom(start) };
   }
 
   /** v3.8：单行配乐声明：`配乐 雨幕 音量 0.25 循环 是`。 */

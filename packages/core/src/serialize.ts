@@ -428,9 +428,14 @@ export function serialize(ir: WorldIR): string {
   }
 
   const stringsByOwner = new Map<string, IRString[]>();
+  const stringsByNamespace = new Map<string, IRString[]>();
   const globals: IRString[] = [];
   for (const s of ir.strings) {
-    if (s.owner) {
+    if (s.namespace) {
+      const list = stringsByNamespace.get(s.namespace) ?? [];
+      list.push(s);
+      stringsByNamespace.set(s.namespace, list);
+    } else if (s.owner) {
       const list = stringsByOwner.get(s.owner) ?? [];
       list.push(s);
       stringsByOwner.set(s.owner, list);
@@ -445,6 +450,11 @@ export function serialize(ir: WorldIR): string {
   }
   // 找不到宿主实体的弦按全局处理，避免丢数据
   for (const leftovers of stringsByOwner.values()) globals.push(...leftovers);
+  for (const [namespace, strings] of stringsByNamespace) {
+    w.line(0, `命名空间 ${namespace}`);
+    for (const s of strings) stringBlock(w, s, 1);
+    w.blank();
+  }
   for (const s of globals) stringBlock(w, s, 0);
   if (globals.length > 0) w.blank();
 

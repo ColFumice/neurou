@@ -51,6 +51,8 @@ export interface IREntity {
 export interface IRString {
   /** 规范 id：全局弦为名字，实体弦为「实体.名字」 */
   id: string;
+  /** v5.11：字符串命名空间；仅作为来源标记，不改变 id/运行时。 */
+  namespace?: string;
   name: string;
   kind: StringKind;
   domain: IRDomain;
