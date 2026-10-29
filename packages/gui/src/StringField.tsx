@@ -36,7 +36,8 @@ import {
   type TimbreCurve,
   type WorldView,
 } from './stringMath.js';
-import { KIND_AUDIO, getStringAudio, type StringAudioState } from './stringAudio.js';
+import { getStringAudio, type StringAudioState } from './stringAudio.js';
+import { sustainedWaves } from './sustainedWave.js';
 import './string-field.css';
 
 /* ------------------------------------------------------------------ *
@@ -753,11 +754,11 @@ export function StringField({
     function clearHold(): void {
       mouseHold = null;
       if (mouseSustainId !== null) {
-        audio.stopSustainedString(mouseSustainId);
+        audio.stopSustainedSpectrum(mouseSustainId);
         mouseSustainId = null;
       }
       keyHolds.clear();
-      for (const id of sustainedKeyVoices.values()) audio.stopSustainedString(id);
+      for (const id of sustainedKeyVoices.values()) audio.stopSustainedSpectrum(id);
       sustainedKeyVoices.clear();
       pinsNow = [];
       setHoldingUi(false);
@@ -1135,27 +1136,21 @@ export function StringField({
       const count = u.length;
       const resonance = includeResonance && resonantNow;
       const geom = focusGeom();
-      const sustained = [...keyHolds.values()].find((hold) => hold.interaction === '持续');
+      const sustainedFocus = interactionOf(focusIdx) === '持续';
       const sustainedKind = kindOf(focusIdx);
-      const sustainedBrightness = KIND_AUDIO[sustainedKind].brightness;
-      const sustainedPin = sustained ?? (mouseSustainId !== null ? mouseHold : null);
-      const sustainedAmp = sustainedPin
-        ? Math.max(18, Math.abs(pinAmplitudeAt(sustainedPin.y)) * 0.85)
-        : 0;
-      const sustainedCycles = 3 + Math.round(sustainedBrightness * 3);
-      const sustainedPhase = (now / 1000) * (1.2 + sustainedBrightness * 2.4);
+      const sustainedWave = sustainedWaves.get(sustainedKind);
+      const sustainedProfile = profileOf(focusIdx);
       for (let i = 0; i < count; i += 1) {
         const x01 = count > 1 ? i / (count - 1) : 0.5;
-        if (sustained) {
-          // v5.35/v5.36：持续型弦的形状 = 持续音波形（正弦/三角），沿弦重复几个周期。
-          const phase = x01 * sustainedCycles * Math.PI * 2 + sustainedPhase;
-          const p = phase / (Math.PI * 2);
-          const wave =
-            sustainedBrightness > 0.7
-              ? 2 * Math.abs(2 * (p - Math.floor(p + 0.5))) - 1
-              : Math.sin(phase);
+        if (sustainedFocus) {
+          // v5.37：持续型弦显示可编辑波形本身；按键/鼠标写入后保持静止。
+          const position = x01 * (sustainedWave.length - 1);
+          const left = Math.floor(position);
+          const right = Math.min(sustainedWave.length - 1, left + 1);
+          const fraction = position - left;
+          const sample = (sustainedWave[left] ?? 0.5) * (1 - fraction) + (sustainedWave[right] ?? 0.5) * fraction;
           const envelope = Math.pow(Math.sin(Math.PI * x01), 0.45);
-          focusDispBuf[i] = sustainedAmp * wave * envelope;
+          focusDispBuf[i] = (sample - 0.5) * 2 * sustainedProfile.maxPull * 0.62 * envelope;
           continue;
         }
         let value = u[i] ?? 0;
@@ -2008,11 +2003,18 @@ export function StringField({
           y: point.y,
           startedAt: performance.now(),
         };
-        mouseSustainId = audio.startSustainedString(
-          kindOf(focusIdx),
+        const kind = kindOf(focusIdx);
+        const profile = profileOf(focusIdx);
+        const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
+        const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
+        sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+        mouseSustainId = audio.startSustainedSpectrum(
+          sustainedWaves.get(kind),
           clamp(point.x / LOGICAL_W, 0, 1),
           clamp(point.y / LOGICAL_H, 0, 1),
-          0.55,
+          true,
+          true,
+          amplitude,
         );
         updateHoldState(performance.now());
       }
@@ -2032,7 +2034,13 @@ export function StringField({
         mouseHold.x = point.x;
         mouseHold.y = point.y;
         if (mouseSustainId !== null) {
-          audio.updateSustainedString(mouseSustainId, clamp(point.x / LOGICAL_W, 0, 1), clamp(point.y / LOGICAL_H, 0, 1));
+          const kind = kindOf(focusIdx);
+          const profile = profileOf(focusIdx);
+          const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
+          const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
+          sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+          audio.updateSustainedSpectrum(mouseSustainId, sustainedWaves.get(kind), true, true);
+          audio.updateSustainedTone(mouseSustainId, clamp(point.x / LOGICAL_W, 0, 1), clamp(point.y / LOGICAL_H, 0, 1));
         }
         updateHeldState();
         return;
@@ -2087,7 +2095,7 @@ export function StringField({
       setPullingUi(false);
       // v5.36：持续型鼠标松手只停止持续声源，不做拨弦判定。
       if (mouseSustainId !== null) {
-        audio.stopSustainedString(mouseSustainId);
+        audio.stopSustainedSpectrum(mouseSustainId);
         mouseSustainId = null;
         mouseHold = null;
         pinsNow = pinsNow.filter((pin) => pin.source !== 'mouse');
@@ -2324,11 +2332,16 @@ export function StringField({
           interaction,
         });
         if (interaction === '持续') {
-          const id = audio.startSustainedString(
-            kindOf(focusIdx),
+          const kind = kindOf(focusIdx);
+          const amp = clamp(amplitude / Math.max(1, profile.maxPull), 0, 1);
+          sustainedWaves.editAt(kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
+          const id = audio.startSustainedSpectrum(
+            sustainedWaves.get(kind),
             clamp(key.cx / LOGICAL_W, 0, 1),
             clamp(key.cy / LOGICAL_H, 0, 1),
-            clamp(amplitude / Math.max(1, profile.maxPull), 0, 1),
+            true,
+            true,
+            amp,
           );
           sustainedKeyVoices.set(event.code, id);
         }
@@ -2344,7 +2357,7 @@ export function StringField({
       updateHeldState();
       if (session.interaction === '持续') {
         const id = sustainedKeyVoices.get(event.code);
-        if (id !== undefined) audio.stopSustainedString(id);
+        if (id !== undefined) audio.stopSustainedSpectrum(id);
         sustainedKeyVoices.delete(event.code);
         return;
       }
@@ -2725,7 +2738,7 @@ export function StringField({
           heldMs: Math.round(performance.now() - startedAt),
         };
       },
-      sustainedStrings: () => audio.sustainedStringCount(),
+      sustainedStrings: () => sustainedKeyVoices.size + (mouseSustainId !== null ? 1 : 0),
       focusWaveSpread: () => {
         const disp = focusDisplayU(performance.now(), false);
         let low = Number.POSITIVE_INFINITY;

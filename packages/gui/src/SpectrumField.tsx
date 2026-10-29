@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { getStringAudio } from './stringAudio.js';
+import { sustainedWaves } from './sustainedWave.js';
 import { keyByCode, layoutKeyboard } from './stringMath.js';
 
 /* ------------------------------------------------------------------ *
@@ -416,14 +417,9 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       return clamp((value - spectrum.min) / spectrumSpan(spectrum), 0, 1);
     }
 
-    /** 阶跃试听：把 n 个平台值展开成密集阶梯，借现有 one-shot/sustained 波形引擎近似阶跃音色。 */
-    function audioBandsFor(spectrum: SpectrumView, values: readonly number[]): readonly number[] {
-      if (spectrum.interpolation !== '阶跃' || values.length < 2) return values;
-      const expanded: number[] = [];
-      for (const value of values) {
-        for (let repeat = 0; repeat < 12; repeat += 1) expanded.push(value);
-      }
-      return expanded;
+    /** v5.37：F2 试听不再由谱曲线决定，而由全部持续型弦的波形合奏决定。 */
+    function audioBandsFor(_spectrum: SpectrumView, _values: readonly number[]): readonly number[] {
+      return sustainedWaves.ensemble();
     }
 
     function audioSmooth(spectrum: SpectrumView): boolean {
