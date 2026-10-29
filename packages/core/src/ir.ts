@@ -150,6 +150,8 @@ export interface IREnding {
   id: string;
   name: string;
   guard: LExpr;
+  /** v4.3：结局专属下一章；缺省用世界元数据「下一章」。 */
+  nextChapter?: string;
   span?: Span;
 }
 

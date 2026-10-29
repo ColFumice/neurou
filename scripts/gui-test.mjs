@@ -29,14 +29,16 @@ const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
 const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
-  下一章 "examples/tuner.nro"
+  下一章 "examples/garden.nro"
   上一章 "examples/tuner.nro"
 
 叙事弦 进度
   类型 数值 0..100
   基线 10
 
-结局 终: 当 进度 >= 0
+结局 终:
+  当 进度 >= 0
+  下一章 "examples/tuner.nro"
 `;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1

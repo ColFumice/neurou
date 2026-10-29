@@ -483,10 +483,14 @@ export function App() {
   }, [bgm?.asset, bgm?.volume, bgm?.loop, bgmSrc]);
   useEffect(() => () => getStringAudio().stopLoop(), []);
 
-  // v4.1：上一章 / 下一章；结局后 N 前进、B 后退；槽位随导航保留。
-  const nextChapterRaw = worldIR?.meta['下一章'];
+  // v4.1/v4.3：上一章 / 下一章；结局专属下一章优先于世界默认。
+  const worldNextRaw = worldIR?.meta['下一章'];
+  const worldNextChapter =
+    typeof worldNextRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(worldNextRaw) ? worldNextRaw : '';
+  const endedId = universe?.state.ended?.id;
+  const endedNextRaw = endedId ? worldIR?.endings.find((ending) => ending.id === endedId)?.nextChapter : undefined;
   const nextChapter =
-    typeof nextChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(nextChapterRaw) ? nextChapterRaw : '';
+    typeof endedNextRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(endedNextRaw) ? endedNextRaw : worldNextChapter;
   const prevChapterRaw = worldIR?.meta['上一章'];
   const prevChapter =
     typeof prevChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(prevChapterRaw) ? prevChapterRaw : '';

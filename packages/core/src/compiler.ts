@@ -1658,7 +1658,19 @@ class Compiler {
       if (lowered.type !== 'boolean' && lowered.type !== 'any') {
         this.error('NRO2003', `结局「${d.name}」的触发条件必须是真假判断。`, d.guard.span);
       }
-      this.endings.push({ id: `ending:${d.name}`, name: d.name, guard: lowered.expr, span: d.span });
+      const nextChapter = d.nextChapter;
+      if (nextChapter !== undefined && !/^examples\/[^/\\]+\.nro$/.test(nextChapter)) {
+        this.error('NRO2101', `结局「${d.name}」的下一章路径「${nextChapter}」无效。`, d.span, {
+          hint: '只允许 examples/<名字>.nro，并写成字符串。',
+        });
+      }
+      this.endings.push({
+        id: `ending:${d.name}`,
+        name: d.name,
+        guard: lowered.expr,
+        ...(nextChapter !== undefined && /^examples\/[^/\\]+\.nro$/.test(nextChapter) ? { nextChapter } : {}),
+        span: d.span,
+      });
       this.markEndingReads(lowered.expr);
     }
   }

@@ -346,7 +346,7 @@ function phasesBlock(w: Writer, phases: IRPhase[]): void {
 
 // ---------- 入口 ----------
 
-const META_ORDER = ['版本', '调性', '种子', '作者', '描述'] as const;
+const META_ORDER = ['版本', '调性', '种子', '作者', '描述', '章节', '上一章', '下一章'] as const;
 
 function worldHeader(w: Writer, ir: WorldIR): void {
   w.line(0, `# 由 neurou 序列化器生成：${ir.name}`);
@@ -359,7 +359,7 @@ function worldHeader(w: Writer, ir: WorldIR): void {
       w.line(1, typeof value === 'number' ? `${key} ${numberText(value)}` : `${key} ${String(value)}`);
     } else if (key === '调性') {
       w.line(1, `${key} ${String(value)}`);
-    } else if (key === '作者' || key === '描述') {
+    } else if (key === '作者' || key === '描述' || key === '章节' || key === '上一章' || key === '下一章') {
       w.line(1, `${key} ${stringText(String(value))}`);
     } else {
       throw new Error(`serialize: 世界里未知的元数据字段「${key}」`);
@@ -432,7 +432,13 @@ export function serialize(ir: WorldIR): string {
   for (const signal of ir.signals) signalBlock(w, signal);
   if (ir.phases.length > 0) phasesBlock(w, ir.phases);
   for (const ending of ir.endings) {
-    w.line(0, endingLine(ending));
+    if (ending.nextChapter) {
+      w.line(0, `结局 ${ending.name}:`);
+      w.line(1, `当 ${exprText(ending.guard)}`);
+      w.line(1, `下一章 ${stringText(ending.nextChapter)}`);
+    } else {
+      w.line(0, endingLine(ending));
+    }
     w.blank();
   }
 
