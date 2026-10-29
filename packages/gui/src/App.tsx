@@ -56,30 +56,41 @@ interface RunSave {
   v: 1;
   file: string;
   seed: number;
+  slot: number;
   tick: number;
   ended: boolean;
   state: WorldState;
 }
 
-function runSaveKey(file: string, seed: number): string {
-  return `${RUN_SAVE_PREFIX}${file}:${seed}`;
+function slotFromUrl(): number {
+  const raw = new URLSearchParams(window.location.search).get('slot');
+  const value = raw === null ? Number.NaN : Number(raw);
+  return Number.isInteger(value) && value >= 0 && value <= 9 ? value : 0;
 }
 
-function readRunSave(file: string, seed: number): RunSave | null {
+const RUN_SLOT = slotFromUrl();
+
+function runSaveKey(file: string, seed: number, slot: number): string {
+  return `${RUN_SAVE_PREFIX}${file}:${seed}:slot${slot}`;
+}
+
+function readRunSave(file: string, seed: number, slot: number): RunSave | null {
   try {
-    const raw = window.localStorage.getItem(runSaveKey(file, seed));
+    const raw = window.localStorage.getItem(runSaveKey(file, seed, slot));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<RunSave>;
-    if (parsed.v !== 1 || parsed.file !== file || parsed.seed !== seed || !parsed.state) return null;
+    if (parsed.v !== 1 || parsed.file !== file || parsed.seed !== seed || parsed.slot !== slot || !parsed.state) {
+      return null;
+    }
     return parsed as RunSave;
   } catch {
     return null;
   }
 }
 
-function clearRunSave(file: string, seed: number): void {
+function clearRunSave(file: string, seed: number, slot: number): void {
   try {
-    window.localStorage.removeItem(runSaveKey(file, seed));
+    window.localStorage.removeItem(runSaveKey(file, seed, slot));
   } catch {
     /* 隐私模式 */
   }
@@ -355,16 +366,16 @@ export function App() {
       const fresh = params.get('fresh') === '1';
       const wantResume = params.get('resume') === '1';
       if (fresh) {
-        clearRunSave(WORLD_FILE, INITIAL_SEED);
+        clearRunSave(WORLD_FILE, INITIAL_SEED, RUN_SLOT);
       } else if (wantResume) {
-        const saved = readRunSave(WORLD_FILE, INITIAL_SEED);
+        const saved = readRunSave(WORLD_FILE, INITIAL_SEED, RUN_SLOT);
         if (saved) {
           try {
             nextUniverse.restore(saved.state);
             setResumed(true);
             setSavedTick(saved.tick);
           } catch {
-            clearRunSave(WORLD_FILE, INITIAL_SEED);
+            clearRunSave(WORLD_FILE, INITIAL_SEED, RUN_SLOT);
           }
         }
       }
@@ -435,11 +446,12 @@ export function App() {
           v: 1,
           file: WORLD_FILE,
           seed: INITIAL_SEED,
+          slot: RUN_SLOT,
           tick: universe.state.tick,
           ended: universe.state.ended !== null,
           state: universe.snapshot(),
         };
-        window.localStorage.setItem(runSaveKey(WORLD_FILE, INITIAL_SEED), JSON.stringify(payload));
+        window.localStorage.setItem(runSaveKey(WORLD_FILE, INITIAL_SEED, RUN_SLOT), JSON.stringify(payload));
         setSavedTick(payload.tick);
       } catch {
         /* 隐私模式/配额满：静默降级 */
@@ -469,25 +481,29 @@ export function App() {
   }, [bgm?.asset, bgm?.volume, bgm?.loop, bgmSrc]);
   useEffect(() => () => getStringAudio().stopLoop(), []);
 
-  // v4.0：世界元数据里的「下一章」；结局后按 N 切到下一世界。
+  // v4.1：上一章 / 下一章；结局后 N 前进、B 后退；槽位随导航保留。
   const nextChapterRaw = worldIR?.meta['下一章'];
   const nextChapter =
     typeof nextChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(nextChapterRaw) ? nextChapterRaw : '';
+  const prevChapterRaw = worldIR?.meta['上一章'];
+  const prevChapter =
+    typeof prevChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(prevChapterRaw) ? prevChapterRaw : '';
   const chapterTitle = typeof worldIR?.meta['章节'] === 'string' ? String(worldIR.meta['章节']) : '';
   useEffect(() => {
     const onChapterKey = (event: KeyboardEvent): void => {
-      if (event.code !== 'KeyN' || event.altKey || event.ctrlKey || event.metaKey || !nextChapter) return;
+      const target = event.code === 'KeyN' ? nextChapter : event.code === 'KeyB' ? prevChapter : '';
+      if (!target || event.altKey || event.ctrlKey || event.metaKey) return;
       if (!universe?.state.ended) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       saveRunRef.current();
       window.location.assign(
-        `${window.location.pathname}?world=${encodeURIComponent(nextChapter)}&seed=${INITIAL_SEED}`,
+        `${window.location.pathname}?world=${encodeURIComponent(target)}&seed=${INITIAL_SEED}&slot=${RUN_SLOT}`,
       );
     };
     window.addEventListener('keydown', onChapterKey, true);
     return () => window.removeEventListener('keydown', onChapterKey, true);
-  }, [nextChapter, universe]);
+  }, [nextChapter, prevChapter, universe]);
 
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
@@ -778,9 +794,11 @@ export function App() {
       data-bgm-loop={bgm?.loop ? 'true' : 'false'}
       data-bgm-src={bgmSrc ?? ''}
       data-next-chapter={nextChapter}
+      data-prev-chapter={prevChapter}
       data-chapter-title={chapterTitle}
       data-resumed={resumed ? 'true' : 'false'}
       data-save-tick={savedTick}
+      data-slot={RUN_SLOT}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}

@@ -5,6 +5,8 @@
   版本 0.1
   调性 小调
   描述 "雾里有一条船，和一座忽明忽暗的灯塔。"
+  章节 "夜航"
+  上一章 "examples/garden.nro"
 
 音频资产 钟声采样 "audio/clock.wav"
 音频资产 雨幕 "audio/rain.wav"

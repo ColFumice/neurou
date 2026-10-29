@@ -30,6 +30,7 @@ const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
   下一章 "examples/tuner.nro"
+  上一章 "examples/tuner.nro"
 
 叙事弦 进度
   类型 数值 0..100
@@ -1472,10 +1473,21 @@ await chapterPage.waitForSelector('[data-testid="string-field"]', { timeout: 100
 await chapterPage.waitForTimeout(1100);
 const chapterApp = chapterPage.locator('[data-testid="ink-app"]');
 check('世界元数据带下一章', (await chapterApp.getAttribute('data-next-chapter')) === 'examples/tuner.nro', String(await chapterApp.getAttribute('data-next-chapter')));
+check('世界元数据带上一章', (await chapterApp.getAttribute('data-prev-chapter')) === 'examples/tuner.nro', String(await chapterApp.getAttribute('data-prev-chapter')));
 await chapterPage.keyboard.press('n');
 await chapterPage.waitForTimeout(1200);
 check('结局后 N 切到下一章', (await chapterApp.getAttribute('data-world-file')) === 'examples/tuner.nro', String(await chapterApp.getAttribute('data-world-file')));
 await chapterPage.close();
+
+const prevPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await prevPage.goto(`${URL}?world=${encodeURIComponent(TEMP_CHAPTER)}&fresh=1`, { waitUntil: 'networkidle' });
+await prevPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await prevPage.waitForTimeout(1100);
+const prevApp = prevPage.locator('[data-testid="ink-app"]');
+await prevPage.keyboard.press('b');
+await prevPage.waitForTimeout(1200);
+check('结局后 B 回到上一章', (await prevApp.getAttribute('data-world-file')) === 'examples/tuner.nro', String(await prevApp.getAttribute('data-world-file')));
+await prevPage.close();
 
 const savePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await savePage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
@@ -1491,6 +1503,22 @@ await savePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 
 await savePage.waitForTimeout(800);
 check('刷新后自动续档', (await saveApp.getAttribute('data-resumed')) === 'true', String(await saveApp.getAttribute('data-resumed')));
 await savePage.close();
+
+// v4.1：多槽存档 ?slot=N 独立隔离
+const slotPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await slotPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&slot=2&fresh=1`, { waitUntil: 'networkidle' });
+await slotPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await slotPage.waitForTimeout(800);
+await slotPage.evaluate(() => window.__neurouString?.setValue?.('叙事', 35));
+await slotPage.waitForTimeout(4600);
+const slotApp = slotPage.locator('[data-testid="ink-app"]');
+const slotTick = Number(await slotApp.getAttribute('data-save-tick'));
+check('slot=2 独立存档产生 tick', (await slotApp.getAttribute('data-slot')) === '2' && slotTick > 0, `${await slotApp.getAttribute('data-slot')}/${slotTick}`);
+await slotPage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&slot=2&resume=1`, { waitUntil: 'networkidle' });
+await slotPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await slotPage.waitForTimeout(800);
+check('slot=2 刷新后续档', (await slotApp.getAttribute('data-slot')) === '2' && (await slotApp.getAttribute('data-resumed')) === 'true', `${await slotApp.getAttribute('data-slot')}/${await slotApp.getAttribute('data-resumed')}`);
+await slotPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
