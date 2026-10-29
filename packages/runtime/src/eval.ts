@@ -54,13 +54,17 @@ export function evalExpr(
       return binary(e.op, l, r);
     }
     case 'call': {
-      if (e.user) {
+      const userCall = e.fn.startsWith('用户:');
+      if (userCall) {
+        const name = e.fn.slice('用户:'.length);
+        const fn = state.functions?.[name];
+        if (!fn) return null;
         const args = e.args.map((a: LExpr) => evalExpr(a, state, params));
         const env: Record<string, RuntimeValue> = {};
-        e.user.params.forEach((name, index) => {
-          env[name] = args[index] ?? null;
+        fn.params.forEach((param, index) => {
+          env[param] = args[index] ?? null;
         });
-        return evalExpr(e.user.body, state, env);
+        return evalExpr(fn.body, state, env);
       }
       const args = e.args.map((a: LExpr) => evalExpr(a, state, params));
       switch (e.fn) {

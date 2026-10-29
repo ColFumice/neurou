@@ -134,6 +134,7 @@ class Compiler {
   private readonly namespaces: IRNamespace[] = [];
   private readonly exportedQualified = new Set<string>();
   private readonly functionDecls = new Map<string, FunctionDecl>();
+  private readonly functionBodies = new Map<string, LExpr>();
   private readonly functions: IRFunction[] = [];
   private readonly expandingFunctions = new Set<string>();
   private readonly ports: IRPort[] = [];
@@ -152,6 +153,7 @@ class Compiler {
     this.program = parse(this.source, this.diagnostics);
     this.collect(this.program.decls);
     this.validateNamespaceExports();
+    this.buildFunctionBodies();
     this.scanMatrixWrites();
     this.buildCouplings();
     this.buildLoops();
@@ -1068,25 +1070,16 @@ class Compiler {
             this.error('NRO2003', `函数「${e.name}」需要 ${user.params.length} 个参数，现在给了 ${e.args.length} 个。`, e.span);
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
-          if (this.expandingFunctions.has(user.name)) {
-            this.error('NRO2008', `函数「${e.name}」递归调用了自己。`, e.span, { hint: '纯函数不能递归。' });
-            return { expr: { k: 'const', v: null }, type: 'any' };
-          }
-          this.expandingFunctions.add(user.name);
-          try {
-            const body = this.lower(user.body, { ...scope, params: new Set(user.params) });
-            return {
-              expr: {
-                k: 'call',
-                fn: `用户:${user.name}`,
-                args: args.map((arg) => arg.expr),
-                user: { name: user.name, params: [...user.params], body: body.expr },
-              },
-              type: 'any',
-            };
-          } finally {
-            this.expandingFunctions.delete(user.name);
-          }
+          const body = this.ensureFunctionBody(user.name, e.span);
+          if (!body) return { expr: { k: 'const', v: null }, type: 'any' };
+          return {
+            expr: {
+              k: 'call',
+              fn: `用户:${user.name}`,
+              args: args.map((arg) => arg.expr),
+            },
+            type: 'any',
+          };
         }
         const argTypes = args.map((a) => a.type);
         const fail = (want: string): { expr: LExpr; type: TypeName } => {
@@ -1327,6 +1320,32 @@ class Compiler {
           }
         }
       }
+    }
+  }
+
+  /** v5.20：函数体只 lower 一次，调用节点只保留函数名。 */
+  private buildFunctionBodies(): void {
+    for (const name of this.functionDecls.keys()) this.ensureFunctionBody(name);
+  }
+
+  private ensureFunctionBody(name: string, span?: Span): LExpr | undefined {
+    const cached = this.functionBodies.get(name);
+    if (cached) return cached;
+    const decl = this.functionDecls.get(name);
+    if (!decl) return undefined;
+    if (this.expandingFunctions.has(name)) {
+      this.error('NRO2008', `函数「${name}」递归调用了自己。`, span ?? decl.span, { hint: '纯函数不能递归。' });
+      return undefined;
+    }
+    this.expandingFunctions.add(name);
+    try {
+      const body = this.lower(decl.body, { params: new Set(decl.params) }).expr;
+      this.functionBodies.set(name, body);
+      const irFunction = this.functions.find((fn) => fn.name === name);
+      if (irFunction) irFunction.body = body;
+      return body;
+    } finally {
+      this.expandingFunctions.delete(name);
     }
   }
 

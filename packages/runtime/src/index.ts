@@ -33,6 +33,8 @@ export {
   createMatrixState,
   sampleMatrixCurve,
   initialValues,
+  initialFunctions,
+  type RuntimeFunction,
   numberRange,
   clampString,
 } from './state.js';

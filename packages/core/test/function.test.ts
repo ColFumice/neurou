@@ -34,6 +34,8 @@ describe('用户纯函数（v5.17）', () => {
     expect(serialize(result.ir)).toContain('函数 夹紧');
     const forcing = result.ir.rules.find((rule) => rule.kind === 'forcing');
     expect(JSON.stringify(forcing?.effects)).toContain('用户:夹紧');
+    expect(JSON.stringify(forcing?.effects)).not.toContain('"user"');
+    expect(result.ir.functions?.[0]?.body?.k).toBe('call');
     const universe = new Universe(result.ir, { seed: 1 });
     universe.tick();
     expect(universe.number('值')).toBe(50);

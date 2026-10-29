@@ -24,6 +24,7 @@ import {
   createSpectrumState,
   createState,
   curveLocalPosition,
+  initialFunctions,
   sampleMatrixCurve,
   sampleSpectrum,
 } from './state.js';
@@ -666,6 +667,7 @@ export class Universe {
 
   restore(s: WorldState): void {
     this.state = cloneState(s);
+    this.state.functions = initialFunctions(this.ir);
     // 旧快照可能没有 spectra / matrices：用 IR 里的作者数据补齐，避免恢复后
     // 谱或关系谱凭空消失。旧快照的谱条目也可能缺少 v2.1a 的采样元数据，
     // 关系谱则整体是 v2.3a 新增的字段，统一从 IR 重写元数据/静态数据。

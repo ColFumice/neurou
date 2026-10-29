@@ -310,6 +310,8 @@ export interface IRFunction {
   name: string;
   params: string[];
   bodySource: string;
+  /** v5.20：lower 后的函数体（含 param 节点），运行时按函数表查找。 */
+  body?: LExpr;
 }
 
 export interface WorldIR {

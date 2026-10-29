@@ -9,6 +9,13 @@ import type { IRMatrix, IRSpectrum, IRString, LExpr, WorldIR } from '@neurou/cor
 
 export type RuntimeValue = number | boolean | string | Set<string> | null;
 
+/** v5.20：运行时纯函数表条目；函数体来自 IR，调用节点只存函数名。 */
+export interface RuntimeFunction {
+  name: string;
+  params: string[];
+  body: LExpr;
+}
+
 /** 谱的调制模式：固定（持久叠加）或受迫（每拍衰减回锚点）。 */
 export type SpectrumMode = '固定' | '受迫';
 
@@ -301,10 +308,19 @@ export interface WorldState {
    * 稳定形状；旧快照没有该字段时由 Universe.restore 从 IR 重建。
    */
   matrices?: Record<string, MatrixState>;
+  /** v5.20：纯函数表；旧快照缺少时由 Universe.restore 从 IR 补。 */
+  functions?: Record<string, RuntimeFunction>;
 }
 
-export function initialValues(world: WorldIR): Record<string, RuntimeValue> {
-  const out: Record<string, RuntimeValue> = {};
+export function initialFunctions(world: WorldIR): Record<string, RuntimeFunction> {
+  const out: Record<string, RuntimeFunction> = {};
+  for (const fn of world.functions ?? []) {
+    if (fn.body) out[fn.name] = { name: fn.name, params: [...fn.params], body: fn.body };
+  }
+  return out;
+}
+
+export function initialValues(world: WorldIR): Record<string, RuntimeValue> {  const out: Record<string, RuntimeValue> = {};
   for (const s of world.strings) {
     out[s.id] = toRuntime(s.baseline);
   }
@@ -389,6 +405,7 @@ export function createState(world: WorldIR, seed = 1, log = false): WorldState {
     branch: 'root',
     spectra: initialSpectra(world),
     matrices: initialMatrices(world),
+    functions: initialFunctions(world),
   };
 }
 
@@ -412,6 +429,7 @@ export function cloneState(s: WorldState): WorldState {
     branch: s.branch,
     ...(s.spectra ? { spectra: cloneSpectra(s.spectra) } : {}),
     ...(s.matrices ? { matrices: cloneMatrices(s.matrices) } : {}),
+    ...(s.functions ? { functions: { ...s.functions } } : {}),
   };
 }
 
