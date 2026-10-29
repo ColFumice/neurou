@@ -460,12 +460,6 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
     }
 
-    function updateArrowVoice(id: number, spectrum: SpectrumView, band: number, value: number): void {
-      if (id <= 0) return;
-      audio.updateSustainedSpectrum(id, sustainedWaves.ensemble(), true, true);
-      audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
-    }
-
     function stopNodeVoice(id: number): void {
       if (id > 0) audio.stopSustainedSpectrum(id);
     }
@@ -540,7 +534,13 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         updateNodeVoice(drag.voiceId, spectrum, band, targets[band] ?? spectrum.min);
       }
       if (arrowTune && arrowTune.voiceId > 0) {
-        updateArrowVoice(arrowTune.voiceId, spectrum, arrowTune.band, targets[arrowTune.band] ?? spectrum.min);
+        // v5.40：方向键合奏只在按下时取一次波形；按住期间只跟踪音高/音量，
+        // 不再每帧换波表，避免持续重新起音变成“头判音重复”。
+        audio.updateSustainedTone(
+          arrowTune.voiceId,
+          nodeXNorm(spectrum, arrowTune.band),
+          nodeYNorm(spectrum, targets[arrowTune.band] ?? spectrum.min),
+        );
       }
       void now;
     }
