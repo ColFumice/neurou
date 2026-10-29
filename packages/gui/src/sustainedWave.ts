@@ -37,7 +37,7 @@ class SustainedWaveBank {
   editAt(kind: StringKind, x01: number, amp: number, sign: 1 | -1): readonly number[] {
     const bands = [...(this.waves.get(kind) ?? defaultWave(kind))];
     const center = Math.max(0, Math.min(bands.length - 1, x01 * (bands.length - 1)));
-    const target = 0.5 - sign * Math.max(0, Math.min(1, amp)) * 0.42;
+    const target = 0.5 + sign * Math.max(0, Math.min(1, amp)) * 0.42;
     for (let i = 0; i < bands.length; i += 1) {
       const distance = Math.abs(i - center);
       const weight = Math.exp(-((distance / 2.2) ** 2));

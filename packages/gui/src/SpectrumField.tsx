@@ -454,12 +454,6 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       );
     }
 
-    function updateNodeVoice(id: number, spectrum: SpectrumView, band: number, value: number): void {
-      if (id <= 0) return;
-      audio.updateSustainedSpectrum(id, audioBandsFor(spectrum, displayed), audioSmooth(spectrum), spectrum.loop);
-      audio.updateSustainedTone(id, nodeXNorm(spectrum, band), nodeYNorm(spectrum, value));
-    }
-
     function stopNodeVoice(id: number): void {
       if (id > 0) audio.stopSustainedSpectrum(id);
     }
@@ -530,8 +524,13 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       const spectrum = currentSpectrum();
       if (!spectrum) return;
       if (drag && drag.voiceId > 0) {
+        // v5.41：拖动只在起音时取谱曲线波形；拖动期间只跟踪音高/音量。
         const band = drag.band;
-        updateNodeVoice(drag.voiceId, spectrum, band, targets[band] ?? spectrum.min);
+        audio.updateSustainedTone(
+          drag.voiceId,
+          nodeXNorm(spectrum, band),
+          nodeYNorm(spectrum, targets[band] ?? spectrum.min),
+        );
       }
       if (arrowTune && arrowTune.voiceId > 0) {
         // v5.40：方向键合奏只在按下时取一次波形；按住期间只跟踪音高/音量，
@@ -565,22 +564,18 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       for (const code of [...keyEdits.keys()]) flushKeyEdit(code, persist);
     }
 
-    /** 持续音色：按住期间每 ~60ms 用当前显示曲线换一次波表，声音跟着曲线变。 */
+    /** 持续音色：映射键按住期间只跟踪音高/音量，波形在 keydown 时取一次。 */
     function syncSustainedVoices(now: number, force = false): void {
       if (keyEdits.size === 0) return;
       if (!force && now - lastVoiceUpdate < SUSTAINED_UPDATE_MS) return;
       lastVoiceUpdate = now;
       const spectrum = currentSpectrum();
       for (const edit of keyEdits.values()) {
-        if (edit.voiceId > 0) {
-          const bands = spectrum ? audioBandsFor(spectrum, displayed) : displayed;
-          audio.updateSustainedSpectrum(edit.voiceId, bands, edit.smooth, edit.loop);
-          if (spectrum) {
-            const count = displayed.length;
-            const xNorm = count <= 1 ? 0.5 : clamp(bandX(spectrum, edit.band, count) / LOGICAL_W, 0, 1);
-            const value = displayed[edit.band] ?? spectrum.min;
-            audio.updateSustainedTone(edit.voiceId, xNorm, nodeYNorm(spectrum, value));
-          }
+        if (edit.voiceId > 0 && spectrum) {
+          const count = displayed.length;
+          const xNorm = count <= 1 ? 0.5 : clamp(bandX(spectrum, edit.band, count) / LOGICAL_W, 0, 1);
+          const value = displayed[edit.band] ?? spectrum.min;
+          audio.updateSustainedTone(edit.voiceId, xNorm, nodeYNorm(spectrum, value));
         }
       }
     }
@@ -975,7 +970,11 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         targets[drag.band] = value;
         // 同一拖动手势持续发声：第一次越过阈值时起 voice，之后实时跟随。
         if (drag.voiceId <= 0) drag.voiceId = startNodeVoice(spectrum, drag.band, value);
-        else updateNodeVoice(drag.voiceId, spectrum, drag.band, value);
+        else {
+          const count = displayed.length;
+          const xNorm = count <= 1 ? 0.5 : clamp(bandX(spectrum, drag.band, count) / LOGICAL_W, 0, 1);
+          audio.updateSustainedTone(drag.voiceId, xNorm, nodeYNorm(spectrum, value));
+        }
         pushUi();
       }
     }
