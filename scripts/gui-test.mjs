@@ -27,7 +27,8 @@ const TEMP_PLAY = 'examples/_acceptance-play.nro';
 const TEMP_AUDIO = 'examples/_acceptance-audio.nro';
 const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
 const TEMP_CHOICES = 'examples/_acceptance-choices.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES];
+const TEMP_GLSL = 'examples/_acceptance-glsl.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER, TEMP_CHOICES, TEMP_GLSL];
 const CHAPTER_WORLD_SOURCE = `世界 章节切换
   版本 0.1
   下一章 "examples/garden.nro"
@@ -53,6 +54,17 @@ const CHOICES_WORLD_SOURCE = `世界 多出口
   当 进度 >= 0
   下一章 "examples/tuner.nro"
   下一章 "examples/garden.nro"
+`;
+const GLSL_WORLD_SOURCE = `世界 GLSL端口
+  版本 0.1
+  章节 "灰度"
+
+叙事弦 雨量
+  类型 数值 0..100
+  基线 40
+
+视觉端口 雨幕
+  参数 强度 雨量
 `;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1
@@ -1619,6 +1631,20 @@ await previewPage.keyboard.press('Space');
 await previewPage.waitForTimeout(250);
 check('再按 Space 关闭现象层', (await previewApp.getAttribute('data-preview-open')) === 'false', String(await previewApp.getAttribute('data-preview-open')));
 await previewPage.close();
+
+// v5.7：视觉端口 → GLSL 后端编译 + 预览 canvas
+writeFileSync(TEMP_GLSL, GLSL_WORLD_SOURCE, 'utf8');
+const glslPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await glslPage.goto(`${URL}?world=${encodeURIComponent(TEMP_GLSL)}&fresh=1`, { waitUntil: 'networkidle' });
+await glslPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await glslPage.waitForTimeout(700);
+const glslApp = glslPage.locator('[data-testid="ink-app"]');
+check('视觉端口进入 GLSL 后端', Number(await glslApp.getAttribute('data-glsl-ports')) === 1, String(await glslApp.getAttribute('data-glsl-ports')));
+check('GLSL 编译成功', (await glslApp.getAttribute('data-glsl-status')) === 'ok', String(await glslApp.getAttribute('data-glsl-error')));
+await glslPage.keyboard.press('Space');
+await glslPage.waitForTimeout(300);
+check('预览蒙版出现 GLSL canvas', (await glslPage.locator('[data-testid="preview-glsl"]').count()) === 1, String(await glslPage.locator('[data-testid="preview-glsl"]').count()));
+await glslPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

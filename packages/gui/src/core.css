@@ -212,3 +212,14 @@ body {
   letter-spacing: 0.06em;
   opacity: 0.42;
 }
+
+/* v5.7：GLSL 端口预览层，位于蒙版文字之下，仍不拦截指针。 */
+.preview-glsl {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.28;
+  filter: grayscale(1);
+  pointer-events: none;
+}

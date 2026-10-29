@@ -36,6 +36,8 @@ import type { Lane, TimbreCurve, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
 import { getStringAudio } from './stringAudio.js';
 import { buildChapterGraph, type ChapterGraphNode } from './chapterGraph.js';
+import { compileGlsl, type GlslArtifact } from './glslBackend.js';
+import { GlslCanvas } from './GlslCanvas.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -337,6 +339,10 @@ export function App() {
   /** v5.4：现象层预览蒙版；Space 切换，与编辑器同屏。 */
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewCues, setPreviewCues] = useState<string[]>([]);
+  /** v5.7：GLSL 后端端口编译结果。 */
+  const [glslArtifact, setGlslArtifact] = useState<GlslArtifact | null>(null);
+  const [glslStatus, setGlslStatus] = useState('');
+  const [glslError, setGlslError] = useState('');
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -658,7 +664,29 @@ export function App() {
     return () => window.removeEventListener('keydown', onGraphKey, true);
   }, [chapterGraphOpen]);
 
-  // v5.4：Space 切换现象层预览蒙版；蒙版不拦截指针，编辑器仍可操作。
+  // v5.7：视觉端口 → GLSLBackend 最小闭环；编译失败只显示状态，不影响世界。
+  useEffect(() => {
+    const visualPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '视觉');
+    if (visualPorts.length === 0 || !universe) {
+      setGlslArtifact(null);
+      setGlslStatus('');
+      setGlslError('');
+      return;
+    }
+    const first = visualPorts[0]!;
+    const params: Record<string, ReturnType<typeof universe.get>> = {};
+    for (const param of first.params) params[param.name] = universe.get(param.string);
+    const compiled = compileGlsl({
+      id: first.id,
+      name: first.name,
+      kind: first.kind,
+      params,
+    });
+    setGlslArtifact(compiled.artifact ?? null);
+    setGlslStatus(compiled.result.ok ? 'ok' : 'error');
+    setGlslError(compiled.result.ok ? '' : compiled.result.error);
+  }, [worldIR, universe]);
+
   useEffect(() => {
     const onPreviewKey = (event: KeyboardEvent): void => {
       if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -968,6 +996,9 @@ export function App() {
       data-preview-open={previewOpen ? 'true' : 'false'}
       data-preview-scene={universe?.sceneName ?? ''}
       data-preview-tick={universe?.state.tick ?? 0}
+      data-glsl-status={glslStatus}
+      data-glsl-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉').length}
+      data-glsl-error={glslError}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}
       data-slot-menu-open={slotMenuOpen ? 'true' : 'false'}
@@ -1047,6 +1078,15 @@ export function App() {
       ) : null}
       {previewOpen && screen === 'strings' ? (
         <div className="preview-mask" data-testid="preview-mask">
+          {glslStatus === 'ok' && glslArtifact ? (
+            <GlslCanvas
+              artifact={glslArtifact}
+              values={glslArtifact.bindings.map((binding) => {
+                const value = universe?.get(binding.string);
+                return typeof value === 'number' ? value : 0;
+              })}
+            />
+          ) : null}
           <div className="preview-scene" data-testid="preview-scene">
             {universe?.sceneName || chapterTitle || worldIR?.name || ''}
           </div>
