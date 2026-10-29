@@ -29,26 +29,40 @@ export function matrixTimePosition(name: string, state: WorldState, depth = 0): 
 }
 
 /** 求值：把图上的表达式还原成一次具体的判断或数值。 */
-export function evalExpr(e: LExpr, state: WorldState): RuntimeValue {
+export function evalExpr(
+  e: LExpr,
+  state: WorldState,
+  params?: Record<string, RuntimeValue>,
+): RuntimeValue {
   switch (e.k) {
     case 'const':
       return Array.isArray(e.v) ? new Set(e.v) : e.v;
     case 'read':
       return state.values[e.id] ?? null;
+    case 'param':
+      return params?.[e.name] ?? null;
     case 'un': {
-      if (e.op === '非') return !truthy(evalExpr(e.e, state));
-      const v = asNumber(evalExpr(e.e, state));
+      if (e.op === '非') return !truthy(evalExpr(e.e, state, params));
+      const v = asNumber(evalExpr(e.e, state, params));
       return e.op === '-' ? -v : v;
     }
     case 'bin': {
-      if (e.op === '且') return truthy(evalExpr(e.l, state)) && truthy(evalExpr(e.r, state));
-      if (e.op === '或') return truthy(evalExpr(e.l, state)) || truthy(evalExpr(e.r, state));
-      const l = evalExpr(e.l, state);
-      const r = evalExpr(e.r, state);
+      if (e.op === '且') return truthy(evalExpr(e.l, state, params)) && truthy(evalExpr(e.r, state, params));
+      if (e.op === '或') return truthy(evalExpr(e.l, state, params)) || truthy(evalExpr(e.r, state, params));
+      const l = evalExpr(e.l, state, params);
+      const r = evalExpr(e.r, state, params);
       return binary(e.op, l, r);
     }
     case 'call': {
-      const args = e.args.map((a: LExpr) => evalExpr(a, state));
+      if (e.user) {
+        const args = e.args.map((a: LExpr) => evalExpr(a, state, params));
+        const env: Record<string, RuntimeValue> = {};
+        e.user.params.forEach((name, index) => {
+          env[name] = args[index] ?? null;
+        });
+        return evalExpr(e.user.body, state, env);
+      }
+      const args = e.args.map((a: LExpr) => evalExpr(a, state, params));
       switch (e.fn) {
         case '数量': {
           const v = args[0];

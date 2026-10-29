@@ -30,9 +30,17 @@ export type IRDomain =
 export type LExpr =
   | { k: 'const'; v: Value }
   | { k: 'read'; id: string }
+  /** v5.19：纯函数形参；只出现在函数体内。 */
+  | { k: 'param'; name: string }
   | { k: 'bin'; op: string; l: LExpr; r: LExpr }
   | { k: 'un'; op: '-' | '+' | '非'; e: LExpr }
-  | { k: 'call'; fn: string; args: LExpr[] };
+  | {
+      k: 'call';
+      fn: string;
+      args: LExpr[];
+      /** v5.19：用户函数调用携带可求值函数体，序列化只写函数名+实参。 */
+      user?: { params: string[]; body: LExpr; name: string };
+    };
 
 export type IREffect =
   | { k: 'set' | 'add' | 'sub'; id: string; value: LExpr }

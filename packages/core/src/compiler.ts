@@ -72,6 +72,8 @@ type TypeName = 'number' | 'boolean' | 'text' | 'enum' | 'set' | 'ref' | 'any';
 
 interface Scope {
   owner?: string;
+  /** v5.19：函数形参名；只在 lowering 函数体时存在。 */
+  params?: Set<string>;
 }
 
 const KIND_SOLVER: Record<StringKind, string> = {
@@ -1004,6 +1006,9 @@ class Compiler {
         return { expr: { k: 'const', v: e.items }, type: 'set' };
       case 'path': {
         const joined = e.parts.join('.');
+        if (e.parts.length === 1 && scope.params?.has(joined)) {
+          return { expr: { k: 'param', name: joined }, type: 'any' };
+        }
         // v2.3：此刻 = 当前拍数（无参内建值，可省略括号）。
         if (joined === '此刻') {
           return { expr: { k: 'call', fn: '此刻', args: [] }, type: 'number' };
@@ -1056,6 +1061,7 @@ class Compiler {
         return { expr: { k: 'bin', op: e.op, l: l.expr, r: r.expr }, type: 'number' };
       }
       case 'call': {
+        const args = e.args.map((a) => this.lower(a, scope));
         const user = this.functionDecls.get(e.name);
         if (user) {
           if (e.args.length !== user.params.length) {
@@ -1063,18 +1069,25 @@ class Compiler {
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
           if (this.expandingFunctions.has(user.name)) {
-            this.error('NRO2008', `函数「${e.name}」递归调用了自己。`, e.span, { hint: '纯函数必须可内联，不能递归。' });
+            this.error('NRO2008', `函数「${e.name}」递归调用了自己。`, e.span, { hint: '纯函数不能递归。' });
             return { expr: { k: 'const', v: null }, type: 'any' };
           }
-          const substituted = this.substituteFunction(user.body, user.params, e.args);
           this.expandingFunctions.add(user.name);
           try {
-            return this.lower(substituted, scope);
+            const body = this.lower(user.body, { ...scope, params: new Set(user.params) });
+            return {
+              expr: {
+                k: 'call',
+                fn: `用户:${user.name}`,
+                args: args.map((arg) => arg.expr),
+                user: { name: user.name, params: [...user.params], body: body.expr },
+              },
+              type: 'any',
+            };
           } finally {
             this.expandingFunctions.delete(user.name);
           }
         }
-        const args = e.args.map((a) => this.lower(a, scope));
         const argTypes = args.map((a) => a.type);
         const fail = (want: string): { expr: LExpr; type: TypeName } => {
           this.error('NRO2003', `函数「${e.name}」需要${want}。`, e.span);
@@ -1314,31 +1327,6 @@ class Compiler {
           }
         }
       }
-    }
-  }
-
-  /** v5.17：把参数引用替换成调用点表达式，再交给 lower 做类型检查与内联。 */
-  private substituteFunction(expr: Expr, params: string[], args: Expr[]): Expr {
-    switch (expr.k) {
-      case 'path': {
-        if (expr.parts.length === 1) {
-          const index = params.indexOf(expr.parts[0]!);
-          if (index >= 0) return args[index]!;
-        }
-        return expr;
-      }
-      case 'bin':
-        return {
-          ...expr,
-          left: this.substituteFunction(expr.left, params, args),
-          right: this.substituteFunction(expr.right, params, args),
-        };
-      case 'un':
-        return { ...expr, operand: this.substituteFunction(expr.operand, params, args) };
-      case 'call':
-        return { ...expr, args: expr.args.map((arg) => this.substituteFunction(arg, params, args)) };
-      default:
-        return expr;
     }
   }
 

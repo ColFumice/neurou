@@ -120,8 +120,12 @@ function exprText(expr: LExpr, parentPrec = 0): string {
   if (expr.k === 'read') {
     return expr.id;
   }
+  if (expr.k === 'param') {
+    return expr.name;
+  }
   if (expr.k === 'call') {
-    return `${expr.fn}(${expr.args.map((a) => exprText(a)).join(', ')})`;
+    const fn = expr.fn.startsWith('用户:') ? expr.fn.slice('用户:'.length) : expr.fn;
+    return `${fn}(${expr.args.map((a) => exprText(a)).join(', ')})`;
   }
   if (expr.k === 'un') {
     const operand = exprText(expr.e, 7);
