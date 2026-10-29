@@ -234,6 +234,73 @@ export class StringAudioEngine {
     play();
   }
 
+  /** v3.5：世界「音频」cue 的短音。名字哈希定音高/seed；value 定音量/亮度；timbre 来自谱。 */
+  playCue(name: string, value: number, timbre?: TimbreCurve, kind?: StringKind): void {
+    if (this.failed) return;
+    const run = (): void => {
+      const ctx = this.ctx;
+      const master = this.master;
+      if (!ctx || !master) return;
+      try {
+        const v = clamp(value, 0, 1);
+        // FNV-1a：名字 → 稳定 seed（音高/波形/微失谐）。
+        let hash = 2166136261;
+        for (let i = 0; i < name.length; i += 1) {
+          hash ^= name.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        const seed = hash >>> 0;
+        const semitone = seed % 24;
+        const kindProfile = kind ? KIND_AUDIO[kind] : null;
+        const octave = kindProfile?.octave ?? 1;
+        const base = 110 * octave * 2 ** (semitone / 12);
+        const kindBrightness = kindProfile?.brightness ?? 0.55;
+
+        // 短 KS 拨弦缓冲：timbre 直接作为初始激励/波表，名字 seed 定噪声/音高。
+        const seconds = Math.min(0.4, 0.16 + ((seed >>> 24) % 6) * 0.015 + (1 - v) * 0.04);
+        const brightness = clamp(kindBrightness * 0.5 + v * 0.5, 0, 1);
+        const samples = ksPluckBuffer({
+          freq: base,
+          seconds,
+          sampleRate: ctx.sampleRate,
+          brightness,
+          seed,
+          ...(timbre ? { timbre } : {}),
+        });
+        const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+        buffer.copyToChannel(samples, 0);
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const gain = ctx.createGain();
+        const peak = 0.1 + v * 0.12 + (kindProfile?.gain ?? 0.25) * 0.05;
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(peak, ctx.currentTime + 0.004);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + seconds + 0.02);
+        source.connect(gain);
+        gain.connect(master);
+        source.start();
+        source.stop(ctx.currentTime + seconds + 0.03);
+        source.onended = () => {
+          try {
+            source.disconnect();
+            gain.disconnect();
+          } catch {
+            /* ignore */
+          }
+        };
+      } catch {
+        /* 声音层静默失败，不影响画面 */
+      }
+    };
+    if (!this.ctx) {
+      void this.ensureStarted().then(run).catch(() => undefined);
+      return;
+    }
+    void this.ctx.resume().catch(() => undefined);
+    run();
+  }
+
   /** v2.0：谱模式里按下一个键，用当前谱作为音色试听。 */
   previewSpectrum(
     bands: readonly number[],

@@ -545,6 +545,7 @@ export function MatrixField({
   const [focusBandEditsUi, setFocusBandEditsUi] = useState(0);
   const [playingUi, setPlayingUi] = useState(false);
   const [liveValuesUi, setLiveValuesUi] = useState(false);
+  const [listenUi, setListenUi] = useState(false);
   const [playheadUi, setPlayheadUi] = useState(0);
   const [playSpeedUi, setPlaySpeedUi] = useState(0);
   const [effectivePhaseUi, setEffectivePhaseUi] = useState(0);
@@ -610,6 +611,10 @@ export function MatrixField({
     let displayed: number[][] = [];
     let targets: number[][] = [];
     let liveValuesNow = false;
+    /** v3.5：S 关系谱听音（节流 ~260ms）。 */
+    let listenNow = false;
+    let lastListenAt = 0;
+    let lastListenValue: number | null = null;
     let selected: CellRef | null = null;
     let hover: CellRef | null = null;
     let drag: {
@@ -1982,6 +1987,13 @@ export function MatrixField({
       setLiveValuesUi(liveValuesNow);
     }
 
+    function toggleListen(): void {
+      listenNow = !listenNow;
+      lastListenAt = 0;
+      lastListenValue = null;
+      setListenUi(listenNow);
+    }
+
     /** 矩阵切换 / 首次加载：快照新矩阵、清交互、重启淡入。 */
     function syncMatrix(now: number): MatrixView | null {
       const matrix = currentMatrix();
@@ -2722,10 +2734,22 @@ export function MatrixField({
           toggleLiveValues();
           return;
         }
-        if (event.code !== 'Tab' && event.code !== 'F3' && !(event.code === 'KeyP' && !event.shiftKey)) {
+        if (
+          event.code !== 'Tab' &&
+          event.code !== 'F3' &&
+          !(event.code === 'KeyP' && !event.shiftKey) &&
+          !(event.code === 'KeyS' && !event.shiftKey)
+        ) {
           if (event.code === 'Space') event.preventDefault();
           return;
         }
+      }
+      // S：关系谱听音开关（编辑/只读叠加都可用）。
+      if (event.code === 'KeyS' && !event.shiftKey && !event.repeat) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toggleListen();
+        return;
       }
       // V：切换运行期只读叠加（编辑模式也可用）。
       if (event.code === 'KeyV' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -2798,6 +2822,8 @@ export function MatrixField({
         event.preventDefault();
         event.stopImmediatePropagation();
         flushAllCurveKeyEdits(true);
+        listenNow = false;
+        setListenUi(false);
         startClosing(performance.now());
         return;
       }
@@ -3483,6 +3509,25 @@ export function MatrixField({
           playhead = wrap01(playhead + freeRate);
         }
       }
+      // v3.5：S 关系谱听音——约 260ms 节流，按播放头（有曲线）或悬停值发 nav 轻音。
+      if (listenNow && matrix) {
+        const cell = hover ?? selected;
+        if (cell && now - lastListenAt >= 260) {
+          const row = matrix.rows[cell.row] ?? '';
+          const col = matrix.cols[cell.col] ?? '';
+          const curve = matrix.curves?.find((candidate) => candidate.row === row && candidate.col === col);
+          const value =
+            curve && curve.bands.length > 0
+              ? sampleCurveAt(matrix, curve, playhead)
+              : (displayed[cell.row]?.[cell.col] ?? 0);
+          // 值变才发声（同值不重复触发）。
+          if (lastListenValue === null || Math.abs(value - lastListenValue) >= 0.001) {
+            lastListenAt = now;
+            lastListenValue = value;
+            audio.matrixTick('nav', clampValue(value));
+          }
+        }
+      }
       pushPlayUi();
       updateCurveKeyVoices(now);
       updateCurveDragVoices(now);
@@ -3831,6 +3876,7 @@ export function MatrixField({
       data-focus-band-edits={focusBandEditsUi}
       data-playing={playingUi ? 'true' : 'false'}
       data-live-values={liveValuesUi ? 'true' : 'false'}
+      data-matrix-listen={listenUi ? 'true' : 'false'}
       data-playhead={playheadUi.toFixed(4)}
       data-play-speed={playSpeedUi.toFixed(3)}
       data-synced={syncedAttr}

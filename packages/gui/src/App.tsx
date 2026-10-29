@@ -31,8 +31,9 @@ import { Universe } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
 import type { MatrixView } from './MatrixField.js';
-import type { Lane, WorldView } from './stringMath.js';
+import type { Lane, TimbreCurve, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
+import { getStringAudio } from './stringAudio.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -210,6 +211,9 @@ export function App() {
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
   const [playReset, setPlayReset] = useState(0);
+  /** v3.5：已播放的世界音频 cue 数/最近一条（仅用于可观测验收）。 */
+  const [cueAudio, setCueAudio] = useState(0);
+  const [lastCue, setLastCue] = useState('');
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -291,7 +295,28 @@ export function App() {
     const timer = window.setInterval(() => {
       if (transitionRef.current) return; // 缓动期间暂停逐拍
       if (universe.state.ended) return;
-      universe.tick();
+      const result = universe.tick();
+      // v3.5：把世界信号的「音频」cue 接到本地声音层。cue 参数若命中谱名，
+      // 用该谱的形状塑造音色；否则由名字哈希出音高。
+      for (const emitted of result.cues) {
+        const cue = emitted.cue;
+        if (cue.k !== '音频' || !cue.param) continue;
+        const spectrum = worldIRRef.current?.spectra.find(
+          (item) => item.id === cue.param || item.name === cue.param,
+        );
+        const timbre: TimbreCurve | undefined = spectrum
+          ? {
+              bands: [...spectrum.bands],
+              min: spectrum.min,
+              max: spectrum.max,
+              smooth: spectrum.interpolation === '平滑',
+              loop: spectrum.loop,
+            }
+          : undefined;
+        getStringAudio().playCue(cue.param, cue.value ?? 0.5, timbre);
+        setCueAudio((n) => n + 1);
+        setLastCue(`${cue.param}:${cue.value ?? ''}`);
+      }
       setVersion((v) => v + 1);
     }, TICK_MS);
     return () => window.clearInterval(timer);
@@ -545,6 +570,8 @@ export function App() {
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
       data-seed={INITIAL_SEED}
+      data-cue-audio={cueAudio}
+      data-last-cue={lastCue}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}

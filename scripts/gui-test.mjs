@@ -24,7 +24,32 @@ const WORLD_PATH = 'examples/tuner.nro';
 const TEMP_TUNER = 'examples/_acceptance-tuner.nro';
 const TEMP_TWO = 'examples/_acceptance-two.nro';
 const TEMP_PLAY = 'examples/_acceptance-play.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY];
+const TEMP_AUDIO = 'examples/_acceptance-audio.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO];
+const AUDIO_WORLD_SOURCE = `世界 音频测试
+  版本 0.1
+
+叙事弦 响度
+  类型 数值 0..100
+  基线 10
+  悬崖 5
+  安全 95
+
+谱 钟
+  段 0.1 0.4 0.9 0.5
+  范围 0..1
+
+动作 敲钟
+  当 响度 >= 0
+  耗时 1
+  效果
+    响度 += 40
+  描述 "敲。"
+
+信号 钟声
+  当 响度 > 30
+  音频 钟 0.8
+`;
 const PLAY_WORLD_SOURCE = `世界 可玩层测试
   版本 0.1
 
@@ -1350,6 +1375,39 @@ const worldApp = worldPage.locator('[data-testid="ink-app"]');
 check('URL 选择世界（data-world-file）', (await worldApp.getAttribute('data-world-file')) === 'examples/relational.nro', String(await worldApp.getAttribute('data-world-file')));
 check('URL seed 复现（data-seed）', (await worldApp.getAttribute('data-seed')) === '42', String(await worldApp.getAttribute('data-seed')));
 await worldPage.close();
+
+// v3.5：世界「音频」cue 接到本地声音层
+writeFileSync(TEMP_AUDIO, AUDIO_WORLD_SOURCE, 'utf8');
+const audioPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await audioPage.goto(`${URL}?world=${encodeURIComponent(TEMP_AUDIO)}`, { waitUntil: 'networkidle' });
+await audioPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await audioPage.waitForTimeout(700);
+await audioPage.mouse.click(720, 450);
+await audioPage.waitForTimeout(300);
+await audioPage.keyboard.press('Enter');
+await audioPage.waitForTimeout(250);
+await audioPage.keyboard.press('Enter');
+await audioPage.waitForTimeout(1400);
+const audioApp = audioPage.locator('[data-testid="ink-app"]');
+check('世界音频 cue 被 GUI 消费', Number(await audioApp.getAttribute('data-cue-audio')) >= 1, String(await audioApp.getAttribute('data-cue-audio')));
+check('音频 cue 命中谱名', (await audioApp.getAttribute('data-last-cue')) === '钟:0.8', String(await audioApp.getAttribute('data-last-cue')));
+await audioPage.close();
+
+// v3.5：F3 S 关系谱听音开关
+const listenPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await listenPage.goto(`${URL}?world=${encodeURIComponent('examples/soundscape.nro')}`, { waitUntil: 'networkidle' });
+await listenPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await listenPage.waitForTimeout(700);
+await listenPage.keyboard.press('F3');
+await listenPage.waitForTimeout(700);
+const listenRoot = listenPage.locator('[data-testid="matrix-field"]');
+await listenPage.keyboard.press('s');
+await listenPage.waitForTimeout(600);
+check('S 打开关系谱听音', (await listenRoot.getAttribute('data-matrix-listen')) === 'true', String(await listenRoot.getAttribute('data-matrix-listen')));
+await listenPage.keyboard.press('s');
+await listenPage.waitForTimeout(300);
+check('再按 S 关闭关系谱听音', (await listenRoot.getAttribute('data-matrix-listen')) === 'false', String(await listenRoot.getAttribute('data-matrix-listen')));
+await listenPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
