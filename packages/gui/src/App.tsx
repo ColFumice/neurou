@@ -28,6 +28,7 @@ import {
   type WorldIR,
 } from '@neurou/core';
 import { Universe } from '@neurou/runtime';
+import type { WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
 import type { MatrixView } from './MatrixField.js';
@@ -48,6 +49,41 @@ const DEV = import.meta.env.DEV;
 /** v3.6：F4 循环四档音量；0 档即静音。 */
 const AUDIO_LEVELS = [1, 0.6, 0.3, 0] as const;
 const AUDIO_PREF_KEY = 'neurou.audio.level';
+const RUN_SAVE_PREFIX = 'neurou.run.';
+const RUN_SAVE_INTERVAL_MS = 4000;
+
+interface RunSave {
+  v: 1;
+  file: string;
+  seed: number;
+  tick: number;
+  ended: boolean;
+  state: WorldState;
+}
+
+function runSaveKey(file: string, seed: number): string {
+  return `${RUN_SAVE_PREFIX}${file}:${seed}`;
+}
+
+function readRunSave(file: string, seed: number): RunSave | null {
+  try {
+    const raw = window.localStorage.getItem(runSaveKey(file, seed));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<RunSave>;
+    if (parsed.v !== 1 || parsed.file !== file || parsed.seed !== seed || !parsed.state) return null;
+    return parsed as RunSave;
+  } catch {
+    return null;
+  }
+}
+
+function clearRunSave(file: string, seed: number): void {
+  try {
+    window.localStorage.removeItem(runSaveKey(file, seed));
+  } catch {
+    /* 隐私模式 */
+  }
+}
 
 interface AudioPref {
   volume: number;
@@ -245,6 +281,11 @@ export function App() {
   const [lastCueKind, setLastCueKind] = useState('');
   /** v3.6：F4 音量档位，localStorage 持久化。 */
   const [audioPref, setAudioPref] = useState<AudioPref>(loadAudioPref);
+  /** v4.0：一局自动存档/恢复。 */
+  const bootedRef = useRef(false);
+  const saveRunRef = useRef<() => void>(() => {});
+  const [resumed, setResumed] = useState(false);
+  const [savedTick, setSavedTick] = useState(0);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
@@ -307,7 +348,28 @@ export function App() {
   useEffect(() => {
     if (!compiled?.ok) return;
     applyWorldIR(compiled.ir);
-    setUniverse(new Universe(compiled.ir, { seed: INITIAL_SEED }));
+    const nextUniverse = new Universe(compiled.ir, { seed: INITIAL_SEED });
+    if (!bootedRef.current) {
+      bootedRef.current = true;
+      const params = new URLSearchParams(window.location.search);
+      const fresh = params.get('fresh') === '1';
+      const wantResume = params.get('resume') === '1';
+      if (fresh) {
+        clearRunSave(WORLD_FILE, INITIAL_SEED);
+      } else if (wantResume) {
+        const saved = readRunSave(WORLD_FILE, INITIAL_SEED);
+        if (saved) {
+          try {
+            nextUniverse.restore(saved.state);
+            setResumed(true);
+            setSavedTick(saved.tick);
+          } catch {
+            clearRunSave(WORLD_FILE, INITIAL_SEED);
+          }
+        }
+      }
+    }
+    setUniverse(nextUniverse);
     setSelected({});
     if (!savedText.current) savedText.current = source ?? '';
     if (source) {
@@ -364,6 +426,35 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [universe]);
 
+  // v4.0：一局自动存档——每 4s 与离页时写 localStorage；刷新后自动续上。
+  useEffect(() => {
+    if (!universe) return;
+    const save = (): void => {
+      try {
+        const payload: RunSave = {
+          v: 1,
+          file: WORLD_FILE,
+          seed: INITIAL_SEED,
+          tick: universe.state.tick,
+          ended: universe.state.ended !== null,
+          state: universe.snapshot(),
+        };
+        window.localStorage.setItem(runSaveKey(WORLD_FILE, INITIAL_SEED), JSON.stringify(payload));
+        setSavedTick(payload.tick);
+      } catch {
+        /* 隐私模式/配额满：静默降级 */
+      }
+    };
+    saveRunRef.current = save;
+    const timer = window.setInterval(save, RUN_SAVE_INTERVAL_MS);
+    window.addEventListener('pagehide', save);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('pagehide', save);
+      save();
+    };
+  }, [universe]);
+
   // v3.8：世界配乐——引用音频资产，循环播放；首次手势后由引擎自动启动。
   const bgm = worldIR?.bgm;
   const bgmAsset = bgm ? worldIR?.audioAssets?.find((item) => item.id === bgm.asset || item.name === bgm.asset) : undefined;
@@ -377,6 +468,26 @@ export function App() {
     void audio.playLoop(`/${bgmSrc}`, bgm.volume, bgm.loop);
   }, [bgm?.asset, bgm?.volume, bgm?.loop, bgmSrc]);
   useEffect(() => () => getStringAudio().stopLoop(), []);
+
+  // v4.0：世界元数据里的「下一章」；结局后按 N 切到下一世界。
+  const nextChapterRaw = worldIR?.meta['下一章'];
+  const nextChapter =
+    typeof nextChapterRaw === 'string' && /^examples\/[^/\\]+\.nro$/.test(nextChapterRaw) ? nextChapterRaw : '';
+  const chapterTitle = typeof worldIR?.meta['章节'] === 'string' ? String(worldIR.meta['章节']) : '';
+  useEffect(() => {
+    const onChapterKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'KeyN' || event.altKey || event.ctrlKey || event.metaKey || !nextChapter) return;
+      if (!universe?.state.ended) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      saveRunRef.current();
+      window.location.assign(
+        `${window.location.pathname}?world=${encodeURIComponent(nextChapter)}&seed=${INITIAL_SEED}`,
+      );
+    };
+    window.addEventListener('keydown', onChapterKey, true);
+    return () => window.removeEventListener('keydown', onChapterKey, true);
+  }, [nextChapter, universe]);
 
   // v3.6：音量/静音只改本地 master gain，不进入世界状态；F4 循环四档。
   useEffect(() => {
@@ -666,6 +777,10 @@ export function App() {
       data-bgm-volume={bgm?.volume ?? 0}
       data-bgm-loop={bgm?.loop ? 'true' : 'false'}
       data-bgm-src={bgmSrc ?? ''}
+      data-next-chapter={nextChapter}
+      data-chapter-title={chapterTitle}
+      data-resumed={resumed ? 'true' : 'false'}
+      data-save-tick={savedTick}
       data-saves={saves}
       data-save-state={saveState}
       data-save-mode={saveMode}

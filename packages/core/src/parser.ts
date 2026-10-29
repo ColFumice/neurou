@@ -360,7 +360,7 @@ class Parser {
             }
           }
           meta.push({ key, value: words.join(' ') });
-        } else if (key === '作者' || key === '描述') {
+        } else if (key === '作者' || key === '描述' || key === '章节' || key === '上一章' || key === '下一章') {
           const v = this.peek();
           if (v.kind === 'string') {
             this.advance();

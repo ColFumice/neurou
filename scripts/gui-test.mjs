@@ -25,7 +25,18 @@ const TEMP_TUNER = 'examples/_acceptance-tuner.nro';
 const TEMP_TWO = 'examples/_acceptance-two.nro';
 const TEMP_PLAY = 'examples/_acceptance-play.nro';
 const TEMP_AUDIO = 'examples/_acceptance-audio.nro';
-const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO];
+const TEMP_CHAPTER = 'examples/_acceptance-chapter.nro';
+const TEMP_FILES = [TEMP_TUNER, TEMP_TWO, TEMP_PLAY, TEMP_AUDIO, TEMP_CHAPTER];
+const CHAPTER_WORLD_SOURCE = `世界 章节切换
+  版本 0.1
+  下一章 "examples/tuner.nro"
+
+叙事弦 进度
+  类型 数值 0..100
+  基线 10
+
+结局 终: 当 进度 >= 0
+`;
 const AUDIO_WORLD_SOURCE = `世界 音频测试
   版本 0.1
 
@@ -1452,6 +1463,34 @@ await listenPage.keyboard.press('s');
 await listenPage.waitForTimeout(300);
 check('再按 S 关闭关系谱听音', (await listenRoot.getAttribute('data-matrix-listen')) === 'false', String(await listenRoot.getAttribute('data-matrix-listen')));
 await listenPage.close();
+
+// v4.0：章节切换 + 自动存档/续档
+writeFileSync(TEMP_CHAPTER, CHAPTER_WORLD_SOURCE, 'utf8');
+const chapterPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await chapterPage.goto(`${URL}?world=${encodeURIComponent(TEMP_CHAPTER)}&fresh=1`, { waitUntil: 'networkidle' });
+await chapterPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await chapterPage.waitForTimeout(1100);
+const chapterApp = chapterPage.locator('[data-testid="ink-app"]');
+check('世界元数据带下一章', (await chapterApp.getAttribute('data-next-chapter')) === 'examples/tuner.nro', String(await chapterApp.getAttribute('data-next-chapter')));
+await chapterPage.keyboard.press('n');
+await chapterPage.waitForTimeout(1200);
+check('结局后 N 切到下一章', (await chapterApp.getAttribute('data-world-file')) === 'examples/tuner.nro', String(await chapterApp.getAttribute('data-world-file')));
+await chapterPage.close();
+
+const savePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await savePage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await savePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await savePage.waitForTimeout(800);
+await savePage.evaluate(() => window.__neurouString?.setValue?.('叙事', 33));
+await savePage.waitForTimeout(4600);
+const saveApp = savePage.locator('[data-testid="ink-app"]');
+const savedTick = Number(await saveApp.getAttribute('data-save-tick'));
+check('运行期自动存档产生 save-tick', savedTick > 0, String(savedTick));
+await savePage.goto(`${URL}?world=${encodeURIComponent('examples/garden.nro')}&resume=1`, { waitUntil: 'networkidle' });
+await savePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await savePage.waitForTimeout(800);
+check('刷新后自动续档', (await saveApp.getAttribute('data-resumed')) === 'true', String(await saveApp.getAttribute('data-resumed')));
+await savePage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

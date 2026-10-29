@@ -1,7 +1,14 @@
 # 变更记录
 
 > 只记录对使用者有意义的版本；完整提交历史见 `git log`。
-> 当前：**v3.10**（语言/运行时 + 调律台 GUI + 13 个示例世界）。
+> 当前：**v4.0**（语言/运行时 + 调律台 GUI + 13 个示例世界）。
+
+## v4.0 叙事/关卡层
+
+- 世界元数据 `章节` / `下一章`；结局后 N 切下一章；
+- 自动存档：每 4s/pagehide 写 localStorage；`?resume=1` 续档、`?fresh=1` 清档；
+- garden → harbor 章节链；根节点 `data-next-chapter` / `data-resumed` / `data-save-tick`；
+- 版本 4.0.0；单元 315 / GUI 245。
 
 ## v3.10 发布闭环
 
