@@ -8,6 +8,7 @@ export {
   createEngine,
   type SceneFrame,
   type EngineListener,
+  type EngineDescription,
 } from './engine.js';
 export {
   type BackendAdapter,

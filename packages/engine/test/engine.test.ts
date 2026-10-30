@@ -101,4 +101,16 @@ describe('Engine facade（v5.2）', () => {
     engine.transitionScene('昼');
     expect(engine.currentSceneId).toBe('scene:昼');
   });
+
+  it('describe 给出 Host 摘要', () => {
+    const result = compileText(WORLD, 'engine-describe.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    const description = engine.describe();
+    expect(description.name).toBe('门面测试');
+    expect(description.scenes).toEqual(['夜', '昼']);
+    expect(description.systems).toEqual(['潮汐']);
+    expect(description.strings).toBe(1);
+    expect(description.functions).toBe(0);
+  });
 });

@@ -30,6 +30,21 @@ export interface SceneFrame {
 
 export type EngineListener = (frame: SceneFrame) => void;
 
+/** v5.51：Host 集成用的只读世界摘要。 */
+export interface EngineDescription {
+  name: string;
+  version: string;
+  tick: number;
+  scene?: string;
+  scenes: string[];
+  systems: string[];
+  ports: { name: string; kind: '视觉' | '音频' }[];
+  strings: number;
+  audioAssets: number;
+  textureAssets: number;
+  functions: number;
+}
+
 export class Engine {
   ir: WorldIR;
   private universe: Universe;
@@ -45,6 +60,22 @@ export class Engine {
 
   get tick(): number {
     return this.universe.state.tick;
+  }
+
+  describe(): EngineDescription {
+    return {
+      name: this.ir.name,
+      version: String(this.ir.meta['版本'] ?? ''),
+      tick: this.tick,
+      ...(this.sceneName ? { scene: this.sceneName } : {}),
+      scenes: (this.ir.scenes ?? []).map((scene) => scene.name),
+      systems: (this.ir.systems ?? []).map((system) => system.name),
+      ports: (this.ir.ports ?? []).map((port) => ({ name: port.name, kind: port.kind })),
+      strings: this.ir.strings.length,
+      audioAssets: (this.ir.audioAssets ?? []).length,
+      textureAssets: (this.ir.textureAssets ?? []).length,
+      functions: (this.ir.functions ?? []).length,
+    };
   }
 
   get phaseName(): string | undefined {
