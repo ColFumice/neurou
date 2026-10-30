@@ -551,6 +551,11 @@ check(
   Number(await page.evaluate(() => window.__neurouString.sustainedStrings())) === 0 && Number(await attr('data-plucks')) === sustainPlucks,
   String(await attr('data-plucks')),
 );
+await page.keyboard.press('Alt+1');
+await page.waitForTimeout(200);
+check('持续型：Alt+1 应用正弦波形预设', (await page.evaluate(() => window.__neurouString.focusWaveSpread())) > 20, String(await page.evaluate(() => window.__neurouString.focusWaveSpread())));
+await page.keyboard.press('Alt+R');
+await page.waitForTimeout(200);
 await page.keyboard.press('Tab');
 await page.keyboard.press('Tab');
 await page.keyboard.press('Tab'); // 视觉 → 动画 → 物理 → 控制（头判）

@@ -2303,6 +2303,28 @@ export function StringField({
             }
           }
         }
+        // v5.46：持续型弦的波形预设/重置（无面板，隐藏手势）。
+        if (modeNow === 'strings' && !dualNow && interactionOf(focusIdx) === '持续') {
+          const focusLane = laneAt(focusIdx);
+          const presets: Record<string, '正弦' | '三角' | '方波' | '柔波'> = {
+            Digit1: '正弦',
+            Digit2: '三角',
+            Digit3: '方波',
+            Digit4: '柔波',
+          };
+          if (focusLane && presets[event.code]) {
+            event.preventDefault();
+            const wave = sustainedWaves.applyPreset(focusLane.id, focusLane.kind, presets[event.code]!);
+            commitWaveform(wave, true);
+            return;
+          }
+          if (focusLane && event.code === 'KeyR') {
+            event.preventDefault();
+            const wave = sustainedWaves.resetString(focusLane.id, focusLane.kind);
+            commitWaveform(wave, true);
+            return;
+          }
+        }
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) return;

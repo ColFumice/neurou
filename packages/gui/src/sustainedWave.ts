@@ -33,6 +33,29 @@ function sanitize(bands: unknown): number[] | null {
   return bands.map((value) => Math.max(0, Math.min(1, value)));
 }
 
+export type WavePreset = '正弦' | '三角' | '方波' | '柔波';
+
+function presetWave(kind: StringKind, preset: WavePreset): number[] {
+  const bands: number[] = [];
+  for (let i = 0; i < SUSTAINED_WAVE_BANDS; i += 1) {
+    const x = i / (SUSTAINED_WAVE_BANDS - 1);
+    const phase = x * Math.PI * 2;
+    const hard = preset === '方波';
+    const raw =
+      preset === '正弦'
+        ? Math.sin(phase)
+        : preset === '三角'
+          ? 2 * Math.abs(2 * (x - Math.floor(x + 0.5))) - 1
+          : hard
+            ? Math.sign(Math.sin(phase)) || 1
+            : Math.sin(phase) + Math.sin(phase * 2) * 0.35;
+    const smooth = hard ? Math.tanh(raw * 3) : raw;
+    const bright = kind === '视觉' || kind === '动画' ? 1 : 0.85;
+    bands.push(0.5 + smooth * 0.3 * bright);
+  }
+  return bands;
+}
+
 class SustainedWaveBank {
   private readonly waves = new Map<string, WaveEntry>();
   private activeIds: string[] = [];
@@ -127,6 +150,20 @@ class SustainedWaveBank {
     this.waves.set(id, { kind, waveform: bands });
     this.persist();
     return bands;
+  }
+
+  resetString(id: string, kind: StringKind): readonly number[] {
+    const waveform = defaultWave(kind);
+    this.waves.set(id, { kind, waveform });
+    this.persist();
+    return waveform;
+  }
+
+  applyPreset(id: string, kind: StringKind, preset: WavePreset): readonly number[] {
+    const waveform = presetWave(kind, preset);
+    this.waves.set(id, { kind, waveform });
+    this.persist();
+    return waveform;
   }
 
   /** F2 合奏：当前世界所有持续型弦逐点平均。 */

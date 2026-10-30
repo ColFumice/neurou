@@ -37,4 +37,14 @@ describe('持续弦独立波形与合奏（v5.45）', () => {
     expect(sustainedWaves.activeCount()).toBe(0);
     expect(sustainedWaves.ensemble().every((value) => value === 0)).toBe(true);
   });
+
+  it('预设与重置可覆盖单根弦波形', () => {
+    sustainedWaves.loadFromIR([stringOf('视觉甲', '视觉')]);
+    const preset = sustainedWaves.applyPreset('视觉甲', '视觉', '方波');
+    expect(preset).toHaveLength(SUSTAINED_WAVE_BANDS);
+    expect(preset.some((value) => value > 0.7)).toBe(true);
+    const reset = sustainedWaves.resetString('视觉甲', '视觉');
+    expect(reset).toHaveLength(SUSTAINED_WAVE_BANDS);
+    expect(Math.max(...reset)).toBeLessThanOrEqual(1);
+  });
 });
