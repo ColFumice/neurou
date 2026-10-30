@@ -254,7 +254,8 @@ await startPage.goto(URL, { waitUntil: 'networkidle' });
 await startPage.waitForSelector('[data-testid="start-screen"]', { timeout: 10000 });
 const startApp = startPage.locator('[data-testid="ink-app"]');
 const startRoot = startPage.locator('[data-testid="start-screen"]');
-check('初始界面出现文本菜单', (await startApp.getAttribute('data-start-open')) === 'true' && (await startRoot.locator('button[data-start-item]').count()) === 9, String(await startRoot.locator('button[data-start-item]').count()));
+check('初始界面出现文本菜单', (await startApp.getAttribute('data-start-open')) === 'true' && (await startRoot.locator('button[data-start-item]').count()) === 4, String(await startRoot.locator('button[data-start-item]').count()));
+check('全屏准星光标', (await startPage.locator('[data-testid="cursor-layer"]').count()) === 1);
 await startRoot.locator('[data-start-item="help"]').hover();
 await startPage.waitForTimeout(150);
 check('初始界面悬停高亮', (await startRoot.locator('[data-start-item="help"]').getAttribute('class'))?.includes('start-item--selected') === true);
@@ -264,9 +265,11 @@ check('鼠标离开后悬停高亮消失', (await startRoot.locator('[data-start
 await startPage.keyboard.press('ArrowDown');
 await startPage.waitForTimeout(120);
 check('初始界面方向键移动', (await startRoot.getAttribute('data-start-selected')) === '1', String(await startRoot.getAttribute('data-start-selected')));
+await startPage.keyboard.press('ArrowRight');
+await startPage.waitForTimeout(180);
+check('初始界面二级文件夹', (await startRoot.getAttribute('data-start-folder')) === '1' && (await startPage.locator('[data-testid="start-folder"] [data-start-child]').count()) === 6);
 await startPage.keyboard.press('Enter');
-await startPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
-await startPage.waitForTimeout(400);
+await startPage.waitForTimeout(1000);
 check('初始界面 Enter 进入世界', (await startApp.getAttribute('data-world-file')) === 'examples/vertical-story.nro', String(await startApp.getAttribute('data-world-file')));
 await startPage.close();
 
@@ -654,11 +657,11 @@ await page.screenshot({ path: 'artifacts/94-string-crossing.png' });
 
 await page.keyboard.press('Escape');
 await page.waitForTimeout(320);
-check('ESC 进入总览', (await attr('data-mode')) === 'overview' && Number(await attr('data-overview-rows')) === 8);
+check('ESC 打开初始界面', (await appAttr('data-start-open')) === 'true' && (await page.locator('[data-testid="start-screen"]').count()) === 1);
 await page.screenshot({ path: 'artifacts/95-string-overview.png' });
 await page.keyboard.press('Escape');
-await page.waitForTimeout(260);
-check('再按 ESC 回到八弦', (await attr('data-mode')) === 'strings');
+await page.waitForTimeout(750);
+check('再次 ESC 回到调律台', (await appAttr('data-start-open')) === 'false' && (await attr('data-mode')) === 'strings');
 
 // ============ 7. 结构编辑：拖动阈值刻度 + 编译闸门 + 撤销/重做 ============
 await page.waitForTimeout(1300); // 结清前面的写回，让 savedText 与磁盘一致
@@ -1069,7 +1072,7 @@ check('F2 退出谱模式回到八弦', (await appAttr('data-screen')) === 'stri
 execFileSync('git', ['checkout', '--', SPECTRA_PATH], { stdio: 'ignore' });
 
 // 默认 tuner 现在也带一条示例谱：首屏 F2 即可进入
-await page.goto('http://127.0.0.1:5188/', { waitUntil: 'networkidle' });
+await page.goto('http://127.0.0.1:5188/?world=examples%2Ftuner.nro&fresh=1', { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]');
 await page.waitForTimeout(900);
 await page.keyboard.press('F2');
@@ -2030,6 +2033,12 @@ await editorPage.waitForTimeout(300);
 const editorOverlay = editorPage.locator('[data-testid="waveform-editor"]');
 check('F6 打开波形/资源编辑器', (await editorApp.getAttribute('data-editor-open')) === 'true' && (await editorOverlay.count()) === 1, String(await editorApp.getAttribute('data-editor-open')));
 check('F6 使用黑色圆角模态', (await editorPage.locator('[data-testid="editor-modal"] .modal-window').count()) === 1);
+const editorModalRect = await editorPage.locator('[data-testid="editor-modal"] .modal-window').evaluate((element) => {
+  const rect = element.getBoundingClientRect();
+  return { width: rect.width, height: rect.height, vw: window.innerWidth, vh: window.innerHeight };
+});
+check('弹窗趋于全屏', editorModalRect.width >= editorModalRect.vw * 0.9 && editorModalRect.height >= editorModalRect.vh * 0.8, JSON.stringify(editorModalRect));
+check('橙色弦簇选中高亮', (await editorPage.locator('[data-testid="string-highlight"]').count()) >= 1);
 check('弹窗打开时底层反色', (await editorPage.locator('.scene-layer--inverted').count()) === 1);
 const selectedBeforeNav = String(await editorOverlay.getAttribute('data-editor-selected'));
 await editorPage.keyboard.press('ArrowDown');
@@ -2088,6 +2097,22 @@ await editorPage.waitForTimeout(200);
 check('Esc 关闭手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'false' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 0);
 await editorPage.close();
 
+// v1.7：记忆模式
+const memoryPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await memoryPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await memoryPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await memoryPage.waitForTimeout(700);
+const memoryApp = memoryPage.locator('[data-testid="ink-app"]');
+await memoryPage.keyboard.press('F12');
+await memoryPage.waitForTimeout(850);
+check('F12 进入记忆模式', (await memoryApp.getAttribute('data-memory-mode')) === 'true' && (await memoryPage.locator('[data-testid="memory-mode"]').count()) === 1);
+await memoryPage.keyboard.press('a');
+await memoryPage.waitForTimeout(200);
+await memoryPage.keyboard.press('F12');
+await memoryPage.waitForTimeout(750);
+check('F12 退出记忆模式', (await memoryApp.getAttribute('data-memory-mode')) === 'false');
+await memoryPage.close();
+
 // v1.6：全屏可绘制流场
 const flowPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await flowPage.goto(`${URL}?world=${encodeURIComponent('examples/flow-field.nro')}&fresh=1`, { waitUntil: 'networkidle' });
@@ -2119,11 +2144,10 @@ await flowPage.mouse.up();
 await flowPage.waitForTimeout(300);
 const flowVersionAfter = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
 check('鼠标拖拽绘制流场', flowVersionAfter > flowVersionBefore, `${flowVersionBefore}→${flowVersionAfter}`);
-await flowPage.keyboard.press('Digit2');
-await flowPage.keyboard.press('ArrowRight');
-await flowPage.keyboard.press('Space');
+const flowVersionKeyBefore = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
+await flowPage.keyboard.press('g');
 await flowPage.waitForTimeout(250);
-check('键盘映射绘制流场', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-brush')) === '1' && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionAfter);
+check('键盘映射绘制流场', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionKeyBefore);
 await flowPage.keyboard.press('Escape');
 await flowPage.waitForTimeout(250);
 check('Esc 退出流场', (await flowApp.getAttribute('data-flow-mode')) === 'false' && (await flowPage.locator('[data-testid="flow-screen"]').count()) === 0);

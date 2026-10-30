@@ -273,6 +273,8 @@ export interface StringFieldProps {
   onRestart?: () => void;
   /** v3.0 重开信号：变化时清本地 sim/拖尾/动作 UI。 */
   resetSignal?: number;
+  /** v1.7：Esc 不再进入总览，而是回到初始界面。 */
+  onExitToStart?: () => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -453,11 +455,14 @@ export function StringField({
   onPerformAction,
   onRestart,
   resetSignal,
+  onExitToStart,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
+  const exitStartRef = useRef(onExitToStart);
+  exitStartRef.current = onExitToStart;
   const waveformEditRef = useRef(onEditWaveform);
   const readOnlyRef = useRef(new Set(readOnlyIds ?? []));
   readOnlyRef.current = new Set(readOnlyIds ?? []);
@@ -2411,6 +2416,10 @@ export function StringField({
         }
         if (linkTargetIndex !== null) {
           clearLinkTarget();
+          return;
+        }
+        if (modeNow === 'strings' && exitStartRef.current) {
+          exitStartRef.current();
           return;
         }
         toggleOverview();

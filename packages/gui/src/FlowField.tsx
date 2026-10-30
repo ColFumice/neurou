@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 const COLS = 64;
 const ROWS = 36;
-const CELL = 18;
 const LEVELS = 9;
 const STORAGE_PREFIX = 'neurou.flow:';
-const RADII = [1.2, 2.4, 4.2];
+const RADIUS = 2.1;
 
 interface FlowFieldProps {
   worldFile: string;
@@ -54,15 +53,32 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fieldRef = useRef<Float32Array>(loadField(worldFile));
   const cursorRef = useRef({ x: COLS / 2, y: ROWS / 2 });
-  const radiusRef = useRef(1);
-  const eraseRef = useRef(false);
-  const [brush, setBrush] = useState(1);
+  const audioRef = useRef<AudioContext | null>(null);
   const [version, setVersion] = useState(0);
+
+  const playSound = (x: number, y: number): void => {
+    try {
+      const context = audioRef.current ?? new AudioContext();
+      audioRef.current = context;
+      void context.resume();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 160 + ((1 - y / ROWS) * 520 + (x / COLS) * 120);
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.028, context.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.6);
+    } catch {
+      /* 无音频上下文时仍可绘制 */
+    }
+  };
 
   const paint = (x: number, y: number): void => {
     const field = fieldRef.current;
-    const radius = RADII[radiusRef.current]!;
-    const color = eraseRef.current ? -0.32 : 0.32;
+    const radius = RADIUS;
     const cx = Math.round(x);
     const cy = Math.round(y);
     const reach = Math.ceil(radius);
@@ -71,7 +87,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         const dx = gx - x;
         const dy = gy - y;
         const weight = Math.exp(-(dx * dx + dy * dy) / (2 * radius * radius));
-        field[gy * COLS + gx] = Math.max(0, Math.min(1, (field[gy * COLS + gx] ?? 0.5) + color * weight));
+        field[gy * COLS + gx] = Math.max(0, Math.min(1, (field[gy * COLS + gx] ?? 0.5) + 0.19 * weight));
       }
     }
     saveField(worldFile, field);
@@ -99,14 +115,20 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         return;
       }
       if (event.code === 'KeyX') {
-        event.preventDefault();
-        eraseRef.current = !eraseRef.current;
         return;
       }
-      if (event.code === 'Digit1' || event.code === 'Digit2' || event.code === 'Digit3') {
+      const rows = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+      const char = event.key.length === 1 ? event.key.toLowerCase() : '';
+      const rowIndex = rows.findIndex((row) => row.includes(char));
+      if (rowIndex >= 0) {
         event.preventDefault();
-        radiusRef.current = Number(event.code.slice(-1)) - 1;
-        setBrush(radiusRef.current);
+        event.stopImmediatePropagation();
+        const colIndex = rows[rowIndex]!.indexOf(char);
+        const x = ((colIndex + 0.5) / rows[rowIndex]!.length) * COLS;
+        const y = ((rowIndex + 0.5) / rows.length) * ROWS;
+        cursorRef.current = { x, y };
+        paint(x, y);
+        playSound(x, y);
         return;
       }
       const step = event.shiftKey ? 4 : 1;
@@ -115,8 +137,10 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       else if (event.code === 'ArrowRight') cursor.x = Math.min(COLS - 1, cursor.x + step);
       else if (event.code === 'ArrowUp') cursor.y = Math.max(0, cursor.y - step);
       else if (event.code === 'ArrowDown') cursor.y = Math.min(ROWS - 1, cursor.y + step);
-      else if (event.code === 'Space' || event.code === 'Enter') paint(cursor.x, cursor.y);
-      else return;
+      else if (event.code === 'Space' || event.code === 'Enter') {
+        paint(cursor.x, cursor.y);
+        playSound(cursor.x, cursor.y);
+      } else return;
       event.preventDefault();
       event.stopImmediatePropagation();
     };
@@ -176,18 +200,17 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       const field = fieldRef.current;
 
       for (let level = 0; level < LEVELS; level += 1) {
-        const value = 0.08 + (level / (LEVELS - 1)) * 0.84;
-        const hue = 180 + level * 18;
-        ctx.strokeStyle = `hsla(${hue}, 92%, ${58 + (level % 3) * 6}%, ${0.68 - level * 0.03})`;
-        ctx.lineWidth = 1.35;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = `hsla(${hue}, 95%, 65%, 0.55)`;
+        const value = 0.08 + (level / (LEVELS - 1)) * 0.84;        const hue = 180 + level * 18;
+        ctx.strokeStyle = `hsla(${hue}, 92%, ${60 + (level % 3) * 6}%, ${0.72 - level * 0.03})`;
+        ctx.lineWidth = 2 + 1.35 * (0.5 + 0.5 * Math.sin(t * 2.4 + level * 1.1));
+        ctx.shadowBlur = 13;
+        ctx.shadowColor = `hsla(${hue}, 95%, 65%, 0.62)`;
         ctx.beginPath();
         const warp = (gx: number, gy: number): number =>
           sample(
             field,
-            gx + Math.sin(gy * 0.19 + t * 0.9 + level) * 1.8,
-            gy + Math.cos(gx * 0.16 - t * 0.7 + level) * 1.6,
+            gx + Math.sin(gy * 0.24 + t * 1.16 + level) * 3.4,
+            gy + Math.cos(gx * 0.2 - t * 0.94 + level) * 2.8,
           );
         for (let gy = 0; gy < ROWS - 1; gy += 1) {
           for (let gx = 0; gx < COLS - 1; gx += 1) {
@@ -233,24 +256,24 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
               add(edges.bottom, edges.left);
             }
             for (const [p, q] of segments) {
-              ctx.moveTo(p.x * cellW, p.y * cellH);
-              ctx.lineTo(q.x * cellW, q.y * cellH);
+              const x1 = p.x * cellW;
+              const y1 = p.y * cellH;
+              const x2 = q.x * cellW;
+              const y2 = q.y * cellH;
+              const mx = (x1 + x2) / 2;
+              const my = (y1 + y2) / 2;
+              const nx = -(y2 - y1);
+              const ny = x2 - x1;
+              const length = Math.hypot(nx, ny) || 1;
+              const bend = Math.min(cellW, cellH) * 0.22 * Math.sin(t * 1.8 + gx * 0.11 + gy * 0.07);
+              ctx.moveTo(x1, y1);
+              ctx.quadraticCurveTo(mx + (nx / length) * bend, my + (ny / length) * bend, x2, y2);
             }
           }
         }
         ctx.stroke();
         ctx.shadowBlur = 0;
       }
-
-      const cursor = cursorRef.current;
-      const cx = (cursor.x + 0.5) * cellW;
-      const cy = (cursor.y + 0.5) * cellH;
-      const radius = RADII[radiusRef.current]! * Math.min(cellW, cellH) * 1.6;
-      ctx.strokeStyle = eraseRef.current ? 'rgba(255,120,120,0.8)' : 'rgba(240,250,255,0.75)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.stroke();
     };
     raf = window.requestAnimationFrame(draw);
     return () => {
@@ -268,7 +291,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   };
 
   return (
-    <div className="flow-screen" data-testid="flow-screen" data-flow-version={version} data-flow-brush={brush}>
+    <div className="flow-screen" data-testid="flow-screen" data-flow-version={version}>
       <canvas
         ref={canvasRef}
         className="flow-screen__canvas"
@@ -279,6 +302,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
           const point = pointerToCell(event);
           cursorRef.current = point;
           paint(point.x, point.y);
+          playSound(point.x, point.y);
         }}
         onPointerMove={(event) => {
           if (event.buttons === 0) return;
@@ -289,8 +313,8 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         onContextMenu={(event) => event.preventDefault()}
       />
       <div className="flow-screen__hud">
-        <strong>流场画布</strong>
-        <span>拖鼠标绘制 · 方向键移动 · 空格落笔 · 1/2/3 笔刷 · X 擦除 · S 保存 · R 重置 · F10/Esc 返回</span>
+        <strong>声场画布</strong>
+        <span>鼠标拖拽绘制 · 方向键移动 · 空格落笔 · 字母键映射声场 · S 保存 · R 重置 · F10/Esc 返回</span>
       </div>
     </div>
   );

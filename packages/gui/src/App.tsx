@@ -49,6 +49,9 @@ import { RuleEditor } from './RuleEditor.js';
 import { Modal } from './Modal.js';
 import { StartScreen, type StartItem } from './StartScreen.js';
 import { FlowField } from './FlowField.js';
+import { CursorLayer } from './CursorLayer.js';
+import { StringHighlight } from './StringHighlight.js';
+import { MemoryMode } from './MemoryMode.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -183,14 +186,21 @@ const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 
 const START_ITEMS: StartItem[] = [
   { id: 'tuner', label: '进入调律台', note: '八弦 · 默认', file: '' },
-  { id: 'story', label: '潮汐之间', note: '垂直故事', file: 'examples/vertical-story.nro' },
-  { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
-  { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
-  { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
-  { id: 'flow', label: '等值线流场', note: 'F10 全屏画布', file: 'examples/flow-field.nro' },
-  { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
+  {
+    id: 'worlds',
+    label: '世界',
+    note: '6 个',
+    children: [
+      { id: 'story', label: '潮汐之间', note: '垂直故事', file: 'examples/vertical-story.nro' },
+      { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
+      { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
+      { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
+      { id: 'flow', label: '等值线流场', note: '全屏声场', file: 'examples/flow-field.nro' },
+      { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
+    ],
+  },
   { id: 'graph', label: '章节路线', note: 'F9', file: '' },
-  { id: 'help', label: '手势帮助', note: '?', file: '' },
+  { id: 'help', label: '操作说明', note: '完整流程', file: '' },
 ];
 
 function chapterLabel(file: string): string {
@@ -462,6 +472,9 @@ export function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [flowMode, setFlowMode] = useState(() => /flow-field\.nro$/.test(WORLD_FILE));
   const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
+  const [startLeaving, setStartLeaving] = useState(false);
+  const [startEntering, setStartEntering] = useState(false);
+  const [memoryMode, setMemoryMode] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
@@ -815,7 +828,53 @@ export function App() {
     return () => window.removeEventListener('keydown', onFlowKey, true);
   }, [flowMode]);
 
-  // v5.7/v5.27：视觉端口 → GLSLBackend；多个端口各编译一个 canvas。
+  // v1.7：F12 记忆模式；其他元素界面切换时自动退出。
+  useEffect(() => {
+    const onMemoryKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'F12' || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (flowMode || startOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setMemoryMode((value) => !value);
+    };
+    window.addEventListener('keydown', onMemoryKey, true);
+    return () => window.removeEventListener('keydown', onMemoryKey, true);
+  }, [flowMode, startOpen]);
+
+  useEffect(() => {
+    if (
+      memoryMode &&
+      (screen !== 'strings' ||
+        editorOpen ||
+        ruleOpen ||
+        helpOpen ||
+        chapterGraphOpen ||
+        sceneMenuOpen ||
+        slotMenuOpen ||
+        flowMode)
+    ) {
+      setMemoryMode(false);
+    }
+  }, [memoryMode, screen, editorOpen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen, flowMode]);
+
+  const chooseStart = (item: StartItem): void => {
+    if (startLeaving) return;
+    setStartLeaving(true);
+    window.setTimeout(() => {
+      setStartOpen(false);
+      setStartLeaving(false);
+      if (item.id === 'graph') setChapterGraphOpen(true);
+      else if (item.id === 'help') setHelpOpen(true);
+      else if (item.file) window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
+    }, 470);
+  };
+
+  const enterStart = (): void => {
+    if (startOpen) return;
+    setStartEntering(true);
+    setStartOpen(true);
+    window.setTimeout(() => setStartEntering(false), 520);
+  };
   useEffect(() => {
     const visualPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '视觉');
     if (visualPorts.length === 0 || !universe) {
@@ -1498,6 +1557,7 @@ export function App() {
       data-save-error-line={saveErrorLine ?? ''}
       data-help-open={helpOpen ? 'true' : 'false'}
       data-flow-mode={flowMode ? 'true' : 'false'}
+      data-memory-mode={memoryMode ? 'true' : 'false'}
       data-start-open={startOpen ? 'true' : 'false'}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
@@ -1539,32 +1599,35 @@ export function App() {
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
-          onChoose={(item) => {
-            if (item.id === 'graph') {
-              setStartOpen(false);
-              setChapterGraphOpen(true);
-              return;
-            }
-            if (item.id === 'help') {
-              setStartOpen(false);
-              setHelpOpen(true);
-              return;
-            }
-            if (!item.file) {
-              setStartOpen(false);
-              return;
-            }
-            window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
-          }}
+          leaving={startLeaving}
+          entering={startEntering}
+          onChoose={chooseStart}
         />
       ) : null}
       {helpOpen ? (
         <Modal onClose={() => setHelpOpen(false)} className="help-modal" testId="help-modal">
           <div className="help-overlay" data-testid="help-overlay">
-            <div className="help-overlay__title">手势</div>
-            <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
-            <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则 · F9 章节路线</div>
-            <div>F10 流场画布 · Space 预览 · Ctrl+Z 撤销 · ? 帮助</div>
+            <div className="help-overlay__title">操作说明 · 从世界到发布</div>
+            <div className="help-section">
+              <div className="help-section__title">1 · 进入世界</div>
+              <div>初始界面 ↑/↓ 选择，→ 展开「世界」文件夹，Enter 进入；Esc 直接回默认调律台。</div>
+            </div>
+            <div className="help-section">
+              <div className="help-section__title">2 · 调律弦</div>
+              <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 按住拨弦 · F2 谱 · F3 关系谱。</div>
+            </div>
+            <div className="help-section">
+              <div className="help-section__title">3 · 编辑元素</div>
+              <div>F6 波形/资源 · F7 规则/动作 · F9 章节路线 · 弹窗内方向键直接选择。</div>
+            </div>
+            <div className="help-section">
+              <div className="help-section__title">4 · 流场</div>
+              <div>F10 进入全屏声场画布：鼠标拖拽、方向键移动、空格落笔、字母键映射声场，F10/Esc 返回。</div>
+            </div>
+            <div className="help-section">
+              <div className="help-section__title">5 · 记忆与发布</div>
+              <div>F12 记忆模式录制当前界面演奏为循环声部，切换界面自动退出。完成后 pnpm build && pnpm release。</div>
+            </div>
             <div
               data-modal-item
               data-modal-no-arrow
@@ -1903,6 +1966,9 @@ export function App() {
           </div>
         </>
       ) : null}
+      <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
+      <StringHighlight />
+      <CursorLayer />
     </div>
   );
 
@@ -2411,6 +2477,9 @@ export function App() {
         onPerformAction={performAction}
         onRestart={restartWorld}
         resetSignal={playReset}
+        onExitToStart={
+          helpOpen || editorOpen || ruleOpen || chapterGraphOpen ? undefined : enterStart
+        }
       />
     ),
     false,

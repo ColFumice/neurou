@@ -70,8 +70,14 @@ await page.waitForTimeout(180);
 const kindAfterTab = await attr('data-kind');
 await page.keyboard.press('Escape');
 await page.waitForTimeout(320);
-const overview = { mode: await attr('data-mode'), rows: Number(await attr('data-overview-rows')) };
-await page.screenshot({ path: 'artifacts/62-prod-overview.png' });
+const start = {
+  opened: (await app.getAttribute('data-start-open')) === 'true',
+  visible: (await page.locator('[data-testid="start-screen"]').count()) === 1,
+};
+await page.screenshot({ path: 'artifacts/62-prod-start.png' });
+await page.keyboard.press('Escape');
+await page.waitForTimeout(780);
+start.closed = (await app.getAttribute('data-start-open')) === 'false';
 
 const audioState = await attr('data-audio');
 const rms = await page.evaluate(() => window.__neurouString?.rms?.() ?? -1);
@@ -90,7 +96,7 @@ console.log(
       prodSave,
       threshold,
       kindAfterTab,
-      overview,
+      start,
       audioState,
       rms,
       errors,
@@ -117,8 +123,9 @@ process.exitCode =
   threshold.resonant === 'true' &&
   Math.abs(Number(threshold.value) - 25) <= 0.6 &&
   kindAfterTab === '视觉' &&
-  overview.mode === 'overview' &&
-  overview.rows === 8 &&
+  start.opened &&
+  start.visible &&
+  start.closed &&
   errors.length === 0
     ? 0
     : 1;
