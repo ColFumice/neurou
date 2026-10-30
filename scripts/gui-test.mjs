@@ -553,6 +553,13 @@ check(
   Number(await page.evaluate(() => window.__neurouString.sustainedStrings())) === 0 && Number(await attr('data-plucks')) === sustainPlucks,
   String(await attr('data-plucks')),
 );
+await page.keyboard.down('a');
+await page.keyboard.down('s');
+await page.waitForTimeout(260);
+check('持续型：多键同时按住为复音', Number(await page.evaluate(() => window.__neurouString.sustainedStrings())) >= 2, String(await page.evaluate(() => window.__neurouString.sustainedStrings())));
+await page.keyboard.up('a');
+await page.keyboard.up('s');
+await page.waitForTimeout(220);
 await page.keyboard.press('Alt+1');
 await page.waitForTimeout(200);
 check('持续型：Alt+1 应用正弦波形预设', (await page.evaluate(() => window.__neurouString.focusWaveSpread())) > 20, String(await page.evaluate(() => window.__neurouString.focusWaveSpread())));
@@ -1744,6 +1751,7 @@ check('GLSL 编译成功', (await glslApp.getAttribute('data-glsl-status')) === 
 await glslPage.keyboard.press('Space');
 await glslPage.waitForTimeout(300);
 check('预览蒙版出现多端口 GLSL canvas', (await glslPage.locator('[data-testid="preview-glsl"]').count()) === 2, String(await glslPage.locator('[data-testid="preview-glsl"]').count()));
+check('GLSL 预览为两 pass（FBO + 后处理）', (await glslPage.locator('[data-testid="preview-glsl"][data-glsl-passes="2"]').count()) === 2, String(await glslPage.locator('[data-testid="preview-glsl"][data-glsl-passes="2"]').count()));
 await glslPage.close();
 
 // v5.8：音频端口 → Faust 源码适配

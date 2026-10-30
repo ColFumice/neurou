@@ -79,6 +79,61 @@ export function GlslCanvas({
     const timeLocation = gl.getUniformLocation(program, artifact.timeUniform);
     const textureLocation = gl.getUniformLocation(program, artifact.textureUniform);
     const valueLocations = artifact.bindings.map((binding) => gl.getUniformLocation(program, binding.uniform));
+
+    // v6.0：第二 pass——场景先渲染到 FBO，再做一个暗角/颗粒后处理。
+    const postVertex = compile(
+      gl.VERTEX_SHADER,
+      `#version 300 es
+in vec2 aPosition;
+out vec2 vUv;
+void main() {
+  vUv = aPosition * 0.5 + 0.5;
+  gl_Position = vec4(aPosition, 0.0, 1.0);
+}`,
+    );
+    const postFragment = compile(
+      gl.FRAGMENT_SHADER,
+      `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform float uTime;
+void main() {
+  vec4 color = texture(uScene, vUv);
+  vec2 d = vUv - 0.5;
+  float vignette = 1.0 - dot(d, d) * 0.55;
+  float grain = (fract(sin(dot(vUv * vec2(1024.0 + uTime, 768.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.035;
+  outColor = vec4(color.rgb * vignette + grain, color.a);
+}`,
+    );
+    const postProgram = gl.createProgram();
+    if (postVertex && postFragment && postProgram) {
+      gl.attachShader(postProgram, postVertex);
+      gl.attachShader(postProgram, postFragment);
+      gl.linkProgram(postProgram);
+    }
+    const postSceneLocation = postProgram ? gl.getUniformLocation(postProgram, 'uScene') : null;
+    const postTimeLocation = postProgram ? gl.getUniformLocation(postProgram, 'uTime') : null;
+    const sceneTexture = gl.createTexture();
+    const sceneFramebuffer = gl.createFramebuffer();
+    let sceneWidth = 0;
+    let sceneHeight = 0;
+    const ensureSceneTarget = (width: number, height: number): void => {
+      if (!sceneTexture || !sceneFramebuffer || (sceneWidth === width && sceneHeight === height)) return;
+      sceneWidth = width;
+      sceneHeight = height;
+      gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFramebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTexture, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    };
+
     const start = performance.now();
     let raf = 0;
     let disposed = false;
@@ -108,6 +163,14 @@ export function GlslCanvas({
         canvas.height = height;
       }
       gl.viewport(0, 0, width, height);
+      // pass 1：场景进 FBO
+      ensureSceneTarget(width, height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFramebuffer);
+      gl.useProgram(program);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      const scenePosition = gl.getAttribLocation(program, 'aPosition');
+      gl.enableVertexAttribArray(scenePosition);
+      gl.vertexAttribPointer(scenePosition, 2, gl.FLOAT, false, 0, 0);
       if (timeLocation) gl.uniform1f(timeLocation, (now - start) / 1000);
       if (textureLocation && texture) {
         gl.activeTexture(gl.TEXTURE0);
@@ -121,6 +184,22 @@ export function GlslCanvas({
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      // pass 2：后处理到屏幕
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (postProgram && sceneTexture) {
+        gl.useProgram(postProgram);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const postPosition = gl.getAttribLocation(postProgram, 'aPosition');
+        gl.enableVertexAttribArray(postPosition);
+        gl.vertexAttribPointer(postPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
+        if (postSceneLocation) gl.uniform1i(postSceneLocation, 0);
+        if (postTimeLocation) gl.uniform1f(postTimeLocation, (now - start) / 1000);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
@@ -133,8 +212,13 @@ export function GlslCanvas({
       gl.deleteShader(fragment);
       gl.deleteBuffer(buffer);
       if (texture) gl.deleteTexture(texture);
+      if (sceneTexture) gl.deleteTexture(sceneTexture);
+      if (sceneFramebuffer) gl.deleteFramebuffer(sceneFramebuffer);
+      if (postProgram) gl.deleteProgram(postProgram);
+      if (postVertex) gl.deleteShader(postVertex);
+      if (postFragment) gl.deleteShader(postFragment);
     };
   }, [artifact]);
 
-  return <canvas ref={canvasRef} className="preview-glsl" data-testid="preview-glsl" aria-hidden="true" />;
+  return <canvas ref={canvasRef} className="preview-glsl" data-testid="preview-glsl" data-glsl-passes="2" aria-hidden="true" />;
 }
