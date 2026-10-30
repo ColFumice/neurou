@@ -265,6 +265,8 @@ export interface StringFieldProps {
   onRemoveString?: (focusId: string) => void;
   /** v5.43：持续型弦波形写入世界 IR（App debounce 写回 .nro）。 */
   onEditWaveform?: (stringId: string, waveform: number[]) => void;
+  /** v5.50：模块弦 id，画成更淡的只读线。 */
+  readOnlyIds?: readonly string[];
   /** v3.0 可玩层：执行一个世界动作（App 排队到下一拍）。 */
   onPerformAction?: (id: string) => void;
   /** v3.0 可玩层：结局后重开世界。 */
@@ -445,6 +447,7 @@ export function StringField({
   onAddString,
   onRemoveString,
   onEditWaveform,
+  readOnlyIds,
   onPerformAction,
   onRestart,
   resetSignal,
@@ -454,6 +457,8 @@ export function StringField({
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
   const waveformEditRef = useRef(onEditWaveform);
+  const readOnlyRef = useRef(new Set(readOnlyIds ?? []));
+  readOnlyRef.current = new Set(readOnlyIds ?? []);
   const thresholdEditRef = useRef(onEditThreshold);
   const cycleRef = useRef(onCycleString);
   const couplingEditRef = useRef(onEditCoupling);
@@ -1130,11 +1135,12 @@ export function StringField({
       const isLinkTarget = linkTargetIndex === index;
       const width = Math.max(profile.restWidth * OTHER_WIDTH_SCALE, isLinkTarget ? 1.6 : 0);
       const baseAlpha = OTHER_ALPHA + ((index % 3) - 1) * OTHER_ALPHA_STEP;
-      const alpha = isLinkTarget
+      const readonly = readOnlyRef.current.has(lanesNow[index]?.id ?? '');
+      const alpha = (isLinkTarget
         ? 0.55
         : amplitude > 1
           ? Math.min(0.34, baseAlpha + (amplitude / Math.max(1, profile.maxPull)) * 0.38)
-          : baseAlpha;
+          : baseAlpha) * (readonly ? 0.45 : 1);
       ctx.strokeStyle = rgba(ink, alpha);
       ctx.lineWidth = width;
       ctx.lineCap = 'round';
@@ -1476,6 +1482,14 @@ export function StringField({
         if (hoverCouplingNow && Math.abs(labelY - hoverCouplingNow.midY) < LABEL_FONT_PX) continue;
         ctx.fillStyle = rgba(ink, i === focusIdx ? 0.55 : 0.2);
         ctx.fillText(lane.name, LABEL_X, labelY);
+        if (readOnlyRef.current.has(lane.id)) {
+          // v5.50：只读弦名后一个极淡小点。
+          const width = ctx.measureText(lane.name).width;
+          ctx.fillStyle = rgba(ink, 0.28);
+          ctx.beginPath();
+          ctx.arc(LABEL_X + width + 4, labelY, 1.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.textAlign = 'center';
     }

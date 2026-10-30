@@ -1960,6 +1960,7 @@ export function App() {
         onInject={onInject}
         onEditThreshold={onEditThreshold}
         onEditWaveform={onEditWaveform}
+        readOnlyIds={[...moduleStringIds]}
         onCycleString={onCycleString}
         onEditCoupling={onEditCoupling}
         onToggleCoupling={onToggleCoupling}
