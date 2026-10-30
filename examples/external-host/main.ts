@@ -1,31 +1,22 @@
 /**
- * 外部 Host 示例（v6.1）
+ * 外部 Host SDK 示例（v6.20）
  *
  * 用法（仓库根目录）：
  *   pnpm tsx examples/external-host/main.ts
  *
- * 这个文件只依赖 @neurou/core / @neurou/engine，不读 GUI 内部状态。
+ * 只依赖 @neurou/core / @neurou/engine，不读 GUI 内部状态。
  */
 import { readFileSync } from 'node:fs';
-import { compileText } from '@neurou/core';
-import { createEngine } from '@neurou/engine';
+import { createExternalHost } from './sdk.js';
 
 const file = 'examples/tuner.nro';
-const compiled = compileText(readFileSync(file, 'utf8'), file);
-if (!compiled.ok) {
-  for (const diagnostic of compiled.diagnostics.errors) {
-    console.error(diagnostic.code, diagnostic.message);
-  }
-  process.exit(1);
-}
-
-const engine = createEngine(compiled.ir, { seed: 7 });
-const before = engine.toHostSnapshot();
-engine.inject('视觉.色温', 42);
-engine.step();
-const after = engine.toHostSnapshot();
-const restored = createEngine(compiled.ir, { seed: 99 });
-const restoredOk = restored.restoreHostSnapshot(after);
+const host = createExternalHost(readFileSync(file, 'utf8'), file, { seed: 7 });
+const before = host.snapshot();
+host.inject('色温', 42);
+host.step();
+const after = host.snapshot();
+const restored = createExternalHost(readFileSync(file, 'utf8'), file, { seed: 99 });
+const restoredOk = restored.restore(after);
 
 console.log(
   JSON.stringify(
@@ -33,13 +24,11 @@ console.log(
       abi: after.abi,
       world: after.description.name,
       version: after.description.version,
-      frames: [
-        { tick: before.description.tick, values: before.values },
-        { tick: after.description.tick, values: after.values },
-      ],
-      scenes: after.description.scenes,
       ports: after.description.ports,
-      restored: { ok: restoredOk, tick: restored.state.tick, color: restored.get('视觉.色温') },
+      scenes: after.description.scenes,
+      before: { tick: before.description.tick, values: before.values },
+      after: { tick: after.description.tick, values: after.values },
+      restored: { ok: restoredOk, tick: restored.snapshot().description.tick, color: restored.engine.get('色温') },
     },
     null,
     2,
