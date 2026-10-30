@@ -565,9 +565,9 @@ export function StringField({
     const keys = layoutKeyboard();
     const focusDispBuf = new Float32Array(STRING_N);
     /** v5.39：持续波形平滑显示缓存 + 拖尾帧。 */
-    const sustainedDisplayWaves = new Map<StringKind, Float32Array>();
+    const sustainedDisplayWaves = new Map<string, Float32Array>();
     const sustainedDrawTrail: Float32Array[] = [];
-    let sustainedTrailKind: StringKind | null = null;
+    let sustainedTrailKind: string | null = null;
     let sustainedWaveFrameAt = 0;
     let lastWaveCommitAt = 0;
     const trailDispBuf = new Float32Array(STRING_N);
@@ -1158,14 +1158,16 @@ export function StringField({
       const geom = focusGeom();
       const sustainedFocus = interactionOf(focusIdx) === '持续';
       const sustainedKind = kindOf(focusIdx);
+      const sustainedLane = laneAt(focusIdx);
+      const sustainedId = sustainedLane?.id ?? sustainedKind;
       const sustainedProfile = profileOf(focusIdx);
-      let sustainedWave: readonly number[] | Float32Array = sustainedWaves.get(sustainedKind);
+      let sustainedWave: readonly number[] | Float32Array = sustainedWaves.getFor(sustainedId, sustainedKind);
       if (sustainedFocus) {
-        let display = sustainedDisplayWaves.get(sustainedKind);
+        let display = sustainedDisplayWaves.get(sustainedId);
         if (!display) {
           display = new Float32Array(sustainedWave.length);
           display.set(sustainedWave);
-          sustainedDisplayWaves.set(sustainedKind, display);
+          sustainedDisplayWaves.set(sustainedId, display);
         }
         if (now - sustainedWaveFrameAt > 8) {
           const dt = Math.min(0.1, Math.max(0.008, (now - sustainedWaveFrameAt) / 1000));
@@ -1612,9 +1614,10 @@ export function StringField({
         const sustainedDraw = interactionOf(focusIdx) === '持续';
         if (sustainedDraw) {
           const kind = kindOf(focusIdx);
-          if (sustainedTrailKind !== kind) {
+          const laneId = laneAt(focusIdx)?.id ?? kind;
+          if (sustainedTrailKind !== laneId) {
             sustainedDrawTrail.length = 0;
-            sustainedTrailKind = kind;
+            sustainedTrailKind = laneId;
           }
           sustainedDrawTrail.unshift(disp.slice());
           if (sustainedDrawTrail.length > 9) sustainedDrawTrail.pop();
@@ -2066,13 +2069,14 @@ export function StringField({
           startedAt: performance.now(),
         };
         const kind = kindOf(focusIdx);
+        const laneId = laneAt(focusIdx)?.id ?? kind;
         const profile = profileOf(focusIdx);
         const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
         const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
-        sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
-        commitWaveform(sustainedWaves.get(kind), true);
+        sustainedWaves.editAtString(laneId, kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+        commitWaveform(sustainedWaves.getFor(laneId, kind), true);
         mouseSustainId = audio.startSustainedSpectrum(
-          sustainedWaves.get(kind),
+          sustainedWaves.getFor(laneId, kind),
           clamp(point.x / LOGICAL_W, 0, 1),
           clamp(point.y / LOGICAL_H, 0, 1),
           true,
@@ -2098,12 +2102,13 @@ export function StringField({
         mouseHold.y = point.y;
         if (mouseSustainId !== null) {
           const kind = kindOf(focusIdx);
+          const laneId = laneAt(focusIdx)?.id ?? kind;
           const profile = profileOf(focusIdx);
           const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
           const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
-          const waveBands = sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+          const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
           commitWaveform(waveBands);
-          audio.updateSustainedSpectrum(mouseSustainId, sustainedWaves.get(kind), true, true);
+          audio.updateSustainedSpectrum(mouseSustainId, sustainedWaves.getFor(laneId, kind), true, true);
           audio.updateSustainedTone(mouseSustainId, clamp(point.x / LOGICAL_W, 0, 1), clamp(point.y / LOGICAL_H, 0, 1));
         }
         updateHeldState();
@@ -2159,7 +2164,8 @@ export function StringField({
       setPullingUi(false);
       // v5.36：持续型鼠标松手只停止持续声源，不做拨弦判定。
       if (mouseSustainId !== null) {
-        commitWaveform(sustainedWaves.get(kindOf(focusIdx)), true);
+        const kind = kindOf(focusIdx);
+        commitWaveform(sustainedWaves.getFor(laneAt(focusIdx)?.id ?? kind, kind), true);
         audio.stopSustainedSpectrum(mouseSustainId);
         mouseSustainId = null;
         mouseHold = null;
@@ -2398,11 +2404,12 @@ export function StringField({
         });
         if (interaction === '持续') {
           const kind = kindOf(focusIdx);
+          const laneId = laneAt(focusIdx)?.id ?? kind;
           const amp = clamp(amplitude / Math.max(1, profile.maxPull), 0, 1);
-          const waveBands = sustainedWaves.editAt(kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
+          const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
           commitWaveform(waveBands, true);
           const id = audio.startSustainedSpectrum(
-            sustainedWaves.get(kind),
+            sustainedWaves.getFor(laneId, kind),
             clamp(key.cx / LOGICAL_W, 0, 1),
             clamp(key.cy / LOGICAL_H, 0, 1),
             true,
