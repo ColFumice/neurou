@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { compileProject, ProjectError, formatDiagnostic, projectGraph, serialize, type WorldIR } from '@neurou/core';
 import { Engine, createEngine } from '@neurou/engine';
+import { scaffoldProject, type ScaffoldTemplate } from './scaffold.js';
 import {
   ANSI,
   modelLabel,
@@ -27,7 +28,8 @@ const HELP = `neurou ${VERSION} · 雨若
   neurou describe <文件.nro>            打印 Engine Host 摘要（JSON）
   neurou fmt <文件.nro> [--write] [--out 路径]
                                         把图重新排成规范 .nro（默认打印到 stdout）
-  neurou init <名字>                     生成一个可运行的世界模板
+  neurou init <名字> [--template single|project|assets] [--out 路径]
+                                         生成可运行模板
   neurou help                            这张帮助
 
 sim / run 选项：
@@ -303,9 +305,17 @@ async function main(): Promise<void> {
     }
     case 'init': {
       const name = args.file ?? '新世界';
-      const path = args.flags['out'] && typeof args.flags['out'] === 'string' ? args.flags['out'] : `${name}.nro`;
-      writeFileSync(path, TEMPLATE.replaceAll('{{名字}}', name), 'utf8');
-      console.log(`已生成 ${resolve(path)}，用 neurou run 打开它。`);
+      const templateFlag = typeof args.flags['template'] === 'string' ? args.flags['template'] : 'single';
+      if (templateFlag !== 'single' && templateFlag !== 'project' && templateFlag !== 'assets') {
+        console.error(`不认识的模板「${templateFlag}」。可用：single、project、assets。`);
+        process.exitCode = 2;
+        return;
+      }
+      const out = typeof args.flags['out'] === 'string' ? args.flags['out'] : undefined;
+      const result = scaffoldProject(name, { template: templateFlag as ScaffoldTemplate, ...(out ? { out } : {}) });
+      console.log(`已生成 ${resolve(result.root)}`);
+      for (const file of result.files) console.log(`  ${file}`);
+      console.log('用 neurou run 打开入口世界；project 模板入口是 world.nro。');
       return;
     }
     default:
