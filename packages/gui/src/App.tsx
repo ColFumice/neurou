@@ -43,6 +43,7 @@ import { GlslCanvas } from './GlslCanvas.js';
 import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import { FaustFallback } from './faustAudio.js';
 import { FaustWasmHost } from './faustWasm.js';
+import { sustainedWaves } from './sustainedWave.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -195,6 +196,7 @@ function seedFromUrl(): number {
 
 const WORLD_FILE = worldFileFromUrl();
 const INITIAL_SEED = seedFromUrl();
+sustainedWaves.configure(WORLD_FILE);
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 

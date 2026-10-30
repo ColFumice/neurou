@@ -24,9 +24,43 @@ function defaultWave(kind: StringKind): number[] {
 
 class SustainedWaveBank {
   private readonly waves = new Map<StringKind, number[]>();
+  private storageKey: string | null = null;
 
   constructor() {
     for (const kind of SUSTAINED_KINDS) this.waves.set(kind, defaultWave(kind));
+  }
+
+  /** v5.42：按世界文件持久化到 localStorage；同一世界刷新后继续使用。 */
+  configure(worldFile: string): void {
+    if (typeof window === 'undefined') return;
+    this.storageKey = `neurou:sustained-waves:${worldFile}`;
+    try {
+      const raw = window.localStorage.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Record<StringKind, number[]>>;
+      for (const kind of SUSTAINED_KINDS) {
+        const bands = parsed[kind];
+        if (!Array.isArray(bands) || bands.length !== SUSTAINED_WAVE_BANDS) continue;
+        if (!bands.every((value) => typeof value === 'number' && Number.isFinite(value))) continue;
+        this.waves.set(kind, bands.map((value) => Math.max(0, Math.min(1, value))));
+      }
+    } catch {
+      /* 隐私模式/坏数据：退回默认波形 */
+    }
+  }
+
+  reset(): void {
+    for (const kind of SUSTAINED_KINDS) this.waves.set(kind, defaultWave(kind));
+    this.persist();
+  }
+
+  private persist(): void {
+    if (typeof window === 'undefined' || !this.storageKey) return;
+    try {
+      window.localStorage.setItem(this.storageKey, JSON.stringify(Object.fromEntries(this.waves)));
+    } catch {
+      /* 配额满/隐私模式：静默 */
+    }
   }
 
   get(kind: StringKind): readonly number[] {
@@ -45,6 +79,7 @@ class SustainedWaveBank {
       bands[i] = (bands[i] ?? 0.5) * (1 - weight * 0.55) + target * weight * 0.55;
     }
     this.waves.set(kind, bands);
+    this.persist();
     return bands;
   }
 
