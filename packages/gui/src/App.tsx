@@ -17,6 +17,7 @@ import {
   setStringThreshold,
   setStringWaveform,
   setRuleNumberField,
+  setAssetSource,
   STRING_INTERACTIONS,
   setSpectrumBand,
   setSpectrumBands,
@@ -368,8 +369,18 @@ export function App() {
   );
   const editorAssets = useMemo<EditorAsset[]>(
     () => [
-      ...(worldIR?.audioAssets ?? []).map((asset) => ({ name: asset.name, src: asset.src, kind: '音频' as const })),
-      ...(worldIR?.textureAssets ?? []).map((asset) => ({ name: asset.name, src: asset.src, kind: '纹理' as const })),
+      ...(worldIR?.audioAssets ?? []).map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        src: asset.src,
+        kind: '音频' as const,
+      })),
+      ...(worldIR?.textureAssets ?? []).map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        src: asset.src,
+        kind: '纹理' as const,
+      })),
     ],
     [worldIR],
   );
@@ -436,6 +447,7 @@ export function App() {
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
   const [editorOpen, setEditorOpen] = useState(false);
   const [ruleOpen, setRuleOpen] = useState(false);
+  const [postLevel, setPostLevel] = useState(1);
   const [spectrumIndex, setSpectrumIndex] = useState(0);
   const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);
@@ -1301,6 +1313,19 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // 编辑器打开时 Esc 总能关闭（焦点可能在输入框/画布）。
+  useEffect(() => {
+    if (!editorOpen && !ruleOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'Escape') return;
+      event.preventDefault();
+      setEditorOpen(false);
+      setRuleOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editorOpen, ruleOpen]);
+
   const shell = (children: ReactNode | null, loading: boolean) => (
     <div
       className="ink-app"
@@ -1449,6 +1474,20 @@ export function App() {
             const wave = sustainedWaves.resetString(id, kind);
             onEditWaveform(id, [...wave]);
           }}
+          onAssetSrc={(id, kind, src) => {
+            const current = worldIRRef.current;
+            if (!current) return;
+            const result = setAssetSource(current, kind === '音频' ? 'audio' : 'texture', id, src);
+            if (!result.ok) {
+              setSaveError(result.error);
+              setSaveState('error');
+              return;
+            }
+            applyWorldIR(result.ir);
+            scheduleSave();
+          }}
+          postLevel={postLevel}
+          onPostLevel={() => setPostLevel((level) => (level + 1) % 3)}
           onClose={() => setEditorOpen(false)}
         />
       ) : null}
@@ -1510,6 +1549,7 @@ export function App() {
                 <GlslCanvas
                   key={`${index}-${artifact.bindings.map((binding) => binding.uniform).join(',')}`}
                   artifact={artifact}
+                  postLevel={postLevel}
                   values={artifact.bindings.map((binding) => {
                     const value = universe?.get(binding.string);
                     return typeof value === 'number' ? value : 0;

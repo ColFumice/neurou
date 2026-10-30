@@ -87,6 +87,8 @@ export class StringAudioEngine {
   private loopPending: { src: string; volume: number; loop: boolean } | null = null;
   private loopToken = 0;
   private voices = new Map<number, SustainedVoice>();
+  /** v6.4：持续音最多同时 12 个 voice，超出时偷最早的。 */
+  private readonly maxSustainedVoices = 12;
   /** v5.34：持续型弦的按住发声。 */
   private sustainedStrings = new Map<
     number,
@@ -789,6 +791,10 @@ export class StringAudioEngine {
     }
     osc.start();
     const id = ++this.voiceSeq;
+    if (this.voices.size >= this.maxSustainedVoices) {
+      const oldest = this.voices.keys().next().value;
+      if (typeof oldest === 'number') this.stopSustainedSpectrum(oldest);
+    }
     this.voices.set(id, { osc, gain, pan, baseGain: target, xNorm: x, yNorm: clamp(yNorm, 0, 1), retires: [] });
     return id;
   }

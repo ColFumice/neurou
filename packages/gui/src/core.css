@@ -395,3 +395,15 @@ body {
   line-height: 1;
 }
 .rule-editor__field strong { font-weight: 500; min-width: 22px; text-align: center; }
+
+.waveform-editor__assets span.waveform-editor__asset--selected { opacity: 0.95; }
+.waveform-editor__asset-input {
+  margin-top: 10px;
+  width: 100%;
+  border: 1px solid rgba(11, 11, 11, 0.18);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 7px;
+}

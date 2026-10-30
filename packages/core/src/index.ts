@@ -40,6 +40,7 @@ export {
   setStringThreshold,
   setStringWaveform,
   setRuleNumberField,
+  setAssetSource,
   setCouplingStrength,
   setCouplingStrengthBetween,
   addCoupling,

@@ -9,6 +9,7 @@ export interface EditorString {
 }
 
 export interface EditorAsset {
+  id: string;
   name: string;
   src: string;
   kind: '音频' | '纹理';
@@ -21,6 +22,9 @@ export interface WaveformEditorProps {
   onEdit: (id: string, kind: StringKind, wave: number[]) => void;
   onPreset: (id: string, kind: StringKind, preset: WavePreset) => void;
   onReset: (id: string, kind: StringKind) => void;
+  onAssetSrc: (id: string, kind: '音频' | '纹理', src: string) => void;
+  postLevel: number;
+  onPostLevel: () => void;
   onClose: () => void;
 }
 
@@ -44,11 +48,16 @@ export function WaveformEditor({
   onEdit,
   onPreset,
   onReset,
+  onAssetSrc,
+  postLevel,
+  onPostLevel,
   onClose,
 }: WaveformEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selected, setSelected] = useState(0);
+  const [assetSelected, setAssetSelected] = useState<string | null>(assets[0]?.id ?? null);
+  const [assetSrc, setAssetSrc] = useState(assets[0]?.src ?? '');
   const current = strings[Math.min(selected, Math.max(0, strings.length - 1))];
   const [wave, setWave] = useState<number[]>(
     current ? [...getWave(current.id, current.kind)] : new Array(SUSTAINED_WAVE_BANDS).fill(0.5),
@@ -180,15 +189,16 @@ export function WaveformEditor({
                 {preset.label}
               </span>
             ))}
-            <span
-              data-editor-reset="true"
-              onClick={() => {
+            <span data-editor-reset="true" onClick={() => {
                 if (!current) return;
                 onReset(current.id, current.kind);
                 setWave([...getWave(current.id, current.kind)]);
               }}
             >
               重置
+            </span>
+            <span data-editor-post={postLevel} onClick={onPostLevel}>
+              后处理 {['关', '轻', '重'][postLevel] ?? postLevel}
             </span>
             <span data-editor-close="true" onClick={onClose}>
               关闭
@@ -199,11 +209,39 @@ export function WaveformEditor({
           <div className="waveform-editor__assets-title">资源</div>
           {assets.length === 0 ? <span className="waveform-editor__empty">无</span> : null}
           {assets.map((asset) => (
-            <span key={`${asset.kind}:${asset.name}`} data-editor-asset={asset.name}>
+            <span
+              key={`${asset.kind}:${asset.name}`}
+              className={assetSelected === asset.id ? 'waveform-editor__asset--selected' : ''}
+              data-editor-asset={asset.name}
+              onClick={() => {
+                setAssetSelected(asset.id);
+                setAssetSrc(asset.src);
+              }}
+            >
               <em>{asset.kind}</em>
               {asset.name} · {asset.src}
             </span>
           ))}
+          {assetSelected ? (
+            <input
+              className="waveform-editor__asset-input"
+              data-editor-asset-src="true"
+              value={assetSrc}
+              onChange={(event) => setAssetSrc(event.target.value)}
+              onBlur={() => {
+                const asset = assets.find((item) => item.id === assetSelected);
+                if (asset && assetSrc.trim() && assetSrc !== asset.src) onAssetSrc(asset.id, asset.kind, assetSrc.trim());
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.stopPropagation();
+                  event.currentTarget.blur();
+                } else if (event.key === 'Escape') {
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+          ) : null}
         </div>
       </div>
     </div>

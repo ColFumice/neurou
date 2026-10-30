@@ -64,6 +64,28 @@ export function setRuleNumberField(
   };
 }
 
+/** v6.4：改音频/纹理资产的 src；引用名不变。 */
+export function setAssetSource(
+  ir: WorldIR,
+  kind: 'audio' | 'texture',
+  id: string,
+  src: string,
+): EditResult {
+  if (!src.trim()) return fail('资产路径不能为空');
+  if (kind === 'audio') {
+    if (!(ir.audioAssets ?? []).some((asset) => asset.id === id)) return fail(`没有音频资产「${id}」`);
+    return {
+      ok: true,
+      ir: { ...ir, audioAssets: (ir.audioAssets ?? []).map((asset) => (asset.id === id ? { ...asset, src } : asset)) },
+    };
+  }
+  if (!(ir.textureAssets ?? []).some((asset) => asset.id === id)) return fail(`没有纹理资产「${id}」`);
+  return {
+    ok: true,
+    ir: { ...ir, textureAssets: (ir.textureAssets ?? []).map((asset) => (asset.id === id ? { ...asset, src } : asset)) },
+  };
+}
+
 /** 改一根数值弦的基线（调律台拖弦 / 拨弦写回都用它）。 */
 export function setStringBaseline(ir: WorldIR, id: string, value: number): EditResult {
   const string = ir.strings.find((s) => s.id === id);

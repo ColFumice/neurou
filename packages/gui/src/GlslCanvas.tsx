@@ -5,9 +5,11 @@ import type { GlslArtifact } from './glslBackend.js';
 export function GlslCanvas({
   artifact,
   values,
+  postLevel = 1,
 }: {
   artifact: GlslArtifact;
   values: number[];
+  postLevel?: number;
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const valuesRef = useRef(values);
@@ -99,11 +101,12 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uScene;
 uniform float uTime;
+uniform float uPost;
 void main() {
   vec4 color = texture(uScene, vUv);
   vec2 d = vUv - 0.5;
-  float vignette = 1.0 - dot(d, d) * 0.55;
-  float grain = (fract(sin(dot(vUv * vec2(1024.0 + uTime, 768.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.035;
+  float vignette = 1.0 - dot(d, d) * 0.55 * uPost;
+  float grain = (fract(sin(dot(vUv * vec2(1024.0 + uTime, 768.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.035 * uPost;
   outColor = vec4(color.rgb * vignette + grain, color.a);
 }`,
     );
@@ -115,6 +118,7 @@ void main() {
     }
     const postSceneLocation = postProgram ? gl.getUniformLocation(postProgram, 'uScene') : null;
     const postTimeLocation = postProgram ? gl.getUniformLocation(postProgram, 'uTime') : null;
+    const postLevelLocation = postProgram ? gl.getUniformLocation(postProgram, 'uPost') : null;
     const sceneTexture = gl.createTexture();
     const sceneFramebuffer = gl.createFramebuffer();
     let sceneWidth = 0;
@@ -196,6 +200,7 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
         if (postSceneLocation) gl.uniform1i(postSceneLocation, 0);
         if (postTimeLocation) gl.uniform1f(postTimeLocation, (now - start) / 1000);
+        if (postLevelLocation) gl.uniform1f(postLevelLocation, postLevel);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -218,7 +223,7 @@ void main() {
       if (postVertex) gl.deleteShader(postVertex);
       if (postFragment) gl.deleteShader(postFragment);
     };
-  }, [artifact]);
+  }, [artifact, postLevel]);
 
-  return <canvas ref={canvasRef} className="preview-glsl" data-testid="preview-glsl" data-glsl-passes="2" aria-hidden="true" />;
+  return <canvas ref={canvasRef} className="preview-glsl" data-testid="preview-glsl" data-glsl-passes="2" data-post-level={postLevel} aria-hidden="true" />;
 }

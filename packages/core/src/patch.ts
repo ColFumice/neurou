@@ -88,7 +88,8 @@ function structuralSignature(ir: WorldIR): string {
       mode: s.mode,
       articulation: s.articulation,
     })),
-    audioAssets: ir.audioAssets ?? [],
+    audioAssets: (ir.audioAssets ?? []).map((asset) => ({ id: asset.id, name: asset.name })),
+    textureAssets: (ir.textureAssets ?? []).map((asset) => ({ id: asset.id, name: asset.name })),
     bgm: ir.bgm ?? null,
     systems: ir.systems ?? [],
     scenes: ir.scenes ?? [],
@@ -410,6 +411,22 @@ function ruleBlockEnd(text: string, start: number): number {
   return text.length;
 }
 
+function assetSrcEdit(
+  text: string,
+  label: '音频资产' | '纹理资产',
+  name: string,
+  src: string,
+  eol: string,
+): TextEdit | { error: string } {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^(\\s*${label}\\s+${escaped}\\s+)"([^"]*)"(\\s*(?:#.*)?)$`, 'm');
+  const match = pattern.exec(text);
+  if (!match) return { error: `找不到${label}「${name}」的声明行` };
+  const start = match.index + (match[1]?.length ?? 0);
+  const end = start + (match[2]?.length ?? 0) + 2;
+  return { start, end, text: `"${src}"` };
+}
+
 function ruleNumberFieldEdit(
   text: string,
   rule: IRRule,
@@ -531,6 +548,26 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   }
   if (addedStrings.length > 0) {
     edits.push(insertStringsEdit(normalized, baseIR, addedStrings, eol));
+  }
+
+  // 资产路径：音频/纹理声明行的 src。
+  for (const edited of editedIR.audioAssets ?? []) {
+    const base = (baseIR.audioAssets ?? []).find((asset) => asset.id === edited.id);
+    if (!base) return { ok: false, reason: `音频资产「${edited.id}」是新增的，需要回退规范序列化` };
+    if (base.src === edited.src) continue;
+    const result = assetSrcEdit(normalized, '音频资产', base.name, edited.src, eol);
+    if ('error' in result) return { ok: false, reason: result.error };
+    edits.push(result);
+    changed.push(`${edited.id}.src`);
+  }
+  for (const edited of editedIR.textureAssets ?? []) {
+    const base = (baseIR.textureAssets ?? []).find((asset) => asset.id === edited.id);
+    if (!base) return { ok: false, reason: `纹理资产「${edited.id}」是新增的，需要回退规范序列化` };
+    if (base.src === edited.src) continue;
+    const result = assetSrcEdit(normalized, '纹理资产', base.name, edited.src, eol);
+    if ('error' in result) return { ok: false, reason: result.error };
+    edits.push(result);
+    changed.push(`${edited.id}.src`);
   }
 
   // 规则数值字段：耗时 / 优先级 / 每（结构本身仍由签名保护）。
