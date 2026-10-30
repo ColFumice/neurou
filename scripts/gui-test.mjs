@@ -2088,27 +2088,48 @@ await editorPage.waitForTimeout(200);
 check('Esc 关闭手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'false' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 0);
 await editorPage.close();
 
-// v1.4：流场视觉与 F10 动态调律
+// v1.6：全屏可绘制流场
 const flowPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await flowPage.goto(`${URL}?world=${encodeURIComponent('examples/flow-field.nro')}&fresh=1`, { waitUntil: 'networkidle' });
-await flowPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
-await flowPage.waitForTimeout(500);
-await flowPage.keyboard.press('Space');
-await flowPage.waitForTimeout(1400);
+await flowPage.waitForSelector('[data-testid="flow-screen"]', { timeout: 10000 });
+await flowPage.waitForTimeout(700);
 const flowApp = flowPage.locator('[data-testid="ink-app"]');
-check('流场视觉预览编译通过', (await flowApp.getAttribute('data-glsl-status')) === 'ok' && (await flowPage.locator('[data-testid="preview-mask"] canvas').count()) === 1, `${await flowApp.getAttribute('data-glsl-status')}`);
-check('流场预览保留彩色路径', (await flowPage.locator('.preview-mask--flow').count()) === 1);
+check('流场自动全屏', (await flowApp.getAttribute('data-flow-mode')) === 'true' && (await flowPage.locator('[data-testid="flow-canvas"]').count()) === 1);
+check('流场不叠加弦图层', (await flowPage.locator('.scene-layer--flow-hidden').count()) === 1);
+const flowSignature = async () =>
+  flowPage.evaluate(() => {
+    const canvas = document.querySelector('[data-testid="flow-canvas"]');
+    if (!(canvas instanceof HTMLCanvasElement)) return 0;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return 0;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4000) sum += data[i] ?? 0;
+    return sum;
+  });
+const flowFrameA = await flowSignature();
+await flowPage.waitForTimeout(500);
+const flowFrameB = await flowSignature();
+check('流场是动态的', flowFrameA !== flowFrameB, `${flowFrameA}/${flowFrameB}`);
+const flowVersionBefore = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
+await flowPage.mouse.move(700, 450);
+await flowPage.mouse.down();
+await flowPage.mouse.move(820, 500, { steps: 8 });
+await flowPage.mouse.up();
+await flowPage.waitForTimeout(300);
+const flowVersionAfter = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
+check('鼠标拖拽绘制流场', flowVersionAfter > flowVersionBefore, `${flowVersionBefore}→${flowVersionAfter}`);
+await flowPage.keyboard.press('Digit2');
+await flowPage.keyboard.press('ArrowRight');
+await flowPage.keyboard.press('Space');
+await flowPage.waitForTimeout(250);
+check('键盘映射绘制流场', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-brush')) === '1' && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionAfter);
+await flowPage.keyboard.press('Escape');
+await flowPage.waitForTimeout(250);
+check('Esc 退出流场', (await flowApp.getAttribute('data-flow-mode')) === 'false' && (await flowPage.locator('[data-testid="flow-screen"]').count()) === 0);
 await flowPage.keyboard.press('F10');
 await flowPage.waitForTimeout(300);
-check('F10 打开流场调律', (await flowApp.getAttribute('data-flow-open')) === 'true' && (await flowPage.locator('[data-flow-param]').count()) === 3, String(await flowPage.locator('[data-flow-param]').count()));
-const flowBefore = await flowPage.locator('[data-flow-param="速度"]').getAttribute('data-flow-value');
-await flowPage.keyboard.press('ArrowLeft');
-await flowPage.waitForTimeout(250);
-const flowAfter = await flowPage.locator('[data-flow-param="速度"]').getAttribute('data-flow-value');
-check('F10 左右键实时调参', Number(flowAfter) < Number(flowBefore), `${flowBefore}→${flowAfter}`);
-await flowPage.keyboard.press('Escape');
-await flowPage.waitForTimeout(200);
-check('Esc 关闭流场调律', (await flowApp.getAttribute('data-flow-open')) === 'false');
+check('F10 重新进入流场', (await flowApp.getAttribute('data-flow-mode')) === 'true');
 await flowPage.close();
 
 await browser.close();

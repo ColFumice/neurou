@@ -48,6 +48,7 @@ import { WaveformEditor, type EditorAsset, type EditorString } from './WaveformE
 import { RuleEditor } from './RuleEditor.js';
 import { Modal } from './Modal.js';
 import { StartScreen, type StartItem } from './StartScreen.js';
+import { FlowField } from './FlowField.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -186,7 +187,7 @@ const START_ITEMS: StartItem[] = [
   { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
   { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
   { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
-  { id: 'flow', label: '等值线流场', note: 'F10 动态调律', file: 'examples/flow-field.nro' },
+  { id: 'flow', label: '等值线流场', note: 'F10 全屏画布', file: 'examples/flow-field.nro' },
   { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
   { id: 'graph', label: '章节路线', note: 'F9', file: '' },
   { id: 'help', label: '手势帮助', note: '?', file: '' },
@@ -459,8 +460,7 @@ export function App() {
   const [saveError, setSaveError] = useState('');
   const [saveErrorLine, setSaveErrorLine] = useState<number | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [flowOpen, setFlowOpen] = useState(false);
-  const [flowSelected, setFlowSelected] = useState(0);
+  const [flowMode, setFlowMode] = useState(() => /flow-field\.nro$/.test(WORLD_FILE));
   const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
@@ -800,52 +800,20 @@ export function App() {
     return () => window.removeEventListener('keydown', onGraphKey, true);
   }, [chapterGraphOpen]);
 
-  // v1.4：F10 流场调律——方向键选择参数，左右键实时改写绑定弦。
+  // v1.6：F10 进入全屏可绘制流场；流场内部自己处理 F10/Esc 退出。
   useEffect(() => {
-    const targets = (): { port: string; name: string; string: string }[] =>
-      (worldIRRef.current?.ports ?? [])
-        .filter((port) => port.kind === '视觉' && port.texture?.pattern === '流场')
-        .flatMap((port) =>
-          port.params.map((param) => ({ port: port.name, name: param.name, string: param.string })),
-        );
     const onFlowKey = (event: KeyboardEvent): void => {
+      if (flowMode) return;
       if (event.code === 'F10' && !event.altKey && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (flowOpen) {
-          setFlowOpen(false);
-        } else {
-          setFlowSelected(0);
-          setPreviewOpen(true);
-          setFlowOpen(true);
-        }
-        return;
-      }
-      if (!flowOpen) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (event.code === 'Escape') {
-        setFlowOpen(false);
-        return;
-      }
-      const list = targets();
-      if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        if (list.length === 0) return;
-        const step = event.code === 'ArrowDown' ? 1 : -1;
-        setFlowSelected((current) => (current + step + list.length) % list.length);
-      } else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
-        const target = list[flowSelected];
-        if (!target || !universe) return;
-        const current = universe.get(target.string);
-        if (typeof current !== 'number') return;
-        const delta = event.code === 'ArrowRight' ? 2 : -2;
-        universe.inject(target.string, Math.max(0, Math.min(100, current + delta)));
-        setVersion((value) => value + 1);
+        setPreviewOpen(false);
+        setFlowMode(true);
       }
     };
     window.addEventListener('keydown', onFlowKey, true);
     return () => window.removeEventListener('keydown', onFlowKey, true);
-  }, [flowOpen, flowSelected, universe]);
+  }, [flowMode]);
 
   // v5.7/v5.27：视觉端口 → GLSLBackend；多个端口各编译一个 canvas。
   useEffect(() => {
@@ -993,6 +961,7 @@ export function App() {
 
   useEffect(() => {
     const onPreviewKey = (event: KeyboardEvent): void => {
+      if (flowMode) return;
       if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
       if (screenRef.current !== 'strings') return;
       event.preventDefault();
@@ -1001,7 +970,7 @@ export function App() {
     };
     window.addEventListener('keydown', onPreviewKey, true);
     return () => window.removeEventListener('keydown', onPreviewKey, true);
-  }, []);
+  }, [flowMode]);
 
   // v5.10：F8 切换运行场景；只在世界有多个场景时生效。
   useEffect(() => {
@@ -1528,8 +1497,7 @@ export function App() {
       data-save-error={saveError}
       data-save-error-line={saveErrorLine ?? ''}
       data-help-open={helpOpen ? 'true' : 'false'}
-      data-flow-open={flowOpen ? 'true' : 'false'}
-      data-flow-selected={flowOpen ? flowSelected : ''}
+      data-flow-mode={flowMode ? 'true' : 'false'}
       data-start-open={startOpen ? 'true' : 'false'}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
@@ -1561,12 +1529,13 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       <div
-        className={`scene-layer${startOpen ? ' scene-layer--start' : ''}${
+        className={`scene-layer${startOpen ? ' scene-layer--start' : ''}${flowMode ? ' scene-layer--flow-hidden' : ''}${
           helpOpen || editorOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''
         }`}
       >
-        {children}
+        {flowMode ? null : children}
       </div>
+      {flowMode ? <FlowField worldFile={WORLD_FILE} onClose={() => setFlowMode(false)} /> : null}
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
@@ -1589,48 +1558,13 @@ export function App() {
           }}
         />
       ) : null}
-      {flowOpen ? (
-        <Modal onClose={() => setFlowOpen(false)} className="flow-modal" testId="flow-modal">
-          <div className="flow-editor" data-testid="flow-editor">
-            <div className="flow-editor__title">流场调律 · F10</div>
-            <div className="flow-editor__hint">↑/↓ 选参数 · ←/→ 调整 · 空格预览 · Esc 关闭</div>
-            {((worldIR?.ports ?? [])
-              .filter((port) => port.kind === '视觉' && port.texture?.pattern === '流场')
-              .flatMap((port) =>
-                port.params.map((param) => ({ port: port.name, name: param.name, string: param.string })),
-              )
-            ).map((target, index) => {
-              const value = universe?.get(target.string);
-              return (
-                <div
-                  key={`${target.port}:${target.name}`}
-                  className={`flow-row${index === flowSelected ? ' flow-row--selected' : ''}`}
-                  data-flow-param={target.name}
-                  data-flow-value={typeof value === 'number' ? value : ''}
-                  data-modal-item
-                  data-modal-no-arrow
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setFlowSelected(index)}
-                >
-                  <span>{target.name}</span>
-                  <em>{typeof value === 'number' ? value.toFixed(1) : '—'}</em>
-                </div>
-              );
-            })}
-            {(worldIR?.ports ?? []).every((port) => port.texture?.pattern !== '流场') ? (
-              <div className="flow-editor__empty">当前世界没有「纹理 流场」视觉端口。</div>
-            ) : null}
-          </div>
-        </Modal>
-      ) : null}
       {helpOpen ? (
         <Modal onClose={() => setHelpOpen(false)} className="help-modal" testId="help-modal">
           <div className="help-overlay" data-testid="help-overlay">
             <div className="help-overlay__title">手势</div>
             <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
             <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则 · F9 章节路线</div>
-            <div>F10 流场调律 · Space 预览 · Ctrl+Z 撤销 · ? 帮助</div>
+            <div>F10 流场画布 · Space 预览 · Ctrl+Z 撤销 · ? 帮助</div>
             <div
               data-modal-item
               data-modal-no-arrow

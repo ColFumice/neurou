@@ -1,7 +1,7 @@
 {
   "name": "neurou",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "description": "neurou（雨若）— 世界弦语言与调律运行时",
   "scripts": {
