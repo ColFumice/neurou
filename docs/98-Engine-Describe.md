@@ -38,7 +38,8 @@ GUI 根节点暴露：
 ```text
 data-engine-name
 data-engine-strings
-data-engine-scenes`ndata-engine-active-systems
+data-engine-scenes
+data-engine-active-systems
 ```
 
 用于验收/诊断，例如：
