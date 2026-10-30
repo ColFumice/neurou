@@ -261,7 +261,7 @@ docs/               总览、语言规范、架构、调律台、序列化、编
 - [真实 Faust wasm 编译与 AudioWorklet（v5.32）](docs/89-真实Faust编译.md)
 - [多音频端口与每拍参数更新（v5.33）](docs/90-多音频端口与参数更新.md)
 - [弦交互方式与 F2 连续编辑修复（v5.34）](docs/91-弦交互方式与F2修复.md)
-- [拉弦响应与持续波形（v5.35）](docs/92-拉弦响应与持续波形.md)\n- [鼠标端三类交互统一（v5.36）](docs/93-鼠标端三类交互.md)\n- [持续型弦的可编辑波形与 F2 合奏（v5.37）](docs/94-持续弦波形编辑与F2合奏.md)\n- [持续波形平滑、变形与拖尾（v5.39）](docs/95-持续波形平滑与拖尾.md)\n- [持续弦波形持久化（v5.42）](docs/96-持续弦波形持久化.md)\n- [模块世界入口写回（v5.47）](docs/97-模块世界入口写回.md)\n- [Engine.describe Host 摘要（v5.51）](docs/98-Engine-Describe.md)\n- [CLI describe（v5.53）](docs/99-CLI-describe.md)\n- [v1.0 收束清单（v5.57）](docs/100-v1.0-收束清单.md)\n- [Host API 定稿（v1.0）](docs/101-Host-API.md)\n- [IR Schema（v1.0）](docs/102-IR-Schema.md)\n- [诊断错误码索引（v1.0）](docs/103-诊断错误码索引.md)\n- [Host API 示例](examples/host-api.ts)
+- [拉弦响应与持续波形（v5.35）](docs/92-拉弦响应与持续波形.md)\n- [鼠标端三类交互统一（v5.36）](docs/93-鼠标端三类交互.md)\n- [持续型弦的可编辑波形与 F2 合奏（v5.37）](docs/94-持续弦波形编辑与F2合奏.md)\n- [持续波形平滑、变形与拖尾（v5.39）](docs/95-持续波形平滑与拖尾.md)\n- [持续弦波形持久化（v5.42）](docs/96-持续弦波形持久化.md)\n- [模块世界入口写回（v5.47）](docs/97-模块世界入口写回.md)\n- [Engine.describe Host 摘要（v5.51）](docs/98-Engine-Describe.md)\n- [CLI describe（v5.53）](docs/99-CLI-describe.md)\n- [v1.0 收束清单（v5.57）](docs/100-v1.0-收束清单.md)\n- [Host API 定稿（v1.0）](docs/101-Host-API.md)\n- [IR Schema（v1.0）](docs/102-IR-Schema.md)\n- [诊断错误码索引（v1.0）](docs/103-诊断错误码索引.md)\n- [手势总览（v1.0）](docs/104-手势总览.md)\n- [发布/回滚清单（v1.0）](docs/105-发布回滚清单.md)\n- [Host API 示例](examples/host-api.ts)
 - [灯与潮：阶跃 + 相位源 + 动态耦合示例（v2.10.1）](docs/33-灯与潮.md)
 - [架构完成度审计](docs/08-架构完成度审计.md)
 - [墨网·生长与基准弦（v0.5 历史）](docs/09-墨网·生长与基准弦.md)
