@@ -19,6 +19,7 @@ export interface StartScreenProps {
 export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element {
   const [selected, setSelected] = useState(0);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [keyboardActive, setKeyboardActive] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element 
       event.preventDefault();
       event.stopImmediatePropagation();
       setHovered(null);
+      setKeyboardActive(true);
       if (event.code === 'ArrowUp') setSelected((index) => (index - 1 + items.length) % items.length);
       else if (event.code === 'ArrowDown') setSelected((index) => (index + 1) % items.length);
       else {
@@ -49,9 +51,12 @@ export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element 
             <button
               key={item.id}
               type="button"
-              className={`start-item${index === selected || index === hovered ? ' start-item--selected' : ''}`}
+              className={`start-item${index === hovered || (keyboardActive && index === selected) ? ' start-item--selected' : ''}`}
               data-start-item={item.id}
-              onMouseEnter={() => setHovered(index)}
+              onMouseEnter={() => {
+                setKeyboardActive(false);
+                setHovered(index);
+              }}
               onMouseLeave={() => setHovered((current) => (current === index ? null : current))}
               onClick={() => {
                 setHovered(null);

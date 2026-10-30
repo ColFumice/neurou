@@ -1226,7 +1226,7 @@ export function StringField({
           // v5.37/v5.39：持续型弦显示可编辑波形；Catmull-Rom 平滑连接 + 缓动变形。
           const sample = smoothSample(sustainedWave, x01);
           const envelope = Math.pow(Math.sin(Math.PI * x01), 0.45);
-          focusDispBuf[i] = (sample - 0.5) * 2 * LOGICAL_H * 0.46 * envelope;
+          focusDispBuf[i] = (sample - 0.5) * 2 * envelope;
           continue;
         }
         let value = u[i] ?? 0;
@@ -1243,6 +1243,24 @@ export function StringField({
           }
         }
         focusDispBuf[i] = value;
+      }
+      if (sustainedFocus) {
+        // v1.5：持续波形以屏幕中心为轴自适应铺满，编辑幅度不再被 maxPull 压扁。
+        let high = 0;
+        let low = 0;
+        for (let i = 0; i < count; i += 1) {
+          const value = focusDispBuf[i] ?? 0;
+          if (value > high) high = value;
+          if (value < low) low = value;
+        }
+        const baseline = LOGICAL_H / 2;
+        const limit = LOGICAL_H / 2 - 20;
+        const posScale = high > 0 ? limit / high : 1;
+        const negScale = low < 0 ? limit / -low : 1;
+        for (let i = 0; i < focusDispBuf.length; i += 1) {
+          const value = i < count ? (focusDispBuf[i] ?? 0) : 0;
+          focusDispBuf[i] = value >= 0 ? value * posScale : value * negScale;
+        }
       }
       return focusDispBuf;
     }
@@ -1662,16 +1680,17 @@ export function StringField({
           sustainedDrawTrail.unshift(disp.slice());
           if (sustainedDrawTrail.length > 9) sustainedDrawTrail.pop();
           ctx.save();
+          const centerOffset = LOGICAL_H / 2 - focusBaseline();
           for (let i = Math.min(7, sustainedDrawTrail.length - 1); i >= 1; i -= 1) {
             const trail = sustainedDrawTrail[i];
             if (!trail) continue;
             ctx.filter = `blur(${2 + i * 1.4}px)`;
-            strokeFocus(ctx, trail, 0.075 * (1 - i / 9), false);
+            strokeFocus(ctx, trail, 0.075 * (1 - i / 9), false, centerOffset);
           }
           ctx.filter = 'none';
           const wander = Math.sin(now * 0.00038 + focusIdx * 1.7) * 1.2;
           const widthScale = 0.9 + 0.16 * (0.5 + 0.5 * Math.sin(now * 0.0009 + focusIdx * 1.3));
-          strokeFocus(ctx, disp, 1, false, wander, widthScale);
+          strokeFocus(ctx, disp, 1, false, wander + centerOffset, widthScale);
           ctx.restore();
         } else if (pinsNow.length > 0) {
           // 按住期间：整条焦点弦单一路径、常态宽度；只留峰顶圆点。
@@ -2454,7 +2473,8 @@ export function StringField({
       }
       const profile = profileOf(focusIdx);
       const baseline = focusBaseline();
-      const amplitude = Math.min(Math.abs(key.cy - baseline), profile.maxPull);
+      const rawDistance = Math.abs(key.cy - baseline);
+      const amplitude = Math.min(rawDistance, profile.maxPull);
       const direction: 1 | -1 = key.cy < baseline ? -1 : 1;
       noteTouch(key.cx, key.cy, amplitude, direction, event.code);
       if (!keyHolds.has(event.code)) {
@@ -2469,7 +2489,11 @@ export function StringField({
         if (interaction === '持续') {
           const kind = kindOf(focusIdx);
           const laneId = laneAt(focusIdx)?.id ?? kind;
-          const amp = clamp(amplitude / Math.max(1, LOGICAL_H * 0.5), 0, 1);
+          const maxKeyDistance = Math.max(
+            1,
+            ...sustainedKeys.map((cell) => Math.abs(cell.cy - baseline)),
+          );
+          const amp = clamp(rawDistance / maxKeyDistance, 0, 1);
           const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
           commitWaveform(waveBands, true);
           const id = audio.startSustainedSpectrum(
