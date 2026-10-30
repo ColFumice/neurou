@@ -166,6 +166,14 @@ class SustainedWaveBank {
     return waveform;
   }
 
+  /** 编辑器直接写入一根弦的完整波形。 */
+  setWaveformString(id: string, kind: StringKind, values: readonly number[]): readonly number[] {
+    const waveform = (sanitize([...values]) ?? defaultWave(kind));
+    this.waves.set(id, { kind, waveform });
+    this.persist();
+    return waveform;
+  }
+
   /** F2 合奏：当前世界所有持续型弦逐点平均。 */
   ensemble(): number[] {
     const out = new Array<number>(SUSTAINED_WAVE_BANDS).fill(0);

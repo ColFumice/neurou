@@ -1855,6 +1855,40 @@ check(
 await structurePage.close();
 try { unlinkSync(PROJECT_STRUCT_PATH); } catch { /* 清理临时入口 */ }
 
+// v5.59：F6 波形 / 资源编辑器
+const editorPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await editorPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await editorPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await editorPage.waitForTimeout(500);
+const editorApp = editorPage.locator('[data-testid="ink-app"]');
+const tunerFileBeforeEditor = readFileSync('examples/tuner.nro', 'utf8');
+await editorPage.keyboard.press('F6');
+await editorPage.waitForTimeout(300);
+const editorOverlay = editorPage.locator('[data-testid="waveform-editor"]');
+check('F6 打开波形/资源编辑器', (await editorApp.getAttribute('data-editor-open')) === 'true' && (await editorOverlay.count()) === 1, String(await editorApp.getAttribute('data-editor-open')));
+const editorStringsAttr = String((await editorOverlay.getAttribute('data-editor-strings')) ?? '');
+check('编辑器列出持续弦与资源', editorStringsAttr.split(',').filter(Boolean).length >= 4 && Boolean(await editorOverlay.getAttribute('data-editor-selected')), editorStringsAttr);
+const bandValuesBeforeEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
+await editorPage.locator('[data-editor-preset="方波"]').click();
+await editorPage.waitForTimeout(1100);
+const bandValuesAfterEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
+check('编辑器预设改变波形', bandValuesAfterEditor !== bandValuesBeforeEditor);
+check('编辑器预设写回保存', (await editorApp.getAttribute('data-save-state')) === 'saved', `${await editorApp.getAttribute('data-save-state')}/${await editorApp.getAttribute('data-save-error')}`);
+const editorBox = await editorPage.locator('[data-testid="waveform-editor-canvas"]').boundingBox();
+if (editorBox) {
+  await editorPage.mouse.move(editorBox.x + editorBox.width * 0.3, editorBox.y + editorBox.height * 0.2);
+  await editorPage.mouse.down();
+  await editorPage.mouse.move(editorBox.x + editorBox.width * 0.5, editorBox.y + editorBox.height * 0.8, { steps: 8 });
+  await editorPage.mouse.up();
+  await editorPage.waitForTimeout(1100);
+}
+const tunerFileAfterEditor = readFileSync('examples/tuner.nro', 'utf8');
+check('编辑器绘制写回文件波形', /波形 /s.test(tunerFileAfterEditor) && tunerFileAfterEditor !== tunerFileBeforeEditor);
+await editorPage.keyboard.press('Escape');
+await editorPage.waitForTimeout(250);
+check('Esc 关闭编辑器', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
+await editorPage.close();
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();

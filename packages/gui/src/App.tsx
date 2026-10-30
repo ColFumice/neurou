@@ -16,6 +16,7 @@ import {
   setCouplingStrengthBetween,
   setStringThreshold,
   setStringWaveform,
+  STRING_INTERACTIONS,
   setSpectrumBand,
   setSpectrumBands,
   setMatrixCell,
@@ -34,6 +35,7 @@ import {
   type WorldIR,
 } from '@neurou/core';
 import { Engine, createEngine } from '@neurou/engine';
+import { WaveformEditor, type EditorAsset, type EditorString } from './WaveformEditor.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -47,7 +49,7 @@ import { GlslCanvas } from './GlslCanvas.js';
 import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import { FaustFallback } from './faustAudio.js';
 import { FaustWasmHost } from './faustWasm.js';
-import { sustainedWaves } from './sustainedWave.js';
+import { sustainedWaves, type WavePreset } from './sustainedWave.js';
 import bundledSource from '../../../examples/tuner.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
@@ -202,6 +204,9 @@ const WORLD_FILE = worldFileFromUrl();
 const INITIAL_SEED = seedFromUrl();
 sustainedWaves.configure(WORLD_FILE);
 
+/** 编辑器读波形：模块级稳定引用，避免父组件每帧重置编辑器。 */
+const readEditorWave = (id: string, kind: StringKind): readonly number[] => sustainedWaves.getFor(id, kind);
+
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 
 /** 撤销/重做的缓动时长与类型。 */
@@ -347,6 +352,25 @@ export function App() {
     const entryIds = new Set(projectEntryStrings(WORLD_FILE, source, worldIR).map((string) => string.id));
     return new Set(worldIR.strings.filter((string) => !entryIds.has(string.id)).map((string) => string.id));
   }, [projectMode, source, worldIR]);
+  const editorStrings = useMemo<EditorString[]>(
+    () =>
+      (worldIR?.strings ?? [])
+        .filter(
+          (string) =>
+            STRING_INTERACTIONS[string.kind] === '持续' &&
+            string.domain.type === 'number' &&
+            !moduleStringIds.has(string.id),
+        )
+        .map((string) => ({ id: string.id, name: string.name, kind: string.kind })),
+    [worldIR, moduleStringIds],
+  );
+  const editorAssets = useMemo<EditorAsset[]>(
+    () => [
+      ...(worldIR?.audioAssets ?? []).map((asset) => ({ name: asset.name, src: asset.src, kind: '音频' as const })),
+      ...(worldIR?.textureAssets ?? []).map((asset) => ({ name: asset.name, src: asset.src, kind: '纹理' as const })),
+    ],
+    [worldIR],
+  );
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
@@ -408,6 +432,7 @@ export function App() {
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
+  const [editorOpen, setEditorOpen] = useState(false);
   const [spectrumIndex, setSpectrumIndex] = useState(0);
   const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);
@@ -1251,6 +1276,17 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // F6：波形/资源编辑器（无常驻面板，只覆盖一层）。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'F6' || event.ctrlKey || event.metaKey || event.altKey) return;
+      event.preventDefault();
+      setEditorOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const shell = (children: ReactNode | null, loading: boolean) => (
     <div
       className="ink-app"
@@ -1325,6 +1361,7 @@ export function App() {
       data-string-adds={stringAdds}
       data-string-removes={stringRemoves}
       data-screen={screen}
+      data-editor-open={editorOpen ? 'true' : 'false'}
       data-spectrum-index={spectrumIndex}
       data-spectrum-count={worldIR?.spectra.length ?? 0}
       data-spectrum-band-edits={bandEdits}
@@ -1345,6 +1382,26 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
+      {editorOpen ? (
+        <WaveformEditor
+          strings={editorStrings}
+          assets={editorAssets}
+          getWave={readEditorWave}
+          onEdit={(id, kind, wave) => {
+            sustainedWaves.setWaveformString(id, kind, wave);
+            onEditWaveform(id, wave);
+          }}
+          onPreset={(id, kind, preset: WavePreset) => {
+            const wave = sustainedWaves.applyPreset(id, kind, preset);
+            onEditWaveform(id, [...wave]);
+          }}
+          onReset={(id, kind) => {
+            const wave = sustainedWaves.resetString(id, kind);
+            onEditWaveform(id, [...wave]);
+          }}
+          onClose={() => setEditorOpen(false)}
+        />
+      ) : null}
       {chapterIntro && chapterTitle ? (
         <div className="chapter-intro" data-testid="chapter-intro">
           {chapterTitle}
