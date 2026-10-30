@@ -2102,9 +2102,9 @@ class Compiler {
       if (d.texture) {
         if (d.kind !== '视觉') {
           this.error('NRO2003', `音频端口「${d.name}」不能声明纹理。`, d.texture.span);
-        } else if (!['棋盘', '条纹', '渐变', '噪点'].includes(d.texture.pattern)) {
+        } else if (!['棋盘', '条纹', '渐变', '噪点', '流场'].includes(d.texture.pattern)) {
           this.error('NRO2003', `端口「${d.name}」的纹理「${d.texture.pattern}」不认识。`, d.texture.span, {
-            hint: '可用：棋盘、条纹、渐变、噪点。',
+            hint: '可用：棋盘、条纹、渐变、噪点、流场。',
           });
         } else if (!Number.isFinite(d.texture.scale) || d.texture.scale <= 0 || d.texture.scale > 64) {
           this.error('NRO2003', `端口「${d.name}」的纹理尺度应在 (0, 64]。`, d.texture.span);

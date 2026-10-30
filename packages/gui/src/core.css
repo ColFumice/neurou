@@ -570,10 +570,10 @@ body {
   height: 100%;
   background: linear-gradient(
     90deg,
-    #fafafa 0%,
-    #fafafa 74%,
-    rgba(250, 250, 250, 0.98) 84%,
-    rgba(250, 250, 250, 0.7) 93%,
+    rgba(250, 250, 250, 0.72) 0%,
+    rgba(250, 250, 250, 0.7) 55%,
+    rgba(250, 250, 250, 0.38) 82%,
+    rgba(250, 250, 250, 0.06) 96%,
     rgba(250, 250, 250, 0) 100%
   );
   color: #0b0b0b;
@@ -582,18 +582,20 @@ body {
   flex-direction: column;
   pointer-events: auto;
   position: relative;
+  backdrop-filter: blur(1.5px);
+  -webkit-backdrop-filter: blur(1.5px);
 }
 .start-left::after {
   content: '';
   position: absolute;
   top: 0;
-  right: -40px;
-  width: 90px;
+  right: -32px;
+  width: 74px;
   height: 100%;
   pointer-events: none;
-  background: linear-gradient(90deg, rgba(250, 250, 250, 0.98), rgba(250, 250, 250, 0));
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: linear-gradient(90deg, rgba(250, 250, 250, 0.5), rgba(250, 250, 250, 0));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .start-title {
   font-family: var(--serif);
@@ -721,9 +723,49 @@ body {
   transition: filter 220ms ease, -webkit-mask-image 300ms ease, mask-image 300ms ease;
 }
 .scene-layer--start {
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.22) 50%, #000 63%, #000 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, transparent 45%, rgba(0, 0, 0, 0.22) 50%, #000 63%, #000 100%);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.24) 0%,
+    rgba(0, 0, 0, 0.36) 38%,
+    rgba(0, 0, 0, 0.6) 62%,
+    rgba(0, 0, 0, 0.92) 74%,
+    #000 78%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.24) 0%,
+    rgba(0, 0, 0, 0.36) 38%,
+    rgba(0, 0, 0, 0.6) 62%,
+    rgba(0, 0, 0, 0.92) 74%,
+    #000 78%,
+    #000 100%
+  );
 }
 .scene-layer--inverted {
   filter: invert(1) hue-rotate(180deg);
+}
+
+/* v1.4：F10 流场调律 */
+.flow-editor { min-width: 340px; }
+.flow-editor__title { font-family: var(--serif); font-size: 20px; letter-spacing: .12em; margin-bottom: 8px; }
+.flow-editor__hint { font-size: 11px; opacity: .5; line-height: 2; margin-bottom: 12px; }
+.flow-row {
+  display: flex; justify-content: space-between; gap: 28px; padding: 9px 8px;
+  border-radius: 8px; opacity: .7; cursor: pointer;
+}
+.flow-row--selected { opacity: 1; background: rgba(255,255,255,.1); }
+.flow-row em { font-style: normal; opacity: .65; }
+.flow-editor__empty { opacity: .55; font-size: 12px; padding: 10px 0; }
+
+/* v1.4：流场预览保留原始颜色，不再套白雾/灰度 */
+.preview-mask--flow {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: #f5f5f4;
+}
+.preview-mask--flow .preview-glsl {
+  opacity: 0.94;
+  filter: none;
 }

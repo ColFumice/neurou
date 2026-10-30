@@ -254,7 +254,13 @@ await startPage.goto(URL, { waitUntil: 'networkidle' });
 await startPage.waitForSelector('[data-testid="start-screen"]', { timeout: 10000 });
 const startApp = startPage.locator('[data-testid="ink-app"]');
 const startRoot = startPage.locator('[data-testid="start-screen"]');
-check('初始界面出现文本菜单', (await startApp.getAttribute('data-start-open')) === 'true' && (await startRoot.locator('button[data-start-item]').count()) === 8, String(await startRoot.locator('button[data-start-item]').count()));
+check('初始界面出现文本菜单', (await startApp.getAttribute('data-start-open')) === 'true' && (await startRoot.locator('button[data-start-item]').count()) === 9, String(await startRoot.locator('button[data-start-item]').count()));
+await startRoot.locator('[data-start-item="help"]').hover();
+await startPage.waitForTimeout(150);
+check('初始界面悬停高亮', (await startRoot.locator('[data-start-item="help"]').getAttribute('class'))?.includes('start-item--selected') === true);
+await startPage.mouse.move(1100, 840);
+await startPage.waitForTimeout(250);
+check('鼠标离开后悬停高亮消失', (await startRoot.locator('[data-start-item="help"]').getAttribute('class'))?.includes('start-item--selected') !== true);
 await startPage.keyboard.press('ArrowDown');
 await startPage.waitForTimeout(120);
 check('初始界面方向键移动', (await startRoot.getAttribute('data-start-selected')) === '1', String(await startRoot.getAttribute('data-start-selected')));
@@ -2081,6 +2087,29 @@ await editorPage.keyboard.press('Escape');
 await editorPage.waitForTimeout(200);
 check('Esc 关闭手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'false' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 0);
 await editorPage.close();
+
+// v1.4：流场视觉与 F10 动态调律
+const flowPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await flowPage.goto(`${URL}?world=${encodeURIComponent('examples/flow-field.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await flowPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await flowPage.waitForTimeout(500);
+await flowPage.keyboard.press('Space');
+await flowPage.waitForTimeout(1400);
+const flowApp = flowPage.locator('[data-testid="ink-app"]');
+check('流场视觉预览编译通过', (await flowApp.getAttribute('data-glsl-status')) === 'ok' && (await flowPage.locator('[data-testid="preview-mask"] canvas').count()) === 1, `${await flowApp.getAttribute('data-glsl-status')}`);
+check('流场预览保留彩色路径', (await flowPage.locator('.preview-mask--flow').count()) === 1);
+await flowPage.keyboard.press('F10');
+await flowPage.waitForTimeout(300);
+check('F10 打开流场调律', (await flowApp.getAttribute('data-flow-open')) === 'true' && (await flowPage.locator('[data-flow-param]').count()) === 3, String(await flowPage.locator('[data-flow-param]').count()));
+const flowBefore = await flowPage.locator('[data-flow-param="速度"]').getAttribute('data-flow-value');
+await flowPage.keyboard.press('ArrowLeft');
+await flowPage.waitForTimeout(250);
+const flowAfter = await flowPage.locator('[data-flow-param="速度"]').getAttribute('data-flow-value');
+check('F10 左右键实时调参', Number(flowAfter) < Number(flowBefore), `${flowBefore}→${flowAfter}`);
+await flowPage.keyboard.press('Escape');
+await flowPage.waitForTimeout(200);
+check('Esc 关闭流场调律', (await flowApp.getAttribute('data-flow-open')) === 'false');
+await flowPage.close();
 
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。

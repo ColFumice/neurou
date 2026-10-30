@@ -18,6 +18,7 @@ export interface StartScreenProps {
  */
 export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element {
   const [selected, setSelected] = useState(0);
+  const [hovered, setHovered] = useState<number | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element 
       if (!codes.includes(event.code)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      setHovered(null);
       if (event.code === 'ArrowUp') setSelected((index) => (index - 1 + items.length) % items.length);
       else if (event.code === 'ArrowDown') setSelected((index) => (index + 1) % items.length);
       else {
@@ -42,15 +44,19 @@ export function StartScreen({ items, onChoose }: StartScreenProps): JSX.Element 
       <div className="start-left">
         <div className="start-title">雨若</div>
         <div className="start-subtitle">neurou · 弦网络世界</div>
-        <div className="start-list">
+        <div className="start-list" onMouseLeave={() => setHovered(null)}>
           {items.map((item, index) => (
             <button
               key={item.id}
               type="button"
-              className={`start-item${index === selected ? ' start-item--selected' : ''}`}
+              className={`start-item${index === selected || index === hovered ? ' start-item--selected' : ''}`}
               data-start-item={item.id}
-              onMouseEnter={() => setSelected(index)}
-              onClick={() => onChoose(item)}
+              onMouseEnter={() => setHovered(index)}
+              onMouseLeave={() => setHovered((current) => (current === index ? null : current))}
+              onClick={() => {
+                setHovered(null);
+                onChoose(item);
+              }}
             >
               <span>{item.label}</span>
               <em>{item.note}</em>

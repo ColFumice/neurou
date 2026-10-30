@@ -186,6 +186,7 @@ const START_ITEMS: StartItem[] = [
   { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
   { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
   { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
+  { id: 'flow', label: '等值线流场', note: 'F10 动态调律', file: 'examples/flow-field.nro' },
   { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
   { id: 'graph', label: '章节路线', note: 'F9', file: '' },
   { id: 'help', label: '手势帮助', note: '?', file: '' },
@@ -458,6 +459,8 @@ export function App() {
   const [saveError, setSaveError] = useState('');
   const [saveErrorLine, setSaveErrorLine] = useState<number | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [flowOpen, setFlowOpen] = useState(false);
+  const [flowSelected, setFlowSelected] = useState(0);
   const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
@@ -796,6 +799,53 @@ export function App() {
     window.addEventListener('keydown', onGraphKey, true);
     return () => window.removeEventListener('keydown', onGraphKey, true);
   }, [chapterGraphOpen]);
+
+  // v1.4：F10 流场调律——方向键选择参数，左右键实时改写绑定弦。
+  useEffect(() => {
+    const targets = (): { port: string; name: string; string: string }[] =>
+      (worldIRRef.current?.ports ?? [])
+        .filter((port) => port.kind === '视觉' && port.texture?.pattern === '流场')
+        .flatMap((port) =>
+          port.params.map((param) => ({ port: port.name, name: param.name, string: param.string })),
+        );
+    const onFlowKey = (event: KeyboardEvent): void => {
+      if (event.code === 'F10' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (flowOpen) {
+          setFlowOpen(false);
+        } else {
+          setFlowSelected(0);
+          setPreviewOpen(true);
+          setFlowOpen(true);
+        }
+        return;
+      }
+      if (!flowOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.code === 'Escape') {
+        setFlowOpen(false);
+        return;
+      }
+      const list = targets();
+      if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+        if (list.length === 0) return;
+        const step = event.code === 'ArrowDown' ? 1 : -1;
+        setFlowSelected((current) => (current + step + list.length) % list.length);
+      } else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
+        const target = list[flowSelected];
+        if (!target || !universe) return;
+        const current = universe.get(target.string);
+        if (typeof current !== 'number') return;
+        const delta = event.code === 'ArrowRight' ? 2 : -2;
+        universe.inject(target.string, Math.max(0, Math.min(100, current + delta)));
+        setVersion((value) => value + 1);
+      }
+    };
+    window.addEventListener('keydown', onFlowKey, true);
+    return () => window.removeEventListener('keydown', onFlowKey, true);
+  }, [flowOpen, flowSelected, universe]);
 
   // v5.7/v5.27：视觉端口 → GLSLBackend；多个端口各编译一个 canvas。
   useEffect(() => {
@@ -1478,6 +1528,8 @@ export function App() {
       data-save-error={saveError}
       data-save-error-line={saveErrorLine ?? ''}
       data-help-open={helpOpen ? 'true' : 'false'}
+      data-flow-open={flowOpen ? 'true' : 'false'}
+      data-flow-selected={flowOpen ? flowSelected : ''}
       data-start-open={startOpen ? 'true' : 'false'}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
@@ -1537,13 +1589,48 @@ export function App() {
           }}
         />
       ) : null}
+      {flowOpen ? (
+        <Modal onClose={() => setFlowOpen(false)} className="flow-modal" testId="flow-modal">
+          <div className="flow-editor" data-testid="flow-editor">
+            <div className="flow-editor__title">流场调律 · F10</div>
+            <div className="flow-editor__hint">↑/↓ 选参数 · ←/→ 调整 · 空格预览 · Esc 关闭</div>
+            {((worldIR?.ports ?? [])
+              .filter((port) => port.kind === '视觉' && port.texture?.pattern === '流场')
+              .flatMap((port) =>
+                port.params.map((param) => ({ port: port.name, name: param.name, string: param.string })),
+              )
+            ).map((target, index) => {
+              const value = universe?.get(target.string);
+              return (
+                <div
+                  key={`${target.port}:${target.name}`}
+                  className={`flow-row${index === flowSelected ? ' flow-row--selected' : ''}`}
+                  data-flow-param={target.name}
+                  data-flow-value={typeof value === 'number' ? value : ''}
+                  data-modal-item
+                  data-modal-no-arrow
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setFlowSelected(index)}
+                >
+                  <span>{target.name}</span>
+                  <em>{typeof value === 'number' ? value.toFixed(1) : '—'}</em>
+                </div>
+              );
+            })}
+            {(worldIR?.ports ?? []).every((port) => port.texture?.pattern !== '流场') ? (
+              <div className="flow-editor__empty">当前世界没有「纹理 流场」视觉端口。</div>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
       {helpOpen ? (
         <Modal onClose={() => setHelpOpen(false)} className="help-modal" testId="help-modal">
           <div className="help-overlay" data-testid="help-overlay">
             <div className="help-overlay__title">手势</div>
             <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
             <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则 · F9 章节路线</div>
-            <div>Space 预览 · Ctrl+Z 撤销 · R 结局后重开 · ? 帮助</div>
+            <div>F10 流场调律 · Space 预览 · Ctrl+Z 撤销 · ? 帮助</div>
             <div
               data-modal-item
               data-modal-no-arrow
@@ -1818,7 +1905,12 @@ export function App() {
         </>
       ) : null}
       {previewOpen && screen === 'strings' ? (
-        <div className="preview-mask" data-testid="preview-mask">
+        <div
+          className={`preview-mask${
+            (worldIR?.ports ?? []).some((port) => port.texture?.pattern === '流场') ? ' preview-mask--flow' : ''
+          }`}
+          data-testid="preview-mask"
+        >
           {glslStatus === 'ok'
             ? glslArtifacts.map((artifact, index) => (
                 <GlslCanvas

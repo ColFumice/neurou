@@ -1226,7 +1226,7 @@ export function StringField({
           // v5.37/v5.39：持续型弦显示可编辑波形；Catmull-Rom 平滑连接 + 缓动变形。
           const sample = smoothSample(sustainedWave, x01);
           const envelope = Math.pow(Math.sin(Math.PI * x01), 0.45);
-          focusDispBuf[i] = (sample - 0.5) * 2 * sustainedProfile.maxPull * 0.62 * envelope;
+          focusDispBuf[i] = (sample - 0.5) * 2 * LOGICAL_H * 0.46 * envelope;
           continue;
         }
         let value = u[i] ?? 0;
@@ -2113,7 +2113,7 @@ export function StringField({
         const kind = kindOf(focusIdx);
         const laneId = laneAt(focusIdx)?.id ?? kind;
         const profile = profileOf(focusIdx);
-        const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
+        const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, LOGICAL_H * 0.5), 0, 1);
         const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
         sustainedWaves.editAtString(laneId, kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
         commitWaveform(sustainedWaves.getFor(laneId, kind), true);
@@ -2146,7 +2146,7 @@ export function StringField({
           const kind = kindOf(focusIdx);
           const laneId = laneAt(focusIdx)?.id ?? kind;
           const profile = profileOf(focusIdx);
-          const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
+          const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, LOGICAL_H * 0.5), 0, 1);
           const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
           const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
           commitWaveform(waveBands);
@@ -2469,7 +2469,7 @@ export function StringField({
         if (interaction === '持续') {
           const kind = kindOf(focusIdx);
           const laneId = laneAt(focusIdx)?.id ?? kind;
-          const amp = clamp(amplitude / Math.max(1, profile.maxPull), 0, 1);
+          const amp = clamp(amplitude / Math.max(1, LOGICAL_H * 0.5), 0, 1);
           const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
           commitWaveform(waveBands, true);
           const id = audio.startSustainedSpectrum(
