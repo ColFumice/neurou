@@ -1026,17 +1026,28 @@ export function App() {
           return;
         }
         const entryBase = projectEntryStrings(WORLD_FILE, baseSource, baseProjectIR);
-        if (entryBase.length === 0) {
+        const baseEntryIds = new Set(entryBase.map((string) => string.id));
+        const baseProjectIds = new Set(baseProjectIR.strings.map((string) => string.id));
+        const moduleIds = new Set(
+          baseProjectIR.strings.filter((string) => !baseEntryIds.has(string.id)).map((string) => string.id),
+        );
+        const addedEntry = candidate.strings.filter((string) => !baseProjectIds.has(string.id));
+        if (entryBase.length === 0 && addedEntry.length === 0) {
           setSaveError('入口文件没有可写回的弦');
           setSaveState('error');
           return;
         }
-        const entryIds = new Set(entryBase.map((string) => string.id));
-        const moduleChanged = candidate.strings.some((string) => {
-          if (entryIds.has(string.id)) return false;
-          const before = baseProjectIR.strings.find((item) => item.id === string.id);
-          return !before || JSON.stringify(before) !== JSON.stringify(string);
-        });
+        const moduleChanged =
+          [...moduleIds].some((id) => {
+            const before = baseProjectIR.strings.find((string) => string.id === id);
+            const after = candidate.strings.find((string) => string.id === id);
+            return !before || !after || JSON.stringify(before) !== JSON.stringify(after);
+          }) ||
+          candidate.strings.some((string) => {
+            if (!moduleIds.has(string.id)) return false;
+            const before = baseProjectIR.strings.find((item) => item.id === string.id);
+            return !before || JSON.stringify(before) !== JSON.stringify(string);
+          });
         if (moduleChanged) {
           setSaveError('模块内的弦是只读的；只能在入口文件里编辑');
           setSaveState('error');
@@ -1062,10 +1073,12 @@ export function App() {
           setSaveState('error');
           return;
         }
-        const editedEntry = entryBase.map((base) => {
+        const editedEntry = [];
+        for (const base of entryBase) {
           const edited = candidate.strings.find((string) => string.id === base.id);
-          return edited ? { ...edited, span: base.span } : base;
-        });
+          if (edited) editedEntry.push({ ...edited, span: base.span });
+        }
+        editedEntry.push(...addedEntry);
         const patch = patchProjectEntry(baseSource, entryBase, editedEntry);
         if (!patch.ok) {
           setSaveError(`入口写回失败：${patch.reason}`);

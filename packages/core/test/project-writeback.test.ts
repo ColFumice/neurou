@@ -50,4 +50,32 @@ describe('模块入口写回（v5.47）', () => {
     const single = `世界 单文件\n  版本 0.1\n\n叙事弦 甲\n  类型 数值 0..100\n  基线 10\n`;
     expect(compileText(single, 'single.nro').ok).toBe(true);
   });
+
+  it('入口弦新增/删除可写回', () => {
+    const files = { 'examples/entry.nro': ENTRY, 'examples/mod.nro': MODULE };
+    const base = compileProjectFromFiles('examples/entry.nro', files);
+    if (!base.ok) throw new Error('compile failed');
+    const baseEntry = projectEntryStrings('examples/entry.nro', ENTRY, base.ir);
+    const added = {
+      id: '新弦',
+      name: '新弦',
+      kind: '叙事' as const,
+      domain: { type: 'number' as const, min: 0, max: 100 },
+      baseline: 20,
+      response: '线性' as const,
+    };
+    const edited = [...baseEntry, added] as typeof baseEntry;
+    const patch = patchProjectEntry(ENTRY, baseEntry, edited);
+    expect(patch.ok).toBe(true);
+    if (!patch.ok) return;
+    expect(patch.text).toContain('叙事弦 新弦');
+    expect(patch.text).toContain('引入 "mod.nro"');
+    expect(patch.text).not.toContain('命名空间 雨');
+
+    const removed = patchProjectEntry(ENTRY, baseEntry, []);
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.text).not.toContain('叙事弦 入口');
+    expect(removed.text).toContain('引入 "mod.nro"');
+  });
 });
