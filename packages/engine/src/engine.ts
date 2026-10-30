@@ -53,6 +53,57 @@ export function isHostSnapshotCompatible(snapshot: unknown): { ok: true } | { ok
   return { ok: true };
 }
 
+/** v6.21：Host 快照迁移器骨架；v0/无 stateVersion 可提升到 v1。 */
+export function migrateHostSnapshot(
+  input: unknown,
+): { ok: true; snapshot: HostSnapshot; notes: string[] } | { ok: false; reason: string } {
+  if (typeof input !== 'object' || input === null) return { ok: false, reason: '快照不是对象' };
+  const value = input as Record<string, unknown>;
+  const state = value.state;
+  if (typeof state !== 'object' || state === null) return { ok: false, reason: '快照缺少 state' };
+  if (value.abi === HOST_ABI) {
+    const version = value.stateVersion ?? 1;
+    if (version !== 1) return { ok: false, reason: `stateVersion 不支持：${String(version)}` };
+    return {
+      ok: true,
+      snapshot: {
+        ...(value as unknown as HostSnapshot),
+        abi: HOST_ABI,
+        stateVersion: 1,
+      },
+      notes: value.stateVersion === undefined ? ['补上缺失的 stateVersion=1'] : [],
+    };
+  }
+  if (value.abi === 'neurou-host/0') {
+    const description = value.description;
+    return {
+      ok: true,
+      snapshot: {
+        ...(value as unknown as HostSnapshot),
+        abi: HOST_ABI,
+        stateVersion: 1,
+        description: (description as EngineDescription | undefined) ?? {
+          abi: HOST_ABI,
+          name: 'legacy',
+          version: '',
+          tick: 0,
+          scenes: [],
+          systems: [],
+          activeSystems: [],
+          ports: [],
+          strings: 0,
+          audioAssets: 0,
+          textureAssets: 0,
+          functions: 0,
+          ended: false,
+        },
+      },
+      notes: ['从 neurou-host/0 提升到 neurou-host/1'],
+    };
+  }
+  return { ok: false, reason: `ABI 不匹配：${String(value.abi)}` };
+}
+
 /** v5.51：Host 集成用的只读世界摘要。 */
 export interface EngineDescription {
   abi: typeof HOST_ABI;

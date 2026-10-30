@@ -12,6 +12,7 @@ export {
   type EngineDescription,
   type HostSnapshot,
   isHostSnapshotCompatible,
+  migrateHostSnapshot,
 } from './engine.js';
 export {
   type BackendAdapter,
