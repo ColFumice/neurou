@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compileText } from '@neurou/core';
-import { createEngine, type SceneFrame } from '../src/index.js';
+import { createEngine, HOST_ABI, type SceneFrame } from '../src/index.js';
 
 const WORLD = `世界 门面测试
   版本 0.1
@@ -113,5 +113,18 @@ describe('Engine facade（v5.2）', () => {
     expect(description.strings).toBe(1);
     expect(description.functions).toBe(0);
     expect(description.ended).toBe(false);
+  });
+
+  it('Host ABI 快照可 JSON roundtrip', () => {
+    const result = compileText(WORLD, 'engine-host-abi.nro');
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    const snapshot = engine.toHostSnapshot();
+    expect(snapshot.abi).toBe(HOST_ABI);
+    expect(snapshot.description.abi).toBe(HOST_ABI);
+    expect(snapshot.values).toEqual(engine.state.values);
+    const roundtrip = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    expect(roundtrip.abi).toBe(HOST_ABI);
+    expect(roundtrip.values['能量']).toBe(5);
   });
 });

@@ -1,0 +1,8 @@
+{
+  "name": "neurou-external-host-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx main.ts"
+  }
+}

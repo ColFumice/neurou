@@ -30,8 +30,19 @@ export interface SceneFrame {
 
 export type EngineListener = (frame: SceneFrame) => void;
 
+/** v6.1：Host 稳定 ABI 标识；字段语义见 docs/110。 */
+export const HOST_ABI = 'neurou-host/1' as const;
+
+export interface HostSnapshot {
+  abi: typeof HOST_ABI;
+  description: EngineDescription;
+  values: Record<string, RuntimeValue>;
+  state: WorldState;
+}
+
 /** v5.51：Host 集成用的只读世界摘要。 */
 export interface EngineDescription {
+  abi: typeof HOST_ABI;
   name: string;
   version: string;
   tick: number;
@@ -68,6 +79,7 @@ export class Engine {
 
   describe(): EngineDescription {
     return {
+      abi: HOST_ABI,
       name: this.ir.name,
       version: String(this.ir.meta['版本'] ?? ''),
       tick: this.tick,
@@ -130,6 +142,16 @@ export class Engine {
 
   get stats(): typeof this.universe.stats {
     return this.universe.stats;
+  }
+
+  /** v6.1：可 JSON 序列化的 Host 快照；ABI 见 docs/110。 */
+  toHostSnapshot(): HostSnapshot {
+    return {
+      abi: HOST_ABI,
+      description: this.describe(),
+      values: { ...this.state.values },
+      state: this.snapshot(),
+    };
   }
 
   inject(id: string, value: RuntimeValue): number {

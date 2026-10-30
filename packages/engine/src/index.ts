@@ -6,9 +6,11 @@
 export {
   Engine,
   createEngine,
+  HOST_ABI,
   type SceneFrame,
   type EngineListener,
   type EngineDescription,
+  type HostSnapshot,
 } from './engine.js';
 export {
   type BackendAdapter,
