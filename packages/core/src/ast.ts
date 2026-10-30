@@ -235,6 +235,8 @@ export interface PortDecl extends DeclBase {
   texture?: { pattern: string; scale: number; span: Span };
   /** v5.30：视觉端口绑定的纹理资产名。 */
   textureAsset?: string;
+  /** v6.15：音频端口参数自动化包络（0..1），周期 = bands.length * 4 拍。 */
+  automation?: number[];
 }
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */

@@ -2126,6 +2126,18 @@ class Compiler {
           }
         }
       }
+      let automation: number[] | undefined;
+      if (d.automation) {
+        if (d.kind !== '音频') {
+          this.error('NRO2003', `视觉端口「${d.name}」不能声明音频自动化。`, d.span);
+        } else if (d.automation.length < 2 || d.automation.length > 64) {
+          this.error('NRO2003', `音频端口「${d.name}」的自动化需要 2..64 个采样。`, d.span);
+        } else if (d.automation.some((value) => !Number.isFinite(value) || value < 0 || value > 1)) {
+          this.error('NRO2003', `音频端口「${d.name}」的自动化采样必须在 0..1 之间。`, d.span);
+        } else {
+          automation = d.automation.map((value) => Math.round(value * 1000) / 1000);
+        }
+      }
       this.ports.push({
         id: `port:${d.kind}:${d.name}`,
         name: d.name,
@@ -2133,6 +2145,7 @@ class Compiler {
         params,
         ...(texture ? { texture } : {}),
         ...(textureAsset ? { textureAsset } : {}),
+        ...(automation ? { automation } : {}),
       });
     }
   }

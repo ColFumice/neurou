@@ -251,6 +251,16 @@ export class Engine {
     for (const port of this.ir.ports ?? []) {
       const params: Record<string, RuntimeValue> = {};
       for (const param of port.params) params[param.name] = state.values[param.string] ?? null;
+      let automation: number | undefined;
+      if (port.automation && port.automation.length >= 2) {
+        const period = port.automation.length * 4;
+        const position = (state.tick % period) / period * port.automation.length;
+        const index = Math.floor(position);
+        const next = (index + 1) % port.automation.length;
+        automation =
+          (port.automation[index] ?? 0.5) +
+          ((port.automation[next] ?? 0.5) - (port.automation[index] ?? 0.5)) * (position - index);
+      }
       ports[port.id] = {
         id: port.id,
         name: port.name,
@@ -258,6 +268,7 @@ export class Engine {
         params,
         ...(port.texture ? { texture: port.texture } : {}),
         ...(port.textureAsset ? { textureAsset: port.textureAsset } : {}),
+        ...(automation === undefined ? {} : { automation }),
       };
     }
     return {

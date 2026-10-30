@@ -293,6 +293,8 @@ export interface IRPort {
   texture?: { pattern: string; scale: number };
   /** v5.30：视觉端口绑定的纹理资产。 */
   textureAsset?: { name: string; src: string };
+  /** v6.15：音频端口参数自动化包络（0..1），周期 = bands.length * 4 拍。 */
+  automation?: number[];
 }
 
 /** v5.30：视觉纹理资产。 */

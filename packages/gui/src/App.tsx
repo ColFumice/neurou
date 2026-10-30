@@ -911,9 +911,10 @@ export function App() {
     const audioPorts = (worldIR?.ports ?? []).filter((port) => port.kind === '音频');
     if (!universe) return;
     audioPorts.forEach((port, index) => {
+      const automation = universe.observe().ports[port.id]?.automation ?? 1;
       const values = port.params.map((param) => {
         const value = universe.get(param.string);
-        return typeof value === 'number' ? value : 0;
+        return typeof value === 'number' ? value * automation : 0;
       });
       faustWasmRef.current[index]?.update(values);
       faustAudioRef.current[index]?.update(values, audioPref.volume);
@@ -1443,6 +1444,10 @@ export function App() {
         .join(',')}
       data-faust-status={faustStatus}
       data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}
+      data-faust-automation={(worldIR?.ports ?? [])
+        .filter((port) => port.kind === '音频' && port.automation)
+        .map((port) => port.name)
+        .join(',')}
       data-faust-error={faustError}
       data-chapter-title={chapterTitle}
       data-chapter-intro={chapterIntro ? 'true' : 'false'}

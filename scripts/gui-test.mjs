@@ -1799,6 +1799,7 @@ const storyApp = storyPage.locator('[data-testid="ink-app"]');
 const storyField = storyPage.locator('[data-testid="string-field"]');
 check('垂直故事：世界与 8 弦', (await storyField.getAttribute('data-world')) === '潮汐之间' && Number(await storyField.getAttribute('data-lane-count')) === 8, `${await storyField.getAttribute('data-world')}/${await storyField.getAttribute('data-lane-count')}`);
 check('垂直故事：两场景与视/音频端口', (await storyApp.getAttribute('data-engine-scenes')) === '夜,昼' && (await storyApp.getAttribute('data-glsl-ports')) === '1' && (await storyApp.getAttribute('data-faust-ports')) === '1', `${await storyApp.getAttribute('data-engine-scenes')}/${await storyApp.getAttribute('data-glsl-ports')}/${await storyApp.getAttribute('data-faust-ports')}`);
+check('垂直故事：音频端口带自动化曲线', (await storyApp.getAttribute('data-faust-automation')) === '潮声', String(await storyApp.getAttribute('data-faust-automation')));
 await storyPage.evaluate(() => window.__neurouString.setValue('叙事', 90));
 await storyPage.waitForTimeout(1200);
 check('垂直故事：高信任走到安顿', (await storyField.getAttribute('data-ending')) === '安顿', String(await storyField.getAttribute('data-ending')));

@@ -447,8 +447,16 @@ class Parser {
         } else if (key === '贴图') {
           decl.textureAsset = this.readName('纹理资产名');
           this.finishLine();
+        } else if (key === '自动化') {
+          const bands: number[] = [];
+          while (!this.atLineEnd()) {
+            bands.push(this.readNumber('自动化采样'));
+            if (this.at('punct', ',')) this.advance();
+          }
+          decl.automation = bands;
+          this.finishLine();
         } else {
-          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>、贴图 <资产名>。');
+          this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>、贴图 <资产名>、自动化 <采样...>。');
           this.skipToLineEnd();
         }
       }
