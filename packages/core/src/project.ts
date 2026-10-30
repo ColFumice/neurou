@@ -8,7 +8,7 @@
  * “按依赖顺序合并声明后编译”，因此诊断行号指向合并后的文本，
  * 不是各模块原始行号——这是第一个版本明确的限制。
  */
-import { SourceFile } from './source.js';
+import { SourceFile, type Span } from './source.js';
 import { compile, type CompileResult } from './compiler.js';
 import { parse } from './parser.js';
 import { patchWorldText, type PatchResult } from './patch.js';
@@ -68,6 +68,8 @@ export function compileProjectFromFiles(entryPath: string, files: ProjectSources
   const visited = new Set<string>();
   const visiting = new Set<string>();
   const chunks: string[] = [];
+  let entryChunkStart = 0;
+  let entryHeaderLength = 0;
 
   const visit = (path: string): void => {
     if (visiting.has(path)) throw new ProjectError(`模块循环引入：${path}`);
@@ -81,12 +83,58 @@ export function compileProjectFromFiles(entryPath: string, files: ProjectSources
     if (path !== entry && WORLD_RE.test(source)) {
       throw new ProjectError(`模块「${path}」不能声明世界；世界只能写在入口文件。`);
     }
-    chunks.push(`# 模块 ${path}\n${withoutImports(source)}`);
+    const header = `# 模块 ${path}\n`;
+    if (path === entry) {
+      entryChunkStart = chunks.join('\n').length + (chunks.length > 0 ? 1 : 0);
+      entryHeaderLength = header.length;
+    }
+    chunks.push(`${header}${withoutImports(source)}`);
   };
 
   visit(entry);
   const combined = chunks.join('\n');
-  return compile(new SourceFile(entry, combined));
+  const result = compile(new SourceFile(entry, combined));
+  result.entryOffset = entryChunkStart + entryHeaderLength;
+  return result;
+}
+
+/** v1.0：入口声明视图；只保留源位置落在入口文本内的声明，并把 span 重基到入口文本。 */
+export function projectEntryView(ir: WorldIR, entryOffset: number, entryLength: number): WorldIR {
+  const inside = (span: Span | undefined): boolean =>
+    Boolean(span && span.start.offset >= entryOffset && span.end.offset <= entryOffset + entryLength);
+  const rebase = (span: Span): Span => ({
+    start: { ...span.start, offset: span.start.offset - entryOffset },
+    end: { ...span.end, offset: span.end.offset - entryOffset },
+  });
+  const pick = <T,>(items: T[] | undefined): T[] =>
+    (items ?? [])
+      .filter((item) => inside((item as { span?: Span }).span))
+      .map((item) => {
+        const span = (item as { span?: Span }).span;
+        return span ? ({ ...item, span: rebase(span) } as T) : item;
+      });
+
+  return {
+    ...ir,
+    strings: pick(ir.strings),
+    entities: pick(ir.entities),
+    spectra: pick(ir.spectra),
+    matrices: pick(ir.matrices),
+    couplings: pick(ir.couplings),
+    loops: pick(ir.loops),
+    rules: pick(ir.rules),
+    axioms: pick(ir.axioms),
+    signals: pick(ir.signals),
+    phases: pick(ir.phases),
+    endings: pick(ir.endings),
+    ...(ir.systems ? { systems: pick(ir.systems) } : {}),
+    ...(ir.scenes ? { scenes: pick(ir.scenes) } : {}),
+    ...(ir.ports ? { ports: pick(ir.ports) } : {}),
+    ...(ir.namespaces ? { namespaces: pick(ir.namespaces) } : {}),
+    ...(ir.functions ? { functions: pick(ir.functions) } : {}),
+    ...(ir.audioAssets ? { audioAssets: pick(ir.audioAssets) } : {}),
+    ...(ir.textureAssets ? { textureAssets: pick(ir.textureAssets) } : {}),
+  };
 }
 
 /** v5.9：带文件读取回调的版本，给 CLI 用；core 本身不做文件 I/O。 */

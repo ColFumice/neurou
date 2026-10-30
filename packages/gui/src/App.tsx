@@ -8,6 +8,7 @@ import {
   patchWorldText,
   patchProjectEntry,
   projectEntryStrings,
+  projectEntryView,
   projectGraph,
   removeCoupling,
   removeString,
@@ -1025,6 +1026,13 @@ export function App() {
           setSaveState('error');
           return;
         }
+        const baseCompiled = compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: baseSource });
+        const entryOffset = baseCompiled.entryOffset;
+        if (typeof entryOffset !== 'number') {
+          setSaveError('模块世界缺少入口偏移');
+          setSaveState('error');
+          return;
+        }
         const entryBase = projectEntryStrings(WORLD_FILE, baseSource, baseProjectIR);
         const baseEntryIds = new Set(entryBase.map((string) => string.id));
         const baseProjectIds = new Set(baseProjectIR.strings.map((string) => string.id));
@@ -1032,11 +1040,6 @@ export function App() {
           baseProjectIR.strings.filter((string) => !baseEntryIds.has(string.id)).map((string) => string.id),
         );
         const addedEntry = candidate.strings.filter((string) => !baseProjectIds.has(string.id));
-        if (entryBase.length === 0 && addedEntry.length === 0) {
-          setSaveError('入口文件没有可写回的弦');
-          setSaveState('error');
-          return;
-        }
         const moduleChanged =
           [...moduleIds].some((id) => {
             const before = baseProjectIR.strings.find((string) => string.id === id);
@@ -1053,33 +1056,16 @@ export function App() {
           setSaveState('error');
           return;
         }
-        const nonStringChanged =
-          JSON.stringify({
-            spectra: candidate.spectra,
-            matrices: candidate.matrices,
-            couplings: candidate.couplings,
-            rules: candidate.rules,
-            meta: candidate.meta,
-          }) !==
-          JSON.stringify({
-            spectra: baseProjectIR.spectra,
-            matrices: baseProjectIR.matrices,
-            couplings: baseProjectIR.couplings,
-            rules: baseProjectIR.rules,
-            meta: baseProjectIR.meta,
-          });
-        if (nonStringChanged) {
-          setSaveError('模块世界暂只支持入口弦字段写回');
+        // v1.0：入口声明视图——弦/谱/关系谱/耦合等所有入口声明。
+        const baseView = projectEntryView(baseProjectIR, entryOffset, baseSource.length);
+        const candidateView = projectEntryView(candidate, entryOffset, baseSource.length);
+        candidateView.strings.push(...addedEntry);
+        if (baseView.strings.length === 0 && baseView.spectra.length === 0 && baseView.couplings.length === 0) {
+          setSaveError('入口文件没有可写回的结构');
           setSaveState('error');
           return;
         }
-        const editedEntry = [];
-        for (const base of entryBase) {
-          const edited = candidate.strings.find((string) => string.id === base.id);
-          if (edited) editedEntry.push({ ...edited, span: base.span });
-        }
-        editedEntry.push(...addedEntry);
-        const patch = patchProjectEntry(baseSource, entryBase, editedEntry);
+        const patch = patchWorldText(baseSource, baseView, candidateView);
         if (!patch.ok) {
           setSaveError(`入口写回失败：${patch.reason}`);
           setSaveState('error');

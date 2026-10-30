@@ -27,6 +27,7 @@ export {
   normalizeProjectPath,
   projectGraph,
   projectEntryStrings,
+  projectEntryView,
   patchProjectEntry,
   type ProjectModule,
   ProjectError,

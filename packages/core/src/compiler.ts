@@ -69,6 +69,8 @@ export interface CompileResult {
   /** 即使有错误也尽量产出图，供 GUI 部分预览与引擎盖诊断 */
   ir: WorldIR;
   ok: boolean;
+  /** 多文件编译时，入口源码在合并文本中的起始偏移（v1.0 写回用）。 */
+  entryOffset?: number;
 }
 
 type TypeName = 'number' | 'boolean' | 'text' | 'enum' | 'set' | 'ref' | 'any';

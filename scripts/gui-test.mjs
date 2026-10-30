@@ -1803,6 +1803,58 @@ await modularPage.waitForTimeout(300);
 check('现象层显示模块依赖', (await modularPage.locator('[data-testid="preview-modules"] span').count()) === 2, String(await modularPage.locator('[data-testid="preview-modules"] span').count()));
 await modularPage.close();
 
+// v1.0：模块入口的非弦结构写回（谱段点）
+const PROJECT_STRUCT_PATH = 'examples/_acceptance-project-struct.nro';
+const PROJECT_STRUCT_SOURCE = `引入 "modules/rain.nro"
+
+# 入口结构注释
+世界 入口结构
+  版本 0.1
+
+叙事弦 甲
+  类型 数值 0..100
+  基线 20
+
+叙事弦 乙
+  类型 数值 0..100
+  基线 40
+
+谱 地形
+  段 0.1 0.2 0.3
+  范围 0..100
+
+耦合 甲 → 乙 同向 0.3
+`;
+writeFileSync(PROJECT_STRUCT_PATH, PROJECT_STRUCT_SOURCE, 'utf8');
+const structurePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await structurePage.goto(`${URL}?world=${encodeURIComponent(PROJECT_STRUCT_PATH)}&fresh=1`, { waitUntil: 'networkidle' });
+await structurePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await structurePage.waitForTimeout(700);
+const structureApp = structurePage.locator('[data-testid="ink-app"]');
+check('入口结构世界按项目打开', (await structureApp.getAttribute('data-project')) === 'true', String(await structureApp.getAttribute('data-project')));
+await structurePage.keyboard.press('F2');
+await structurePage.waitForTimeout(400);
+const structurePositions = await structurePage.evaluate(() => window.__neurouSpectrum?.bandPositions() ?? []);
+const structBand = structurePositions[1];
+if (structBand) {
+  await structurePage.mouse.move(structBand.x, structBand.y);
+  await structurePage.mouse.down();
+  await structurePage.mouse.move(structBand.x, structBand.y - 90, { steps: 8 });
+  await structurePage.waitForTimeout(260);
+  await structurePage.mouse.up();
+  await structurePage.waitForTimeout(1200);
+}
+check('入口谱编辑写回状态 = saved', (await structureApp.getAttribute('data-save-state')) === 'saved', String(await structureApp.getAttribute('data-save-state')));
+check('入口谱写回走行级 patch', (await structureApp.getAttribute('data-save-mode')) === 'patch', `${await structureApp.getAttribute('data-save-mode')}/${await structureApp.getAttribute('data-save-error')}`);
+const structText = readFileSync(PROJECT_STRUCT_PATH, 'utf8');
+check(
+  '入口谱行更新且注释/引入保留',
+  /段 0\.1 \d+(?:\.\d+)? 0\.3/.test(structText) && structText.includes('# 入口结构注释') && structText.includes('引入 "modules/rain.nro"') && !structText.includes('命名空间 雨'),
+  structText.split(/\r?\n/).find((line) => line.trimStart().startsWith('段')) ?? '',
+);
+await structurePage.close();
+try { unlinkSync(PROJECT_STRUCT_PATH); } catch { /* 清理临时入口 */ }
+
 await browser.close();
 // 关闭浏览器后可能还有一次 debounce 写回在飞，最后再恢复一次世界文件。
 restoreWorld();
