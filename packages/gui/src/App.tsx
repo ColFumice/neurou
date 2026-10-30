@@ -1967,7 +1967,7 @@ export function App() {
           </div>
         </>
       ) : null}
-      <MemoryMode active={memoryMode} screen={screen} worldFile={WORLD_FILE} onExit={() => setMemoryMode(false)} />
+      <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
       <Metronome />
       <StringHighlight />
       <CursorLayer />

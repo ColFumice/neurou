@@ -100,6 +100,12 @@ export class StringAudioEngine {
   /** v3.6：用户音量 0..1 / 静音；context 未建时先存值，创建时应用。 */
   private volume = 1;
   private muted = false;
+  /** v1.9：记忆模式的真实音频采样。 */
+  private memoryRecorder: MediaRecorder | null = null;
+  private memoryStream: MediaStreamAudioDestinationNode | null = null;
+  private memoryChunks: Blob[] = [];
+  private memoryTakes: AudioBuffer[] = [];
+  private memorySources: AudioBufferSourceNode[] = [];
 
   getState(): StringAudioState {
     return this.status;
@@ -129,6 +135,111 @@ export class StringAudioEngine {
     this.muted = !this.muted;
     this.applyMasterGain();
     return this.muted;
+  }
+
+  /** v1.9：从 master 并行录制真实界面音频，不经过合成音替代。 */
+  async startMemoryRecording(): Promise<boolean> {
+    await this.ensureStarted();
+    const ctx = this.ctx;
+    const master = this.master;
+    if (!ctx || !master || this.failed) return false;
+    if (typeof MediaRecorder === 'undefined') return false;
+    if (this.memoryRecorder) return true;
+    try {
+      const dest = ctx.createMediaStreamDestination();
+      master.connect(dest);
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      );
+      const recorder = mime ? new MediaRecorder(dest.stream, { mimeType: mime }) : new MediaRecorder(dest.stream);
+      this.memoryChunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) this.memoryChunks.push(event.data);
+      };
+      recorder.start(120);
+      this.memoryRecorder = recorder;
+      this.memoryStream = dest;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  memoryTakeCount(): number {
+    return this.memoryTakes.length;
+  }
+
+  /** 先前的采样循环直接接到 destination，不经过 master，避免被新录制再次采样。 */
+  playMemoryTakes(): number {
+    const ctx = this.ctx;
+    if (!ctx) return 0;
+    this.stopMemoryPlayback();
+    for (const buffer of this.memoryTakes) {
+      try {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        source.connect(ctx.destination);
+        source.start();
+        this.memorySources.push(source);
+      } catch {
+        /* ignore */
+      }
+    }
+    return this.memoryTakes.length;
+  }
+
+  stopMemoryPlayback(): void {
+    for (const source of this.memorySources) {
+      try {
+        source.stop();
+        source.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.memorySources = [];
+  }
+
+  async stopMemoryRecording(): Promise<{ durationMs: number; takes: number } | null> {
+    const recorder = this.memoryRecorder;
+    const stream = this.memoryStream;
+    if (!recorder) return null;
+    this.memoryRecorder = null;
+    this.memoryStream = null;
+    try {
+      if (recorder.state !== 'inactive') {
+        await new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+          recorder.stop();
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      if (stream) this.master?.disconnect(stream);
+    } catch {
+      /* ignore */
+    }
+    const chunks = this.memoryChunks.slice();
+    this.memoryChunks = [];
+    if (chunks.length === 0) return null;
+    try {
+      const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+      const data = await blob.arrayBuffer();
+      const buffer = await this.ctx?.decodeAudioData(data.slice(0));
+      if (!buffer || buffer.duration < 0.05) return null;
+      this.memoryTakes = [...this.memoryTakes, buffer].slice(-8);
+      return { durationMs: Math.round(buffer.duration * 1000), takes: this.memoryTakes.length };
+    } catch {
+      return null;
+    }
+  }
+
+  /** 移植音频资产 / 外部 Host 也可用它确认采样循环数量。 */
+  memoryTakeDurations(): number[] {
+    return this.memoryTakes.map((buffer) => Math.round(buffer.duration * 1000));
   }
 
   private effectiveGain(): number {
