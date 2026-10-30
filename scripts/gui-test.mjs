@@ -1863,6 +1863,22 @@ check(
 await structurePage.close();
 try { unlinkSync(PROJECT_STRUCT_PATH); } catch { /* 清理临时入口 */ }
 
+// v6.2：完整垂直切片（弦/谱/关系谱/场景/端口/资源/动作/结局）
+const slicePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await slicePage.goto(`${URL}?world=${encodeURIComponent('examples/vertical-slice.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await slicePage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await slicePage.waitForTimeout(700);
+const sliceApp = slicePage.locator('[data-testid="ink-app"]');
+const sliceField = slicePage.locator('[data-testid="string-field"]');
+check('垂直切片：8 弦世界', Number(await sliceField.getAttribute('data-lane-count')) === 8 && (await sliceField.getAttribute('data-world')) === '垂直切片', `${await sliceField.getAttribute('data-world')}/${await sliceField.getAttribute('data-lane-count')}`);
+check('垂直切片：谱/关系谱/场景', (await sliceApp.getAttribute('data-spectrum-count')) === '1' && (await sliceApp.getAttribute('data-matrix-count')) === '1' && (await sliceApp.getAttribute('data-engine-scenes')) === '夜,昼', `${await sliceApp.getAttribute('data-spectrum-count')}/${await sliceApp.getAttribute('data-matrix-count')}/${await sliceApp.getAttribute('data-engine-scenes')}`);
+check('垂直切片：视觉/音频端口与资源', (await sliceApp.getAttribute('data-glsl-ports')) === '1' && (await sliceApp.getAttribute('data-faust-ports')) === '1' && (await sliceApp.getAttribute('data-glsl-assets'))?.includes('雨纹') === true, `${await sliceApp.getAttribute('data-glsl-ports')}/${await sliceApp.getAttribute('data-faust-ports')}/${await sliceApp.getAttribute('data-glsl-assets')}`);
+await slicePage.keyboard.press('Space');
+await slicePage.waitForTimeout(500);
+check('垂直切片：预览同时出现视觉与音频', (await slicePage.locator('[data-testid="preview-glsl"]').count()) === 1 && (await slicePage.locator('[data-testid="preview-audio"]').count()) === 1, String(await slicePage.locator('[data-testid="preview-glsl"]').count()));
+check('垂直切片：两 pass 与 Faust 节点', (await slicePage.locator('[data-testid="preview-glsl"][data-glsl-passes="2"]').count()) === 1 && Number(await sliceApp.getAttribute('data-faust-nodes')) >= 1, `${await sliceApp.getAttribute('data-faust-nodes')}`);
+await slicePage.close();
+
 // v5.59：F6 波形 / 资源编辑器
 const editorPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await editorPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
