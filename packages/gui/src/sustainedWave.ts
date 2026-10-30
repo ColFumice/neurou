@@ -24,6 +24,7 @@ function defaultWave(kind: StringKind): number[] {
 
 class SustainedWaveBank {
   private readonly waves = new Map<StringKind, number[]>();
+  private activeKinds: StringKind[] = [...SUSTAINED_KINDS];
   private storageKey: string | null = null;
 
   constructor() {
@@ -49,15 +50,23 @@ class SustainedWaveBank {
     }
   }
 
-  /** v5.43：从世界 IR 恢复持续弦波形（源文件优先于本地缓存）。 */
+  /** v5.44：F2 合奏只取当前世界真实存在的持续型弦，而不是固定四类。 */
   loadFromIR(strings: readonly IRString[]): void {
+    const present = new Set<StringKind>();
     for (const kind of SUSTAINED_KINDS) {
       const found = strings.find(
         (string) => string.kind === kind && Array.isArray(string.waveform) && string.waveform.length >= 2,
       );
-      if (!found?.waveform) continue;
-      this.waves.set(kind, found.waveform.map((value) => Math.max(0, Math.min(1, value))));
+      if (found) present.add(kind);
+      if (found?.waveform) {
+        this.waves.set(kind, found.waveform.map((value) => Math.max(0, Math.min(1, value))));
+      }
     }
+    // 没有显式波形的持续弦也算存在，使用默认波形参与合奏。
+    for (const string of strings) {
+      if (STRING_INTERACTIONS[string.kind] === '持续') present.add(string.kind);
+    }
+    this.activeKinds = SUSTAINED_KINDS.filter((kind) => present.has(kind));
     this.persist();
   }
 
@@ -97,12 +106,16 @@ class SustainedWaveBank {
 
   ensemble(): number[] {
     const out = new Array<number>(SUSTAINED_WAVE_BANDS).fill(0);
-    if (SUSTAINED_KINDS.length === 0) return out;
-    for (const kind of SUSTAINED_KINDS) {
+    if (this.activeKinds.length === 0) return out;
+    for (const kind of this.activeKinds) {
       const wave = this.get(kind);
-      for (let i = 0; i < SUSTAINED_WAVE_BANDS; i += 1) out[i] = (out[i] ?? 0) + (wave[i] ?? 0.5) / SUSTAINED_KINDS.length;
+      for (let i = 0; i < SUSTAINED_WAVE_BANDS; i += 1) out[i] = (out[i] ?? 0) + (wave[i] ?? 0.5) / this.activeKinds.length;
     }
     return out;
+  }
+
+  activeCount(): number {
+    return this.activeKinds.length;
   }
 }
 

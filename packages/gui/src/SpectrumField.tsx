@@ -442,11 +442,13 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
       );
     }
 
-    /** v5.38：只有 F2 按住 ↑/↓ 连续调音时，才使用全部持续型弦的合奏波形。 */
+    /** v5.44：F2 方向键合奏只取当前世界真实存在的持续型弦。 */
     function startArrowVoice(spectrum: SpectrumView, band: number, value: number): number {
+      const ensemble = sustainedWaves.ensemble();
+      if (ensemble.length < 2 || sustainedWaves.activeCount() === 0) return 0;
       void audio.ensureStarted();
       return audio.startSustainedSpectrum(
-        sustainedWaves.ensemble(),
+        ensemble,
         nodeXNorm(spectrum, band),
         nodeYNorm(spectrum, value),
         true,
