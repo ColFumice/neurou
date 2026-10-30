@@ -59,6 +59,22 @@ export function MemoryMode({ active, screen, onExit }: MemoryModeProps): JSX.Ele
 
     const onKey = (event: KeyboardEvent): void => {
       if (!activeRef.current) return;
+      if (event.ctrlKey && event.code === 'F12') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        audio.stopMemoryPlayback();
+        audio.clearMemoryTakes();
+        setTakes(0);
+        return;
+      }
+      if (event.ctrlKey && (event.code === 'Delete' || event.code === 'Backspace')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        audio.stopMemoryPlayback();
+        audio.removeLastMemoryTake();
+        setTakes(audio.playMemoryTakes());
+        return;
+      }
       if (!NOTE_KEYS.test(event.key) && event.code !== 'Space') return;
       if (event.repeat) return;
       notesRef.current += 1;

@@ -275,6 +275,8 @@ export interface StringFieldProps {
   resetSignal?: number;
   /** v1.7：Esc 不再进入总览，而是回到初始界面。 */
   onExitToStart?: () => void;
+  /** v1.10：把当前焦点弦类型同步给记忆模式。 */
+  onFocusKindChange?: (kind: StringKind) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -456,6 +458,7 @@ export function StringField({
   onRestart,
   resetSignal,
   onExitToStart,
+  onFocusKindChange,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -495,6 +498,10 @@ export function StringField({
   const safeFocus = laneCount > 0 ? Math.min(focusIndex, laneCount - 1) : 0;
   const focusLane = view.lanes[safeFocus] ?? null;
   const focusKind = focusLane ? focusLane.kind : '叙事';
+
+  useEffect(() => {
+    onFocusKindChange?.(focusKind);
+  }, [focusKind, onFocusKindChange]);
 
   const actions = view.actions ?? [];
   const [touchMode, setTouchMode] = useState(false);

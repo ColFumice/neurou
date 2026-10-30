@@ -1059,3 +1059,31 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
 }
 .metronome__dot--accent { background: #fff; box-shadow: 0 0 16px rgba(255,255,255,.9); }
 .metronome__hint { font-size: 9px; opacity: .35; margin-left: 8px; max-width: 150px; line-height: 1.5; }
+
+/* v1.10：F9 记忆模式效果器 */
+.memory-effects {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 260;
+  width: min(420px, 86vw);
+  padding: 20px 22px;
+  border-radius: 18px;
+  background: rgba(8, 8, 10, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f6f6f3;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+.memory-effects__title { font-family: var(--serif); font-size: 18px; letter-spacing: .12em; }
+.memory-effects__hint { font-size: 10px; opacity: .45; margin: 6px 0 14px; }
+.memory-effects__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  opacity: .62;
+}
+.memory-effects__row--selected { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+.memory-effects__row em { font-style: normal; opacity: .7; }

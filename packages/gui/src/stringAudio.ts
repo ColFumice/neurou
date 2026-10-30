@@ -12,6 +12,21 @@ import type { TimbreCurve } from './stringMath.js';
 
 export type StringAudioState = 'off' | 'running' | 'suspended' | 'unavailable';
 
+export interface KindEffects {
+  /** 0..1，混响发送量。 */
+  reverb: number;
+  /** 200..12000Hz 低通。 */
+  cutoff: number;
+}
+
+interface KindBus {
+  input: GainNode;
+  filter: BiquadFilterNode;
+  dry: GainNode;
+  wet: GainNode;
+  convolver: ConvolverNode;
+}
+
 /** v3.6：master 基础增益；有效增益 = 0.4 × volume（muted 时 0）。 */
 const BASE_MASTER_GAIN = 0.4;
 
@@ -106,6 +121,9 @@ export class StringAudioEngine {
   private memoryChunks: Blob[] = [];
   private memoryTakes: AudioBuffer[] = [];
   private memorySources: AudioBufferSourceNode[] = [];
+  /** v1.10：按弦类型分开的效果总线（F9 记忆模式）。 */
+  private kindBuses = new Map<StringKind, KindBus>();
+  private kindEffects = new Map<StringKind, KindEffects>();
 
   getState(): StringAudioState {
     return this.status;
@@ -167,6 +185,71 @@ export class StringAudioEngine {
 
   memoryTakeCount(): number {
     return this.memoryTakes.length;
+  }
+
+  clearMemoryTakes(): void {
+    this.memoryTakes = [];
+    this.stopMemoryPlayback();
+  }
+
+  removeLastMemoryTake(): number {
+    this.memoryTakes = this.memoryTakes.slice(0, -1);
+    return this.memoryTakes.length;
+  }
+
+  getKindEffects(kind: StringKind): KindEffects {
+    return this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000 };
+  }
+
+  /** F9：调整当前弦类型的效果器总线。 */
+  setKindEffects(kind: StringKind, patch: Partial<KindEffects>): KindEffects {
+    const current = this.getKindEffects(kind);
+    const next: KindEffects = {
+      reverb: Math.max(0, Math.min(1, patch.reverb ?? current.reverb)),
+      cutoff: Math.max(200, Math.min(12000, patch.cutoff ?? current.cutoff)),
+    };
+    this.kindEffects.set(kind, next);
+    const bus = this.kindBuses.get(kind);
+    if (bus) {
+      const now = this.ctx?.currentTime ?? 0;
+      bus.dry.gain.setTargetAtTime(1 - next.reverb * 0.55, now, 0.03);
+      bus.wet.gain.setTargetAtTime(next.reverb * 0.7, now, 0.03);
+      bus.filter.frequency.setTargetAtTime(next.cutoff, now, 0.03);
+    }
+    return next;
+  }
+
+  private outputFor(kind: StringKind): AudioNode {
+    return this.kindBuses.get(kind)?.input ?? this.master ?? this.ctx!.destination;
+  }
+
+  private buildKindBuses(ctx: AudioContext, master: GainNode): void {
+    const seconds = 1.8;
+    const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < data.length; i += 1) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3.2);
+      }
+    }
+    for (const kind of Object.keys(KIND_AUDIO) as StringKind[]) {
+      const input = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      const dry = ctx.createGain();
+      const wet = ctx.createGain();
+      const convolver = ctx.createConvolver();
+      convolver.buffer = impulse;
+      input.connect(filter);
+      filter.connect(dry);
+      filter.connect(convolver);
+      convolver.connect(wet);
+      dry.connect(master);
+      wet.connect(master);
+      this.kindBuses.set(kind, { input, filter, dry, wet, convolver });
+      this.setKindEffects(kind, this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000 });
+    }
   }
 
   /** 先前的采样循环直接接到 destination，不经过 master，避免被新录制再次采样。 */
@@ -352,6 +435,7 @@ export class StringAudioEngine {
     this.master = master;
     this.analyser = analyser;
     this.analyserData = new Float32Array(analyser.fftSize);
+    this.buildKindBuses(ctx, master);
 
     try {
       await ctx.resume();
@@ -731,14 +815,15 @@ export class StringAudioEngine {
     const gain = ctx.createGain();
     gain.gain.value = clamp(profile.gain * (0.5 + amp * 0.8), 0.02, 0.44);
     const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    const output = this.outputFor(kind);
     if (pan) {
       pan.pan.value = (x * 2 - 1) * 0.55;
       source.connect(gain);
       gain.connect(pan);
-      pan.connect(master);
+      pan.connect(output);
     } else {
       source.connect(gain);
-      gain.connect(master);
+      gain.connect(output);
     }
     this.sources.add(source);
     source.onended = () => {
@@ -853,14 +938,15 @@ export class StringAudioEngine {
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.055);
     const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    const output = this.outputFor(kind);
     if (pan) {
       pan.pan.value = (x * 2 - 1) * 0.4;
       osc.connect(gain);
       gain.connect(pan);
-      pan.connect(master);
+      pan.connect(output);
     } else {
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(output);
     }
     osc.start();
     this.sustainedStrings.set(id, { osc, gain, pan, kind, x, y });

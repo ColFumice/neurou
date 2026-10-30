@@ -53,6 +53,7 @@ import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
 import { Metronome } from './Metronome.js';
+import { MemoryEffects } from './MemoryEffects.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -476,6 +477,8 @@ export function App() {
   const [startLeaving, setStartLeaving] = useState(false);
   const [startEntering, setStartEntering] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
+  const [focusKind, setFocusKind] = useState<StringKind>('叙事');
+  const [memoryFxOpen, setMemoryFxOpen] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
@@ -799,6 +802,12 @@ export function App() {
   useEffect(() => {
     const onGraphKey = (event: KeyboardEvent): void => {
       if (event.code === 'F9' && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        if (memoryMode) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setMemoryFxOpen((open) => !open);
+          return;
+        }
         if (!chapterGraphOpen && screenRef.current !== 'strings') return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -812,7 +821,7 @@ export function App() {
     };
     window.addEventListener('keydown', onGraphKey, true);
     return () => window.removeEventListener('keydown', onGraphKey, true);
-  }, [chapterGraphOpen]);
+  }, [chapterGraphOpen, memoryMode]);
 
   // v1.6：F10 进入全屏可绘制流场；流场内部自己处理 F10/Esc 退出。
   useEffect(() => {
@@ -845,7 +854,7 @@ export function App() {
   useEffect(() => {
     if (
       memoryMode &&
-      (screen !== 'strings' ||
+      (screen === 'matrix' ||
         editorOpen ||
         ruleOpen ||
         helpOpen ||
@@ -855,6 +864,7 @@ export function App() {
         flowMode)
     ) {
       setMemoryMode(false);
+      setMemoryFxOpen(false);
     }
   }, [memoryMode, screen, editorOpen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen, flowMode]);
 
@@ -1382,19 +1392,28 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // F2：从八弦或关系谱进入谱模式（世界里至少有一条谱）。谱模式内的 F2/Esc 由 SpectrumField 处理。
+  // F2：从八弦或关系谱进入谱模式；记忆模式下自动选当前弦类型绑定的音色谱。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'F2' || event.ctrlKey || event.metaKey || event.altKey) return;
       if (screenRef.current === 'spectrum') return;
-      if ((worldIRRef.current?.spectra.length ?? 0) === 0) return;
+      const ir = worldIRRef.current;
+      if ((ir?.spectra.length ?? 0) === 0) return;
       event.preventDefault();
-      setSpectrumIndex(0);
+      if (memoryMode && ir) {
+        const bound = ir.strings.find((item) => item.kind === focusKind && item.timbre);
+        const index = bound
+          ? ir.spectra.findIndex((item) => item.id === bound.timbre || item.name === bound.timbre)
+          : -1;
+        setSpectrumIndex(index >= 0 ? index : 0);
+      } else {
+        setSpectrumIndex(0);
+      }
       setScreen('spectrum');
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [memoryMode, focusKind]);
 
   // F3：从八弦或谱模式进入关系谱矩阵（世界里至少有关系谱）。矩阵内的 F3/Esc 由 MatrixField 处理。
   useEffect(() => {
@@ -1968,6 +1987,7 @@ export function App() {
         </>
       ) : null}
       <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
+      <MemoryEffects open={memoryMode && memoryFxOpen} kind={focusKind} onClose={() => setMemoryFxOpen(false)} />
       <Metronome />
       <StringHighlight />
       <CursorLayer />
@@ -2482,6 +2502,7 @@ export function App() {
         onExitToStart={
           helpOpen || editorOpen || ruleOpen || chapterGraphOpen ? undefined : enterStart
         }
+        onFocusKindChange={setFocusKind}
       />
     ),
     false,
