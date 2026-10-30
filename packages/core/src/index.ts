@@ -34,7 +34,7 @@ export {
   type ProjectSources,
 } from './project.js';
 export { serialize, stringBlockLines } from './serialize.js';
-export { patchWorldText, type PatchResult, ruleBlockText, replaceRuleBlockText } from './patch.js';
+export { patchWorldText, type PatchResult, ruleBlockText, replaceRuleBlockText, patchRuleBlockText } from './patch.js';
 export {
   setStringBaseline,
   setStringThreshold,

@@ -405,6 +405,58 @@ export function ruleBlockText(text: string, rule: IRRule): string | null {
   return text.slice(start, end);
 }
 
+/** v6.11：逐行 diff 替换规则块；尽量保留未改行与行尾注释。 */
+export function patchRuleBlockText(
+  text: string,
+  rule: IRRule,
+  nextSource: string,
+): PatchResult {
+  if (!rule.span) return { ok: false, reason: `规则「${rule.id}」没有源位置` };
+  if (!nextSource.trim()) return { ok: false, reason: '规则源文本不能为空' };
+  const start = rule.span.start.offset;
+  const end = ruleBlockEnd(text, start);
+  const oldRaw = text.slice(start, end);
+  const hadTrailing = oldRaw.endsWith('\n');
+  const oldLines = oldRaw.replace(/\r?\n$/, '').split('\n');
+  const newLines = nextSource.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const oldMiddle = oldLines.slice(prefix, oldLines.length - suffix);
+  const newMiddle = newLines.slice(prefix, newLines.length - suffix);
+
+  const commentOf = (line: string): string => {
+    const match = /^(.*?)(\s+#.*)$/.exec(line);
+    return match?.[2] ?? '';
+  };
+  let middle: string[];
+  if (oldMiddle.length === newMiddle.length) {
+    middle = newMiddle.map((line, index) => {
+      const oldLine = oldMiddle[index] ?? '';
+      const oldComment = commentOf(oldLine);
+      return oldComment && !/#/.test(line) ? `${line.trimEnd()}${oldComment}` : line;
+    });
+  } else {
+    middle = [...newMiddle];
+  }
+  const rebuilt = `${[...oldLines.slice(0, prefix), ...middle, ...oldLines.slice(oldLines.length - suffix)].join('\n')}${hadTrailing ? '\n' : ''}`;
+  return {
+    ok: true,
+    text: `${text.slice(0, start)}${rebuilt}${text.slice(end)}`,
+    changed: [rule.id],
+  };
+}
+
 /** v6.7：整块替换规则源文本；调用方必须重新编译校验。 */
 export function replaceRuleBlockText(
   text: string,

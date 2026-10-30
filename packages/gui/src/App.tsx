@@ -11,6 +11,7 @@ import {
   projectEntryView,
   ruleBlockText,
   replaceRuleBlockText,
+  patchRuleBlockText,
   projectGraph,
   removeCoupling,
   removeString,
@@ -1514,7 +1515,7 @@ export function App() {
                 setSaveState('error');
                 return;
               }
-              const replaced = replaceRuleBlockText(text, rule, next);
+              const replaced = patchRuleBlockText(text, rule, next);
               if (!replaced.ok) {
                 setSaveError(replaced.reason);
                 setSaveState('error');
