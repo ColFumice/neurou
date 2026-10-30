@@ -4,7 +4,7 @@
  * 每条持续型弦保存一条 32 段波形（0..1 采样值）；按键/鼠标在弦上写入波形。
  * 发音使用该波形；F2 谱模式试听使用所有持续型弦的合奏。
  */
-import { STRING_INTERACTIONS, STRING_KINDS, type StringKind } from '@neurou/core';
+import { STRING_INTERACTIONS, STRING_KINDS, type IRString, type StringKind } from '@neurou/core';
 
 export const SUSTAINED_WAVE_BANDS = 32;
 export const SUSTAINED_KINDS = STRING_KINDS.filter((kind) => STRING_INTERACTIONS[kind] === '持续');
@@ -47,6 +47,18 @@ class SustainedWaveBank {
     } catch {
       /* 隐私模式/坏数据：退回默认波形 */
     }
+  }
+
+  /** v5.43：从世界 IR 恢复持续弦波形（源文件优先于本地缓存）。 */
+  loadFromIR(strings: readonly IRString[]): void {
+    for (const kind of SUSTAINED_KINDS) {
+      const found = strings.find(
+        (string) => string.kind === kind && Array.isArray(string.waveform) && string.waveform.length >= 2,
+      );
+      if (!found?.waveform) continue;
+      this.waves.set(kind, found.waveform.map((value) => Math.max(0, Math.min(1, value))));
+    }
+    this.persist();
   }
 
   reset(): void {

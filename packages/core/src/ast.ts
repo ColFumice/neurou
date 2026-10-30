@@ -111,6 +111,8 @@ export interface StringDecl extends DeclBase {
   target?: string;
   /** 音色引用：某条谱的名字（v2.0）。 */
   timbre?: string;
+  /** v5.43：持续型弦的可编辑波形（0..1）。 */
+  waveform?: number[];
   note?: string;
   /** 所属实体（嵌套声明时由 parser 填入） */
   owner?: string;

@@ -12,6 +12,7 @@ import {
   serialize,
   setCouplingStrengthBetween,
   setStringThreshold,
+  setStringWaveform,
   setSpectrumBand,
   setSpectrumBands,
   setMatrixCell,
@@ -446,6 +447,7 @@ export function App() {
   useEffect(() => {
     if (!compiled?.ok) return;
     applyWorldIR(compiled.ir);
+    sustainedWaves.loadFromIR(compiled.ir.strings);
     const nextUniverse = createEngine(compiled.ir, { seed: INITIAL_SEED });
     if (!bootedRef.current) {
       bootedRef.current = true;
@@ -1470,6 +1472,20 @@ export function App() {
     setVersion((v) => v + 1);
   };
 
+  const onEditWaveform = (stringId: string, waveform: number[]): void => {
+    if (transitionRef.current) return;
+    const current = worldIRRef.current;
+    if (!current) return;
+    const result = setStringWaveform(current, stringId, waveform);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
+    applyWorldIR(result.ir);
+    setSaveError('');
+    scheduleSave();
+  };
+
   const onEditThreshold = (
     kind: StringKind,
     which: 'verge' | 'safe',
@@ -1838,6 +1854,7 @@ export function App() {
         view={view}
         onInject={onInject}
         onEditThreshold={onEditThreshold}
+        onEditWaveform={onEditWaveform}
         onCycleString={onCycleString}
         onEditCoupling={onEditCoupling}
         onToggleCoupling={onToggleCoupling}

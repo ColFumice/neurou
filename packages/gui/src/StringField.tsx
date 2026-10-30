@@ -263,6 +263,8 @@ export interface StringFieldProps {
   onAddString?: (focusId: string) => void;
   /** Alt+Backspace：删除焦点弦（App 校验引用/回路，失败写 data-save-error）。 */
   onRemoveString?: (focusId: string) => void;
+  /** v5.43：持续型弦波形写入世界 IR（App debounce 写回 .nro）。 */
+  onEditWaveform?: (stringId: string, waveform: number[]) => void;
   /** v3.0 可玩层：执行一个世界动作（App 排队到下一拍）。 */
   onPerformAction?: (id: string) => void;
   /** v3.0 可玩层：结局后重开世界。 */
@@ -442,6 +444,7 @@ export function StringField({
   onToggleCoupling,
   onAddString,
   onRemoveString,
+  onEditWaveform,
   onPerformAction,
   onRestart,
   resetSignal,
@@ -450,6 +453,7 @@ export function StringField({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<WorldView>(view);
   const injectRef = useRef(onInject);
+  const waveformEditRef = useRef(onEditWaveform);
   const thresholdEditRef = useRef(onEditThreshold);
   const cycleRef = useRef(onCycleString);
   const couplingEditRef = useRef(onEditCoupling);
@@ -463,6 +467,7 @@ export function StringField({
   const resetSignalRef = useRef<number | undefined>(resetSignal);
   viewRef.current = view;
   injectRef.current = onInject;
+  waveformEditRef.current = onEditWaveform;
   thresholdEditRef.current = onEditThreshold;
   cycleRef.current = onCycleString;
   couplingEditRef.current = onEditCoupling;
@@ -564,6 +569,7 @@ export function StringField({
     const sustainedDrawTrail: Float32Array[] = [];
     let sustainedTrailKind: StringKind | null = null;
     let sustainedWaveFrameAt = 0;
+    let lastWaveCommitAt = 0;
     const trailDispBuf = new Float32Array(STRING_N);
     const curveBufs: number[][] = [];
     let sims: StringSim[] = [];
@@ -662,6 +668,15 @@ export function StringField({
 
     function interactionOf(index: number): StringInteraction {
       return STRING_INTERACTIONS[kindOf(index)] ?? '尾判';
+    }
+
+    function commitWaveform(bands: readonly number[], force = false): void {
+      const lane = laneAt(focusIdx);
+      if (!lane) return;
+      const now = performance.now();
+      if (!force && now - lastWaveCommitAt < 90) return;
+      lastWaveCommitAt = now;
+      waveformEditRef.current?.(lane.id, [...bands]);
     }
 
     function profileOf(index: number): KindVisualProfile {
@@ -2055,6 +2070,7 @@ export function StringField({
         const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
         const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
         sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+        commitWaveform(sustainedWaves.get(kind), true);
         mouseSustainId = audio.startSustainedSpectrum(
           sustainedWaves.get(kind),
           clamp(point.x / LOGICAL_W, 0, 1),
@@ -2085,7 +2101,8 @@ export function StringField({
           const profile = profileOf(focusIdx);
           const amplitude = clamp(Math.abs(point.y - focusBaseline()) / Math.max(1, profile.maxPull), 0, 1);
           const direction: 1 | -1 = point.y < focusBaseline() ? -1 : 1;
-          sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+          const waveBands = sustainedWaves.editAt(kind, clamp(point.x / LOGICAL_W, 0, 1), amplitude, direction);
+          commitWaveform(waveBands);
           audio.updateSustainedSpectrum(mouseSustainId, sustainedWaves.get(kind), true, true);
           audio.updateSustainedTone(mouseSustainId, clamp(point.x / LOGICAL_W, 0, 1), clamp(point.y / LOGICAL_H, 0, 1));
         }
@@ -2142,6 +2159,7 @@ export function StringField({
       setPullingUi(false);
       // v5.36：持续型鼠标松手只停止持续声源，不做拨弦判定。
       if (mouseSustainId !== null) {
+        commitWaveform(sustainedWaves.get(kindOf(focusIdx)), true);
         audio.stopSustainedSpectrum(mouseSustainId);
         mouseSustainId = null;
         mouseHold = null;
@@ -2381,7 +2399,8 @@ export function StringField({
         if (interaction === '持续') {
           const kind = kindOf(focusIdx);
           const amp = clamp(amplitude / Math.max(1, profile.maxPull), 0, 1);
-          sustainedWaves.editAt(kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
+          const waveBands = sustainedWaves.editAt(kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
+          commitWaveform(waveBands, true);
           const id = audio.startSustainedSpectrum(
             sustainedWaves.get(kind),
             clamp(key.cx / LOGICAL_W, 0, 1),

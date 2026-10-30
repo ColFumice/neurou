@@ -35,6 +35,7 @@ export { patchWorldText, type PatchResult } from './patch.js';
 export {
   setStringBaseline,
   setStringThreshold,
+  setStringWaveform,
   setCouplingStrength,
   setCouplingStrengthBetween,
   addCoupling,

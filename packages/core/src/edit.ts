@@ -34,6 +34,20 @@ function replaceString(ir: WorldIR, id: string, next: IRString): WorldIR {
   return { ...ir, strings: ir.strings.map((s) => (s.id === id ? next : s)) };
 }
 
+/** v5.43：写入持续型弦的波形（32 段，0..1）。 */
+export function setStringWaveform(ir: WorldIR, id: string, values: readonly number[]): EditResult {
+  const string = ir.strings.find((s) => s.id === id);
+  if (!string) return fail(`没有弦「${id}」`);
+  if (values.length < 2 || values.length > 64) return fail('波形需要 2..64 个采样');
+  if (!values.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+    return fail('波形采样必须在 0..1 之间');
+  }
+  return {
+    ok: true,
+    ir: replaceString(ir, id, { ...string, waveform: values.map((value) => Math.round(value * 1000) / 1000) }),
+  };
+}
+
 /** 改一根数值弦的基线（调律台拖弦 / 拨弦写回都用它）。 */
 export function setStringBaseline(ir: WorldIR, id: string, value: number): EditResult {
   const string = ir.strings.find((s) => s.id === id);

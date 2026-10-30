@@ -362,6 +362,39 @@ function stringFieldEdit(
   };
 }
 
+function stringWaveformEdit(
+  text: string,
+  string: IRString,
+  waveform: readonly number[],
+  eol: string,
+): TextEdit | { error: string } {
+  if (!string.span) return { error: `弦「${string.id}」没有源位置，无法行级写回波形` };
+  const lines = linesIn(text, string.span.start.offset, string.span.end.offset);
+  const body = waveform.map((value) => formatNumber(value)).join(' ');
+  const target = lines.find((line) => /^\s*波形(?=\s|$)/.test(contentOf(text, line)));
+  if (target) {
+    const content = contentOf(text, target);
+    const match = /^(\s*波形\s+)([^#]*?)(\s*(?:#.*)?)$/.exec(content);
+    if (!match) return { error: `弦「${string.id}」的「波形」行格式无法识别` };
+    return {
+      start: target.contentStart,
+      end: target.contentEnd,
+      text: `${match[1]}${body}${match[3]}`,
+    };
+  }
+  const anchor =
+    lines.find((line) => /^\s*基线(?=\s|$)/.test(contentOf(text, line))) ??
+    lines.find((line) => /^\s*类型(?=\s|$)/.test(contentOf(text, line)));
+  if (!anchor) return { error: `弦「${string.id}」没有「基线」或「类型」行，无法插入波形` };
+  const indent = /^(\s*)/.exec(contentOf(text, anchor))?.[1] ?? '  ';
+  const needsBreak = anchor.end === text.length && !text.endsWith('\n');
+  return {
+    start: anchor.end,
+    end: anchor.end,
+    text: `${needsBreak ? eol : ''}${indent}波形 ${body}${eol}`,
+  };
+}
+
 function couplingStrengthEdit(
   text: string,
   coupling: IRCoupling,
@@ -440,6 +473,17 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
       changed.push(`${id}.${field.key}`);
+    }
+    const beforeWave = base.waveform ?? [];
+    const afterWave = edited.waveform ?? [];
+    const waveChanged =
+      beforeWave.length !== afterWave.length ||
+      beforeWave.some((value, index) => Math.abs(value - (afterWave[index] ?? 0)) > 1e-9);
+    if (waveChanged) {
+      const result = stringWaveformEdit(normalized, base, afterWave, eol);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${id}.waveform`);
     }
   }
 

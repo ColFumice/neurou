@@ -75,6 +75,8 @@ export interface IRString {
   target?: string;
   /** 音色引用：某条谱的 id（v2.0） */
   timbre?: string;
+  /** v5.43：持续型弦的可编辑波形（0..1）。 */
+  waveform?: number[];
   note?: string;
   span?: Span;
 }

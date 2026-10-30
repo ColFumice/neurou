@@ -30,6 +30,7 @@ import type {
   WorldDecl,
 } from './ast.js';
 import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
+import { STRING_INTERACTIONS } from './ast.js';
 import type {
   IRAudioAsset,
   IRAxiom,
@@ -893,6 +894,18 @@ class Compiler {
     }
     const verge = this.constNumber(d.verge, `${id}.悬崖`, d.span);
     const safe = this.constNumber(d.safe, `${id}.安全`, d.span);
+    let waveform: number[] | undefined;
+    if (d.waveform) {
+      if (STRING_INTERACTIONS[d.stringKind] !== '持续') {
+        this.error('NRO2005', `只有持续型弦可以声明「波形」，「${id}」不是。`, d.span);
+      } else if (d.waveform.length < 2 || d.waveform.length > 64) {
+        this.error('NRO2005', `弦「${id}」的波形需要 2..64 个采样。`, d.span);
+      } else if (d.waveform.some((value) => !Number.isFinite(value) || value < 0 || value > 1)) {
+        this.error('NRO2005', `弦「${id}」的波形采样必须在 0..1 之间。`, d.span);
+      } else {
+        waveform = d.waveform.map((value) => Math.round(value * 1000) / 1000);
+      }
+    }
 
     if (d.verge || d.safe) {
       if (domain.type !== 'number') {
@@ -934,6 +947,7 @@ class Compiler {
       ...(scope ? { namespace: scope } : {}),
       target: d.target,
       ...(d.timbre ? { timbre: d.timbre } : {}),
+      ...(waveform ? { waveform } : {}),
       note: d.note,
       span: d.span,
     };
