@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { compileText, patchWorldText, removeAsset, renameAsset } from '../src/index.js';
+import {
+  assetReferences,
+  compileText,
+  patchWorldText,
+  removeAsset,
+  renameAsset,
+  replaceAssetReferences,
+} from '../src/index.js';
 
 const WORLD = `世界 资产管理
   版本 0.1
@@ -61,5 +68,26 @@ describe('资产重命名/删除（v6.8）', () => {
     expect(next.ir.bgm?.asset).toBe('新雨声');
     expect(next.ir.ports?.find((port) => port.textureAsset)?.textureAsset?.name).toBe('新雨纹');
     expect(removeAsset(next.ir, 'audio', '新雨声').ok).toBe(false);
+  });
+
+  it('引用可替换到另一个同类型资产', () => {
+    const source = `世界 替换引用\n  版本 0.1\n\n音频资产 雨声 "audio/rain.wav"\n音频资产 钟声 "audio/clock.wav"\n纹理资产 雨纹 "textures/rain.svg"\n纹理资产 备用纹 "textures/rain.svg"\n配乐 雨声 音量 0.2 循环 是\n\n叙事弦 甲\n  类型 数值 0..100\n  基线 20\n\n视觉端口 雨幕\n  参数 强度 甲\n  贴图 雨纹\n`;
+    const compiled = compileText(source, 'asset-replace.nro');
+    if (!compiled.ok) throw new Error('compile failed');
+    expect(assetReferences(compiled.ir, 'audio', '雨声').map((ref) => ref.kind)).toEqual(['配乐']);
+    expect(assetReferences(compiled.ir, 'texture', '雨纹').map((ref) => ref.kind)).toEqual(['贴图']);
+    const audio = replaceAssetReferences(compiled.ir, 'audio', '雨声', '钟声');
+    if (!audio.ok) throw new Error(audio.error);
+    const texture = replaceAssetReferences(audio.ir, 'texture', '雨纹', '备用纹');
+    if (!texture.ok) throw new Error(texture.error);
+    const patch = patchWorldText(source, compiled.ir, texture.ir);
+    if (!patch.ok) throw new Error(patch.reason);
+    expect(patch.text).toContain('配乐 钟声');
+    expect(patch.text).toContain('贴图 备用纹');
+    const next = compileText(patch.text, 'asset-replace-patched.nro');
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(next.ir.bgm?.asset).toBe('钟声');
+    expect(next.ir.ports?.find((port) => port.textureAsset)?.textureAsset?.name).toBe('备用纹');
   });
 });

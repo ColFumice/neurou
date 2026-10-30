@@ -93,7 +93,7 @@ function structuralSignature(ir: WorldIR): string {
     scenes: ir.scenes ?? [],
     ports: (ir.ports ?? []).map((port) => ({
       ...port,
-      textureAsset: port.textureAsset ? { src: port.textureAsset.src } : undefined,
+      textureAsset: port.textureAsset ? 'texture' : undefined,
     })),
     namespaces: ir.namespaces ?? [],
     functions: ir.functions ?? [],
@@ -694,12 +694,6 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
       changed.push(`${edited.id}.rename`);
-      if (baseIR.bgm?.asset === base.name && editedIR.bgm?.asset === edited.name) {
-        const bgm = bgmAssetEdit(normalized, base.name, edited.name);
-        if ('error' in bgm) return { ok: false, reason: bgm.error };
-        edits.push(bgm);
-        changed.push('bgm.asset');
-      }
     }
     if (base.src !== edited.src) {
       const result = assetSrcEdit(normalized, '音频资产', edited.name, edited.src, eol);
@@ -727,8 +721,6 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
       changed.push(`${edited.id}.rename`);
-      const refs = textureRefEdits(normalized, base.name, edited.name);
-      if (refs.length > 0) edits.push(...refs);
     }
     if (base.src !== edited.src) {
       const result = assetSrcEdit(normalized, '纹理资产', edited.name, edited.src, eol);
@@ -742,6 +734,28 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
     if ('error' in result) return { ok: false, reason: result.error };
     edits.push(result);
     changed.push(`${baseTextureAssets[index]!.id}.removed`);
+  }
+
+  // 引用替换/重命名：配乐与视觉贴图。
+  if (baseIR.bgm && editedIR.bgm && baseIR.bgm.asset !== editedIR.bgm.asset) {
+    const result = bgmAssetEdit(normalized, baseIR.bgm.asset, editedIR.bgm.asset);
+    if ('error' in result) return { ok: false, reason: result.error };
+    edits.push(result);
+    changed.push('bgm.asset');
+  }
+  const textureRefDone = new Set<string>();
+  for (const editedPort of editedIR.ports ?? []) {
+    const basePort = (baseIR.ports ?? []).find((port) => port.id === editedPort.id);
+    const before = basePort?.textureAsset?.name;
+    const after = editedPort.textureAsset?.name;
+    if (!before || !after || before === after) continue;
+    const key = `${before}->${after}`;
+    if (textureRefDone.has(key)) continue;
+    textureRefDone.add(key);
+    const refs = textureRefEdits(normalized, before, after);
+    if (refs.length === 0) return { ok: false, reason: `找不到贴图「${before}」的引用行` };
+    edits.push(...refs);
+    changed.push('port.textureAsset');
   }
 
   // 规则数值字段：耗时 / 优先级 / 每（结构本身仍由签名保护）。

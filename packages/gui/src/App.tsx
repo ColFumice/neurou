@@ -23,6 +23,8 @@ import {
   setAssetSource,
   renameAsset,
   removeAsset,
+  assetReferences,
+  replaceAssetReferences,
   STRING_INTERACTIONS,
   setSpectrumBand,
   setSpectrumBands,
@@ -1591,6 +1593,26 @@ export function App() {
             const current = worldIRRef.current;
             if (!current) return;
             const result = removeAsset(current, kind === '音频' ? 'audio' : 'texture', id);
+            if (!result.ok) {
+              setSaveError(result.error);
+              setSaveState('error');
+              return;
+            }
+            applyWorldIR(result.ir);
+            scheduleSave();
+          }}
+          getAssetRefs={(id, kind) => {
+            const current = worldIRRef.current;
+            if (!current) return [];
+            return assetReferences(current, kind === '音频' ? 'audio' : 'texture', id).map((ref) => ref.name);
+          }}
+          getAssetChoices={(id, kind) =>
+            editorAssets.filter((asset) => asset.kind === kind && asset.id !== id)
+          }
+          onAssetReplace={(id, kind, nextId) => {
+            const current = worldIRRef.current;
+            if (!current) return;
+            const result = replaceAssetReferences(current, kind === '音频' ? 'audio' : 'texture', id, nextId);
             if (!result.ok) {
               setSaveError(result.error);
               setSaveState('error');

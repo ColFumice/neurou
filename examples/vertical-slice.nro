@@ -7,6 +7,7 @@
 
 音频资产 雨声 "audio/rain.wav"
 纹理资产 雨纹 "textures/rain.svg"
+纹理资产 备用纹 "textures/rain.svg"
 
 实体 对手
   是 角色

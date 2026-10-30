@@ -16,7 +16,7 @@ describe('垂直切片全链路（v6.2）', () => {
     expect(ir.matrices.map((m) => m.name)).toContain('信任网');
     expect(ir.ports).toHaveLength(2);
     expect(ir.audioAssets).toHaveLength(1);
-    expect(ir.textureAssets).toHaveLength(1);
+    expect(ir.textureAssets).toHaveLength(2);
     expect(ir.scenes?.map((s) => s.name)).toEqual(['夜', '昼']);
     expect(ir.systems?.map((s) => s.name)).toEqual(['潮汐']);
   });

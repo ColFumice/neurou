@@ -430,3 +430,15 @@ body {
 }
 .waveform-editor__asset-delete:hover { opacity: 0.95; }
 .waveform-editor__post-range { width: 110px; accent-color: var(--ink); }
+.waveform-editor__asset-refs,
+.waveform-editor__asset-choices {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.62;
+  line-height: 1.7;
+}
+.waveform-editor__asset-choices span {
+  margin-left: 8px;
+  text-decoration: underline;
+  cursor: pointer;
+}

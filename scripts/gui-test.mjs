@@ -1890,6 +1890,24 @@ await slicePage.waitForTimeout(1100);
 const sliceFileAfterAssetEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
 check('资源路径写回文件', sliceFileAfterAssetEdit.includes('audio/clock.wav') && sliceFileAfterAssetEdit !== sliceFileBeforeAssetEdit, `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`);
 writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
+await slicePage.locator('[data-editor-asset="雨纹"]').click();
+await slicePage.waitForTimeout(200);
+check(
+  '资产引用图显示贴图引用',
+  Number(await slicePage.locator('[data-editor-asset-refs]').getAttribute('data-editor-asset-refs')) > 0 && (await slicePage.locator('[data-editor-asset-delete-blocked="true"]').count()) === 1,
+  String(await slicePage.locator('[data-editor-asset-refs]').getAttribute('data-editor-asset-refs')),
+);
+await slicePage.locator('[data-editor-asset-replace="备用纹"]').click();
+await slicePage.waitForTimeout(1100);
+const sliceFileAfterReplace = readFileSync('examples/vertical-slice.nro', 'utf8');
+check(
+  '资产引用替换写回贴图',
+  sliceFileAfterReplace.includes('贴图 备用纹') && (await sliceApp.getAttribute('data-save-error')) === '',
+  `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`,
+);
+writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
+await slicePage.locator('[data-editor-asset="雨声"]').click();
+await slicePage.waitForTimeout(200);
 const assetNameInput = slicePage.locator('[data-editor-asset-name="true"]');
 if ((await assetNameInput.count()) > 0) {
   await assetNameInput.fill('新雨声');

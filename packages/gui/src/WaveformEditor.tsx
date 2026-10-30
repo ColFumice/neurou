@@ -25,6 +25,9 @@ export interface WaveformEditorProps {
   onAssetSrc: (id: string, kind: '音频' | '纹理', src: string) => void;
   onAssetRename: (id: string, kind: '音频' | '纹理', name: string) => void;
   onAssetDelete: (id: string, kind: '音频' | '纹理') => void;
+  getAssetRefs: (id: string, kind: '音频' | '纹理') => string[];
+  getAssetChoices: (id: string, kind: '音频' | '纹理') => EditorAsset[];
+  onAssetReplace: (id: string, kind: '音频' | '纹理', nextId: string) => void;
   postLevel: number;
   onPostLevel: (value: number) => void;
   onClose: () => void;
@@ -53,6 +56,9 @@ export function WaveformEditor({
   onAssetSrc,
   onAssetRename,
   onAssetDelete,
+  getAssetRefs,
+  getAssetChoices,
+  onAssetReplace,
   postLevel,
   onPostLevel,
   onClose,
@@ -271,16 +277,46 @@ export function WaveformEditor({
             />
           ) : null}
           {assetSelected ? (
-            <span
-              className="waveform-editor__asset-delete"
-              data-editor-asset-delete="true"
-              onClick={() => {
-                const asset = assets.find((item) => item.id === assetSelected);
-                if (asset) onAssetDelete(asset.id, asset.kind);
-              }}
-            >
-              删除资产
-            </span>
+            (() => {
+              const asset = assets.find((item) => item.id === assetSelected);
+              if (!asset) return null;
+              const refs = getAssetRefs(asset.id, asset.kind);
+              const choices = getAssetChoices(asset.id, asset.kind);
+              return (
+                <>
+                  <div className="waveform-editor__asset-refs" data-editor-asset-refs={refs.length}>
+                    引用：{refs.length === 0 ? '无' : refs.join(' / ')}
+                  </div>
+                  {refs.length > 0 && choices.length > 0 ? (
+                    <div className="waveform-editor__asset-choices">
+                      替换为：
+                      {choices.map((choice) => (
+                        <span
+                          key={choice.id}
+                          data-editor-asset-replace={choice.name}
+                          onClick={() => onAssetReplace(asset.id, asset.kind, choice.id)}
+                        >
+                          {choice.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {refs.length > 0 ? (
+                    <span className="waveform-editor__asset-delete" data-editor-asset-delete-blocked="true">
+                      被引用，不能删除
+                    </span>
+                  ) : (
+                    <span
+                      className="waveform-editor__asset-delete"
+                      data-editor-asset-delete="true"
+                      onClick={() => onAssetDelete(asset.id, asset.kind)}
+                    >
+                      删除资产
+                    </span>
+                  )}
+                </>
+              );
+            })()
           ) : null}
         </div>
       </div>

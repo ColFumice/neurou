@@ -140,6 +140,52 @@ export function removeAsset(ir: WorldIR, kind: 'audio' | 'texture', id: string):
   return { ok: true, ir: { ...ir, textureAssets: (ir.textureAssets ?? []).filter((asset) => asset.id !== id) } };
 }
 
+/** v6.12：列出资产引用（配乐 / 视觉贴图）。 */
+export interface AssetReference {
+  kind: '配乐' | '贴图';
+  id: string;
+  name: string;
+}
+
+export function assetReferences(ir: WorldIR, kind: 'audio' | 'texture', id: string): AssetReference[] {
+  if (kind === 'audio') {
+    if (ir.bgm?.asset === id) return [{ kind: '配乐', id: 'bgm', name: '配乐' }];
+    return [];
+  }
+  return (ir.ports ?? [])
+    .filter((port) => port.textureAsset?.name === id)
+    .map((port) => ({ kind: '贴图', id: port.id, name: port.name }));
+}
+
+/** v6.12：把资产引用替换为同类型的另一个资产。 */
+export function replaceAssetReferences(
+  ir: WorldIR,
+  kind: 'audio' | 'texture',
+  oldId: string,
+  newId: string,
+): EditResult {
+  if (kind === 'audio') {
+    const next = (ir.audioAssets ?? []).find((asset) => asset.id === newId);
+    if (!next) return fail(`没有音频资产「${newId}」`);
+    if (!ir.bgm || ir.bgm.asset !== oldId) return fail('该音频资产没有引用');
+    return { ok: true, ir: { ...ir, bgm: { ...ir.bgm, asset: next.id } } };
+  }
+  const next = (ir.textureAssets ?? []).find((asset) => asset.id === newId);
+  if (!next) return fail(`没有纹理资产「${newId}」`);
+  if (!(ir.ports ?? []).some((port) => port.textureAsset?.name === oldId)) return fail('该纹理资产没有引用');
+  return {
+    ok: true,
+    ir: {
+      ...ir,
+      ports: (ir.ports ?? []).map((port) =>
+        port.textureAsset?.name === oldId
+          ? { ...port, textureAsset: { name: next.name, src: next.src } }
+          : port,
+      ),
+    },
+  };
+}
+
 /** 改一根数值弦的基线（调律台拖弦 / 拨弦写回都用它）。 */
 export function setStringBaseline(ir: WorldIR, id: string, value: number): EditResult {
   const string = ir.strings.find((s) => s.id === id);
