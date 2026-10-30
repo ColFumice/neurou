@@ -1271,6 +1271,9 @@ export function App() {
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
       data-project={projectMode ? 'true' : 'false'}
+      data-engine-name={universe?.describe().name ?? ''}
+      data-engine-strings={universe?.describe().strings ?? 0}
+      data-engine-scenes={universe?.describe().scenes.join(',') ?? ''}
       data-module-strings={[...moduleStringIds].join(',')}
       data-project-modules={projectModules.map((module) => module.path).join(',')}
       data-seed={INITIAL_SEED}

@@ -29,3 +29,19 @@ interface EngineDescription {
 - 只读摘要，不包含值/谱/矩阵细节；
 - 不替代 `observe()` 帧；
 - 不承诺稳定 ABI。
+
+## GUI 可观测（v5.52）
+
+GUI 根节点暴露：
+
+```text
+data-engine-name
+data-engine-strings
+data-engine-scenes
+```
+
+用于验收/诊断，例如：
+
+```js
+document.querySelector('[data-testid="ink-app"]').dataset.engineStrings
+```

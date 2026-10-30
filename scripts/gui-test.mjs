@@ -366,6 +366,7 @@ check('没有任何常驻 DOM 文字', (await page.evaluate(() => document.body.
 check('GUI 读的是真实世界', (await attr('data-world')) === '调律台', String(await attr('data-world')));
 check('弦的数量 = 世界里的 8 类弦', Number(await attr('data-lane-count')) === 8, String(await attr('data-lane-count')));
 check('lane 顺序 = KIND_ORDER', JSON.stringify(JSON.parse(String(await attr('data-kinds')))) === JSON.stringify(KINDS));
+check('Engine.describe 暴露在 GUI', (await appAttr('data-engine-strings')) === '8' && (await appAttr('data-engine-name')) === '调律台', `${await appAttr('data-engine-name')}/${await appAttr('data-engine-strings')}`);
 const initialValues = await valuesOf();
 check(
   '8 个值是 tuner.nro 的运行时初值',
