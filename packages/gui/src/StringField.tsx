@@ -2511,7 +2511,7 @@ export function StringField({
           );
           const amp = clamp(rawDistance / maxKeyDistance, 0, 1);
           const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
-          commitWaveform(waveBands, true);
+          commitWaveform(waveBands);
           const id = audio.startSustainedSpectrum(
             sustainedWaves.getFor(laneId, kind),
             clamp(key.cx / LOGICAL_W, 0, 1),

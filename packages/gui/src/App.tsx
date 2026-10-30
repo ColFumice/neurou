@@ -201,7 +201,7 @@ const START_ITEMS: StartItem[] = [
       { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
     ],
   },
-  { id: 'graph', label: '章节路线', note: 'F9', file: '' },
+  { id: 'graph', label: '章节路线', note: 'Shift+F9', file: '' },
   { id: 'help', label: '操作说明', note: '完整流程', file: '' },
 ];
 
@@ -808,6 +808,7 @@ export function App() {
           setMemoryFxOpen((open) => !open);
           return;
         }
+        if (!event.shiftKey) return;
         if (!chapterGraphOpen && screenRef.current !== 'strings') return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1638,7 +1639,7 @@ export function App() {
             </div>
             <div className="help-section">
               <div className="help-section__title">3 · 编辑元素</div>
-              <div>F6 波形/资源 · F7 规则/动作 · F9 章节路线 · 弹窗内方向键直接选择。</div>
+              <div>F6 波形/资源 · F7 规则/动作 · Shift+F9 章节路线 · 弹窗内方向键直接选择。</div>
             </div>
             <div className="help-section">
               <div className="help-section__title">4 · 流场</div>

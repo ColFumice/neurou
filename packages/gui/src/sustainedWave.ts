@@ -116,7 +116,27 @@ class SustainedWaveBank {
     this.persist();
   }
 
+  private persistTimer: number | null = null;
+
   private persist(): void {
+    if (typeof window === 'undefined' || !this.storageKey) return;
+    if (this.persistTimer !== null) return;
+    this.persistTimer = window.setTimeout(() => {
+      this.persistTimer = null;
+      this.writePersistence();
+    }, 80);
+  }
+
+  /** 立即落盘（卸载/显式保存时使用）。 */
+  flushPersistence(): void {
+    if (this.persistTimer !== null) {
+      window.clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.writePersistence();
+  }
+
+  private writePersistence(): void {
     if (typeof window === 'undefined' || !this.storageKey) return;
     try {
       const strings = Object.fromEntries([...this.waves.entries()].map(([id, entry]) => [id, entry]));

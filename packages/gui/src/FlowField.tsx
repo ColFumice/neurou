@@ -200,17 +200,14 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       const field = fieldRef.current;
 
       for (let level = 0; level < LEVELS; level += 1) {
-        const value = 0.08 + (level / (LEVELS - 1)) * 0.84;        const hue = 180 + level * 18;
-        ctx.strokeStyle = `hsla(${hue}, 92%, ${60 + (level % 3) * 6}%, ${0.72 - level * 0.03})`;
-        ctx.lineWidth = 2 + 1.35 * (0.5 + 0.5 * Math.sin(t * 2.4 + level * 1.1));
-        ctx.shadowBlur = 13;
-        ctx.shadowColor = `hsla(${hue}, 95%, 65%, 0.62)`;
-        ctx.beginPath();
+        const value = 0.08 + (level / (LEVELS - 1)) * 0.84;
+        const hue = 180 + level * 18;
+        const segments: Array<[{ x: number; y: number }, { x: number; y: number }]> = [];
         const warp = (gx: number, gy: number): number =>
           sample(
             field,
-            gx + Math.sin(gy * 0.24 + t * 1.16 + level) * 3.4,
-            gy + Math.cos(gx * 0.2 - t * 0.94 + level) * 2.8,
+            gx + Math.sin(gy * 0.17 + t * 0.7 + level) * 1.15,
+            gy + Math.cos(gx * 0.15 - t * 0.58 + level) * 0.9,
           );
         for (let gy = 0; gy < ROWS - 1; gy += 1) {
           for (let gx = 0; gx < COLS - 1; gx += 1) {
@@ -228,7 +225,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
             ): { x: number; y: number } | null => {
               if ((v1 > value) === (v2 > value)) return null;
               const ratio = (value - v1) / (v2 - v1 || 1);
-              return { x: x1 + (x2 - x1) * ratio, y: y1 + (y2 - y1) * ratio };
+              return { x: (x1 + (x2 - x1) * ratio) * cellW, y: (y1 + (y2 - y1) * ratio) * cellH };
             };
             const edges = {
               top: cross(gx, gy, ax, gx + 1, gy, bx),
@@ -238,7 +235,6 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
             };
             const idx =
               (ax > value ? 1 : 0) | (bx > value ? 2 : 0) | (cx > value ? 4 : 0) | (dx > value ? 8 : 0);
-            const segments: Array<[{ x: number; y: number }, { x: number; y: number }]> = [];
             const add = (p: { x: number; y: number } | null, q: { x: number; y: number } | null): void => {
               if (p && q) segments.push([p, q]);
             };
@@ -255,23 +251,71 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
               add(edges.top, edges.right);
               add(edges.bottom, edges.left);
             }
-            for (const [p, q] of segments) {
-              const x1 = p.x * cellW;
-              const y1 = p.y * cellH;
-              const x2 = q.x * cellW;
-              const y2 = q.y * cellH;
-              const mx = (x1 + x2) / 2;
-              const my = (y1 + y2) / 2;
-              const nx = -(y2 - y1);
-              const ny = x2 - x1;
-              const length = Math.hypot(nx, ny) || 1;
-              const bend = Math.min(cellW, cellH) * 0.22 * Math.sin(t * 1.8 + gx * 0.11 + gy * 0.07);
-              ctx.moveTo(x1, y1);
-              ctx.quadraticCurveTo(mx + (nx / length) * bend, my + (ny / length) * bend, x2, y2);
-            }
           }
         }
-        ctx.stroke();
+
+        const keyOf = (point: { x: number; y: number }): string =>
+          `${Math.round(point.x * 2)},${Math.round(point.y * 2)}`;
+        const byPoint = new Map<string, number[]>();
+        segments.forEach((segment, index) => {
+          for (const point of segment) {
+            const key = keyOf(point);
+            const list = byPoint.get(key);
+            if (list) list.push(index);
+            else byPoint.set(key, [index]);
+          }
+        });
+        const used = new Uint8Array(segments.length);
+        const other = (segment: [{ x: number; y: number }, { x: number; y: number }], point: string): { x: number; y: number } =>
+          keyOf(segment[0]) === point ? segment[1] : segment[0];
+        const extend = (points: Array<{ x: number; y: number }>, atStart: boolean): void => {
+          for (let guard = 0; guard < segments.length; guard += 1) {
+            const endpoint = atStart ? points[0]! : points[points.length - 1]!;
+            const key = keyOf(endpoint);
+            const candidates = byPoint.get(key) ?? [];
+            let found = -1;
+            for (const index of candidates) {
+              if (!used[index]) {
+                found = index;
+                break;
+              }
+            }
+            if (found < 0) return;
+            used[found] = 1;
+            const next = other(segments[found]!, key);
+            if (atStart) points.unshift(next);
+            else points.push(next);
+            if (keyOf(next) === keyOf(atStart ? points[points.length - 1]! : points[0]!)) return;
+          }
+        };
+
+        let pathIndex = 0;
+        for (let index = 0; index < segments.length; index += 1) {
+          if (used[index]) continue;
+          used[index] = 1;
+          const segment = segments[index]!;
+          const points = [segment[0], segment[1]];
+          extend(points, false);
+          extend(points, true);
+          if (points.length < 2) continue;
+          const width = 2 + 1.6 * (0.5 + 0.5 * Math.sin(t * 2.1 + level * 0.83 + pathIndex * 0.37));
+          ctx.strokeStyle = `hsla(${hue}, 92%, ${62 + (level % 3) * 5}%, ${0.72 - level * 0.025})`;
+          ctx.lineWidth = width;
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = `hsla(${hue}, 95%, 68%, 0.55)`;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(points[0]!.x, points[0]!.y);
+          for (let k = 1; k < points.length - 1; k += 1) {
+            const current = points[k]!;
+            const next = points[k + 1]!;
+            ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
+          }
+          ctx.lineTo(points[points.length - 1]!.x, points[points.length - 1]!.y);
+          ctx.stroke();
+          pathIndex += 1;
+        }
         ctx.shadowBlur = 0;
       }
     };
