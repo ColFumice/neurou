@@ -30,7 +30,8 @@ describe('项目脚手架（v6.18）', () => {
   it('project 模板多文件可编译并含模块', () => {
     const dir = temp();
     const result = scaffoldProject('多文件', { template: 'project', out: join(dir, 'proj') });
-    expect(result.files).toHaveLength(4);
+    expect(result.files).toHaveLength(5);
+    expect(readFileSync(result.files[4]!, 'utf8')).toContain('neurou check world.nro');
     const files: Record<string, string> = {};
     for (const file of result.files) files[file.replace(/\\/g, '/')] = readFileSync(file, 'utf8');
     const entry = join(result.root, 'world.nro').replace(/\\/g, '/');

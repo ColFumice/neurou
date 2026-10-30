@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { compileProject, ProjectError, formatDiagnostic, projectGraph, serialize, type WorldIR } from '@neurou/core';
-import { Engine, createEngine } from '@neurou/engine';
+import { Engine, createEngine, isHostSnapshotCompatible } from '@neurou/engine';
 import { scaffoldProject, type ScaffoldTemplate } from './scaffold.js';
 import {
   ANSI,
@@ -26,6 +26,7 @@ const HELP = `neurou ${VERSION} · 雨若
   neurou run <文件.nro> [选项]           进入这个世界，逐拍游玩
   neurou ir <文件.nro> [--out 路径]      导出弦网络图（JSON）
   neurou describe <文件.nro>            打印 Engine Host 摘要（JSON）
+  neurou snapshot-check <快照.json>     检查 Host 快照 ABI/stateVersion 兼容性
   neurou fmt <文件.nro> [--write] [--out 路径]
                                         把图重新排成规范 .nro（默认打印到 stdout）
   neurou init <名字> [--template single|project|assets] [--out 路径]
@@ -256,6 +257,25 @@ async function main(): Promise<void> {
       }
       const engine = createEngine(world.ir);
       console.log(JSON.stringify(engine.describe(), null, 2));
+      return;
+    }
+    case 'snapshot-check': {
+      if (!args.file) {
+        console.error('用法：neurou snapshot-check <快照.json>');
+        process.exitCode = 2;
+        return;
+      }
+      let snapshot: unknown;
+      try {
+        snapshot = JSON.parse(readFileSync(args.file, 'utf8'));
+      } catch {
+        console.error(`读不到或无法解析快照：${args.file}`);
+        process.exitCode = 1;
+        return;
+      }
+      const result = isHostSnapshotCompatible(snapshot);
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
       return;
     }
     case 'ir': {

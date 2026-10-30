@@ -42,6 +42,17 @@ export interface HostSnapshot {
   state: WorldState;
 }
 
+/** v6.19：Host 快照兼容性检查（CLI/CI 复用）。 */
+export function isHostSnapshotCompatible(snapshot: unknown): { ok: true } | { ok: false; reason: string } {
+  if (typeof snapshot !== 'object' || snapshot === null) return { ok: false, reason: '快照不是对象' };
+  const value = snapshot as { abi?: unknown; stateVersion?: unknown; state?: unknown };
+  if (value.abi !== HOST_ABI) return { ok: false, reason: `ABI 不匹配：${String(value.abi)}` };
+  const version = value.stateVersion ?? 1;
+  if (version !== 1) return { ok: false, reason: `stateVersion 不支持：${String(version)}` };
+  if (typeof value.state !== 'object' || value.state === null) return { ok: false, reason: '快照缺少 state' };
+  return { ok: true };
+}
+
 /** v5.51：Host 集成用的只读世界摘要。 */
 export interface EngineDescription {
   abi: typeof HOST_ABI;
@@ -159,9 +170,7 @@ export class Engine {
 
   /** v6.5：从 Host 快照恢复；只接受同一 ABI 的 stateVersion 1。 */
   restoreHostSnapshot(snapshot: HostSnapshot): boolean {
-    if (snapshot.abi !== HOST_ABI) return false;
-    const version = snapshot.stateVersion ?? 1;
-    if (version !== 1) return false;
+    if (!isHostSnapshotCompatible(snapshot).ok) return false;
     this.restore(snapshot.state);
     return true;
   }

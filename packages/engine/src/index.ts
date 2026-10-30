@@ -11,6 +11,7 @@ export {
   type EngineListener,
   type EngineDescription,
   type HostSnapshot,
+  isHostSnapshotCompatible,
 } from './engine.js';
 export {
   type BackendAdapter,

@@ -101,6 +101,22 @@ const PACKAGE_JSON = `{
 }
 `;
 
+const PROJECT_CI = `name: neurou
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g @neurou/cli
+      - run: neurou check world.nro
+      - run: neurou snapshot-check host-snapshot.json
+        continue-on-error: true
+`;
+
 const ASSETS_ENTRY = `世界 {{名字}}
   版本 0.1
   章节 "{{名字}}"
@@ -148,11 +164,13 @@ export function scaffoldProject(name: string, options: ScaffoldOptions = {}): Sc
       join(root, 'modules', 'cast.nro'),
       join(root, 'package.json'),
       join(root, 'README.md'),
+      join(root, '.github', 'workflows', 'neurou.yml'),
     ];
     write(files[0]!, PROJECT_ENTRY.replaceAll('{{名字}}', name));
     write(files[1]!, PROJECT_MODULE);
     write(files[2]!, PACKAGE_JSON.replaceAll('{{slug}}', slug));
     write(files[3]!, README.replaceAll('{{名字}}', name));
+    write(files[4]!, PROJECT_CI);
     return { root, files };
   }
   const files = [
