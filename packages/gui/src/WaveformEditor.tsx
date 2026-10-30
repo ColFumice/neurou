@@ -23,8 +23,10 @@ export interface WaveformEditorProps {
   onPreset: (id: string, kind: StringKind, preset: WavePreset) => void;
   onReset: (id: string, kind: StringKind) => void;
   onAssetSrc: (id: string, kind: '音频' | '纹理', src: string) => void;
+  onAssetRename: (id: string, kind: '音频' | '纹理', name: string) => void;
+  onAssetDelete: (id: string, kind: '音频' | '纹理') => void;
   postLevel: number;
-  onPostLevel: () => void;
+  onPostLevel: (value: number) => void;
   onClose: () => void;
 }
 
@@ -49,6 +51,8 @@ export function WaveformEditor({
   onPreset,
   onReset,
   onAssetSrc,
+  onAssetRename,
+  onAssetDelete,
   postLevel,
   onPostLevel,
   onClose,
@@ -58,6 +62,7 @@ export function WaveformEditor({
   const [selected, setSelected] = useState(0);
   const [assetSelected, setAssetSelected] = useState<string | null>(assets[0]?.id ?? null);
   const [assetSrc, setAssetSrc] = useState(assets[0]?.src ?? '');
+  const [assetName, setAssetName] = useState(assets[0]?.name ?? '');
   const current = strings[Math.min(selected, Math.max(0, strings.length - 1))];
   const [wave, setWave] = useState<number[]>(
     current ? [...getWave(current.id, current.kind)] : new Array(SUSTAINED_WAVE_BANDS).fill(0.5),
@@ -197,9 +202,19 @@ export function WaveformEditor({
             >
               重置
             </span>
-            <span data-editor-post={postLevel} onClick={onPostLevel}>
-              后处理 {['关', '轻', '重'][postLevel] ?? postLevel}
+            <span data-editor-post={postLevel} onClick={() => onPostLevel((postLevel + 1) % 3)}>
+              后处理 {postLevel.toFixed(2)}
             </span>
+            <input
+              className="waveform-editor__post-range"
+              data-editor-post-range="true"
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={postLevel}
+              onChange={(event) => onPostLevel(Number(event.target.value))}
+            />
             <span data-editor-close="true" onClick={onClose}>
               关闭
             </span>
@@ -216,12 +231,29 @@ export function WaveformEditor({
               onClick={() => {
                 setAssetSelected(asset.id);
                 setAssetSrc(asset.src);
+                setAssetName(asset.name);
               }}
             >
               <em>{asset.kind}</em>
               {asset.name} · {asset.src}
             </span>
           ))}
+          {assetSelected ? (
+            <input
+              className="waveform-editor__asset-input"
+              data-editor-asset-name="true"
+              value={assetName}
+              onChange={(event) => setAssetName(event.target.value)}
+              onBlur={() => {
+                const asset = assets.find((item) => item.id === assetSelected);
+                if (asset && assetName.trim() && assetName !== asset.name) onAssetRename(asset.id, asset.kind, assetName.trim());
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+                else if (event.key === 'Escape') event.currentTarget.blur();
+              }}
+            />
+          ) : null}
           {assetSelected ? (
             <input
               className="waveform-editor__asset-input"
@@ -233,14 +265,22 @@ export function WaveformEditor({
                 if (asset && assetSrc.trim() && assetSrc !== asset.src) onAssetSrc(asset.id, asset.kind, assetSrc.trim());
               }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.stopPropagation();
-                  event.currentTarget.blur();
-                } else if (event.key === 'Escape') {
-                  event.currentTarget.blur();
-                }
+                if (event.key === 'Enter') event.currentTarget.blur();
+                else if (event.key === 'Escape') event.currentTarget.blur();
               }}
             />
+          ) : null}
+          {assetSelected ? (
+            <span
+              className="waveform-editor__asset-delete"
+              data-editor-asset-delete="true"
+              onClick={() => {
+                const asset = assets.find((item) => item.id === assetSelected);
+                if (asset) onAssetDelete(asset.id, asset.kind);
+              }}
+            >
+              删除资产
+            </span>
           ) : null}
         </div>
       </div>

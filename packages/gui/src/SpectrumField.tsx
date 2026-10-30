@@ -453,6 +453,8 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         nodeYNorm(spectrum, value),
         true,
         true,
+        0.6,
+        10,
       );
     }
 

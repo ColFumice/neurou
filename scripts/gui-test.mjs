@@ -1889,6 +1889,15 @@ await slicePage.waitForTimeout(1100);
 const sliceFileAfterAssetEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
 check('资源路径写回文件', sliceFileAfterAssetEdit.includes('audio/clock.wav') && sliceFileAfterAssetEdit !== sliceFileBeforeAssetEdit, `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`);
 writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
+const assetNameInput = slicePage.locator('[data-editor-asset-name="true"]');
+if ((await assetNameInput.count()) > 0) {
+  await assetNameInput.fill('新雨声');
+  await assetNameInput.press('Enter');
+  await slicePage.waitForTimeout(1100);
+  const sliceFileAfterRename = readFileSync('examples/vertical-slice.nro', 'utf8');
+  check('资产重命名写回文件', sliceFileAfterRename.includes('音频资产 新雨声'), `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`);
+  writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
+}
 await slicePage.keyboard.press('Escape');
 await slicePage.waitForTimeout(200);
 await slicePage.keyboard.press('Space');
@@ -1908,6 +1917,19 @@ writeFileSync('examples/vertical-slice.nro', sliceFileBeforeRuleEdit, 'utf8');
 await slicePage.keyboard.press('Escape');
 await slicePage.waitForTimeout(200);
 check('Esc 关闭规则编辑器', (await sliceApp.getAttribute('data-rule-editor-open')) === 'false' && (await ruleOverlay.count()) === 0);
+await slicePage.keyboard.press('F7');
+await slicePage.waitForTimeout(300);
+const ruleSource = slicePage.locator('[data-rule-source="true"]');
+check('F7 可编辑规则源文本', (await ruleSource.count()) === 1 && String(await ruleSource.inputValue()).includes('信任 += 6'), String(await ruleSource.inputValue()).slice(0, 40));
+const editedRuleSource = String(await ruleSource.inputValue()).replace('信任 += 6', '信任 += 8');
+const sliceFileBeforeRawRule = readFileSync('examples/vertical-slice.nro', 'utf8');
+await ruleSource.fill(editedRuleSource);
+await slicePage.locator('[data-rule-apply="true"]').click();
+await slicePage.waitForTimeout(900);
+const sliceFileAfterRawRule = readFileSync('examples/vertical-slice.nro', 'utf8');
+check('规则源文本应用并写回', sliceFileAfterRawRule.includes('信任 += 8') && (await sliceApp.getAttribute('data-save-mode')) === 'rule-source' && (await sliceApp.getAttribute('data-save-error')) === '', `${await sliceApp.getAttribute('data-save-mode')}/${await sliceApp.getAttribute('data-save-error')}`);
+check('规则源应用后关闭编辑器', (await sliceApp.getAttribute('data-rule-editor-open')) === 'false' && (await ruleOverlay.count()) === 0);
+writeFileSync('examples/vertical-slice.nro', sliceFileBeforeRawRule, 'utf8');
 await slicePage.close();
 
 // v5.59：F6 波形 / 资源编辑器
@@ -1930,6 +1952,16 @@ const postBefore = String(await editorPage.locator('[data-editor-post]').getAttr
 await editorPage.locator('[data-editor-post]').click();
 await editorPage.waitForTimeout(150);
 check('编辑器可循环后处理档位', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')) !== postBefore, postBefore);
+const postRange = editorPage.locator('[data-editor-post-range="true"]');
+if ((await postRange.count()) > 0) {
+  await postRange.evaluate((element) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(element, '1.35');
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await editorPage.waitForTimeout(150);
+  check('后处理可任意调参', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')) === '1.35', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')));
+}
 const bandValuesAfterEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
 check('编辑器预设改变波形', bandValuesAfterEditor !== bandValuesBeforeEditor);
 check('编辑器预设写回保存', (await editorApp.getAttribute('data-save-state')) === 'saved', `${await editorApp.getAttribute('data-save-state')}/${await editorApp.getAttribute('data-save-error')}`);

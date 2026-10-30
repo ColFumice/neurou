@@ -9,6 +9,8 @@ import {
   patchProjectEntry,
   projectEntryStrings,
   projectEntryView,
+  ruleBlockText,
+  replaceRuleBlockText,
   projectGraph,
   removeCoupling,
   removeString,
@@ -18,6 +20,8 @@ import {
   setStringWaveform,
   setRuleNumberField,
   setAssetSource,
+  renameAsset,
+  removeAsset,
   STRING_INTERACTIONS,
   setSpectrumBand,
   setSpectrumBands,
@@ -433,7 +437,7 @@ export function App() {
   const faustWasmRef = useRef<FaustWasmHost[]>([]);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | ''>('');
+  const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | 'rule-source' | ''>('');
   const [saveError, setSaveError] = useState('');
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
@@ -1454,6 +1458,73 @@ export function App() {
             applyWorldIR(result.ir);
             scheduleSave();
           }}
+          getSource={(id) => {
+            const text = baseText.current;
+            const ir = baseIR.current;
+            if (!text || !ir) return '';
+            let rule = ir.rules.find((item) => item.id === id);
+            if (projectMode) {
+              try {
+                const base = compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: text });
+                if (typeof base.entryOffset === 'number') {
+                  rule = projectEntryView(ir, base.entryOffset, text.length).rules.find((item) => item.id === id);
+                }
+              } catch {
+                return '';
+              }
+            }
+            return rule ? (ruleBlockText(text, rule) ?? '') : '';
+          }}
+          onApplySource={(id, next) => {
+            void (async () => {
+              const text = baseText.current;
+              const ir = baseIR.current;
+              if (!text || !ir) return;
+              let rule = ir.rules.find((item) => item.id === id);
+              if (projectMode) {
+                try {
+                  const base = compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: text });
+                  if (typeof base.entryOffset !== 'number') throw new Error('缺少入口偏移');
+                  rule = projectEntryView(ir, base.entryOffset, text.length).rules.find((item) => item.id === id);
+                } catch (error) {
+                  setSaveError(String(error));
+                  setSaveState('error');
+                  return;
+                }
+              }
+              if (!rule) {
+                setSaveError('找不到入口规则');
+                setSaveState('error');
+                return;
+              }
+              const replaced = replaceRuleBlockText(text, rule, next);
+              if (!replaced.ok) {
+                setSaveError(replaced.reason);
+                setSaveState('error');
+                return;
+              }
+              const check = projectMode
+                ? compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: replaced.text })
+                : compileText(replaced.text, `${WORLD_FILE}.rule-source`);
+              if (!check.ok) {
+                setSaveError(check.diagnostics.errors[0]?.message ?? '规则源编译失败');
+                setSaveState('error');
+                return;
+              }
+              if (!(await writeFile(replaced.text))) throw new Error('写回失败');
+              undoStack.current.push(savedText.current);
+              savedText.current = replaced.text;
+              redoStack.current = [];
+              setUndoDepth(undoStack.current.length);
+              setRedoDepth(0);
+              setSaves((count) => count + 1);
+              setSaveMode('rule-source');
+              setSaveError('');
+              setSaveState('saved');
+              setRuleOpen(false);
+              apply(replaced.text);
+            })();
+          }}
           onClose={() => setRuleOpen(false)}
         />
       ) : null}
@@ -1486,8 +1557,32 @@ export function App() {
             applyWorldIR(result.ir);
             scheduleSave();
           }}
+          onAssetRename={(id, kind, name) => {
+            const current = worldIRRef.current;
+            if (!current) return;
+            const result = renameAsset(current, kind === '音频' ? 'audio' : 'texture', id, name);
+            if (!result.ok) {
+              setSaveError(result.error);
+              setSaveState('error');
+              return;
+            }
+            applyWorldIR(result.ir);
+            scheduleSave();
+          }}
+          onAssetDelete={(id, kind) => {
+            const current = worldIRRef.current;
+            if (!current) return;
+            const result = removeAsset(current, kind === '音频' ? 'audio' : 'texture', id);
+            if (!result.ok) {
+              setSaveError(result.error);
+              setSaveState('error');
+              return;
+            }
+            applyWorldIR(result.ir);
+            scheduleSave();
+          }}
           postLevel={postLevel}
-          onPostLevel={() => setPostLevel((level) => (level + 1) % 3)}
+          onPostLevel={(value) => setPostLevel(value)}
           onClose={() => setEditorOpen(false)}
         />
       ) : null}

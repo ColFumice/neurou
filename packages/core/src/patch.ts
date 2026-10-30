@@ -88,8 +88,6 @@ function structuralSignature(ir: WorldIR): string {
       mode: s.mode,
       articulation: s.articulation,
     })),
-    audioAssets: (ir.audioAssets ?? []).map((asset) => ({ id: asset.id, name: asset.name })),
-    textureAssets: (ir.textureAssets ?? []).map((asset) => ({ id: asset.id, name: asset.name })),
     bgm: ir.bgm ?? null,
     systems: ir.systems ?? [],
     scenes: ir.scenes ?? [],
@@ -396,6 +394,33 @@ function stringWaveformEdit(
   };
 }
 
+/** v6.7：提取一条规则/动作的源块。 */
+export function ruleBlockText(text: string, rule: IRRule): string | null {
+  if (!rule.span) return null;
+  const start = rule.span.start.offset;
+  const end = ruleBlockEnd(text, start);
+  return text.slice(start, end);
+}
+
+/** v6.7：整块替换规则源文本；调用方必须重新编译校验。 */
+export function replaceRuleBlockText(
+  text: string,
+  rule: IRRule,
+  nextSource: string,
+): PatchResult {
+  if (!rule.span) return { ok: false, reason: `规则「${rule.id}」没有源位置` };
+  if (!nextSource.trim()) return { ok: false, reason: '规则源文本不能为空' };
+  const start = rule.span.start.offset;
+  const end = ruleBlockEnd(text, start);
+  const original = text.slice(start, end);
+  const trailing = /\r?\n$/.test(original) ? '\n' : '';
+  return {
+    ok: true,
+    text: `${text.slice(0, start)}${nextSource.trimEnd()}${trailing}${text.slice(end)}`,
+    changed: [rule.id],
+  };
+}
+
 function ruleBlockEnd(text: string, start: number): number {
   let pos = text.indexOf('\n', start);
   if (pos < 0) return text.length;
@@ -409,6 +434,28 @@ function ruleBlockEnd(text: string, start: number): number {
     pos = end + 1;
   }
   return text.length;
+}
+
+function assetDeclarationEdit(
+  text: string,
+  label: '音频资产' | '纹理资产',
+  name: string,
+  nextName: string | null,
+): TextEdit | { error: string } {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^([ \\t]*${label}[ \\t]+)(${escaped})([ \\t]+"[^"]*"[ \\t]*(?:#.*)?)$`, 'm');
+  const match = pattern.exec(text);
+  if (!match) return { error: `找不到${label}「${name}」的声明行` };
+  if (nextName === null) {
+    const end = text.indexOf('\n', match.index + match[0].length);
+    return {
+      start: match.index,
+      end: end < 0 ? text.length : end + 1,
+      text: '',
+    };
+  }
+  const start = match.index + (match[1]?.length ?? 0);
+  return { start, end: start + (match[2]?.length ?? 0), text: nextName };
 }
 
 function assetSrcEdit(
@@ -558,24 +605,60 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
     edits.push(insertStringsEdit(normalized, baseIR, addedStrings, eol));
   }
 
-  // 资产路径：音频/纹理声明行的 src。
-  for (const edited of editedIR.audioAssets ?? []) {
-    const base = (baseIR.audioAssets ?? []).find((asset) => asset.id === edited.id);
-    if (!base) return { ok: false, reason: `音频资产「${edited.id}」是新增的，需要回退规范序列化` };
-    if (base.src === edited.src) continue;
-    const result = assetSrcEdit(normalized, '音频资产', base.name, edited.src, eol);
-    if ('error' in result) return { ok: false, reason: result.error };
-    edits.push(result);
-    changed.push(`${edited.id}.src`);
+  // 资产：按顺序比较，支持改路径、改名、删除未引用资产。
+  const baseAudioAssets = baseIR.audioAssets ?? [];
+  const editedAudioAssets = editedIR.audioAssets ?? [];
+  if (editedAudioAssets.length > baseAudioAssets.length) {
+    return { ok: false, reason: '音频资产新增需要回退规范序列化' };
   }
-  for (const edited of editedIR.textureAssets ?? []) {
-    const base = (baseIR.textureAssets ?? []).find((asset) => asset.id === edited.id);
-    if (!base) return { ok: false, reason: `纹理资产「${edited.id}」是新增的，需要回退规范序列化` };
-    if (base.src === edited.src) continue;
-    const result = assetSrcEdit(normalized, '纹理资产', base.name, edited.src, eol);
+  for (let index = 0; index < editedAudioAssets.length; index += 1) {
+    const base = baseAudioAssets[index]!;
+    const edited = editedAudioAssets[index]!;
+    if (base.name !== edited.name) {
+      const result = assetDeclarationEdit(normalized, '音频资产', base.name, edited.name);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${edited.id}.rename`);
+    }
+    if (base.src !== edited.src) {
+      const result = assetSrcEdit(normalized, '音频资产', edited.name, edited.src, eol);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${edited.id}.src`);
+    }
+  }
+  for (let index = editedAudioAssets.length; index < baseAudioAssets.length; index += 1) {
+    const result = assetDeclarationEdit(normalized, '音频资产', baseAudioAssets[index]!.name, null);
     if ('error' in result) return { ok: false, reason: result.error };
     edits.push(result);
-    changed.push(`${edited.id}.src`);
+    changed.push(`${baseAudioAssets[index]!.id}.removed`);
+  }
+  const baseTextureAssets = baseIR.textureAssets ?? [];
+  const editedTextureAssets = editedIR.textureAssets ?? [];
+  if (editedTextureAssets.length > baseTextureAssets.length) {
+    return { ok: false, reason: '纹理资产新增需要回退规范序列化' };
+  }
+  for (let index = 0; index < editedTextureAssets.length; index += 1) {
+    const base = baseTextureAssets[index]!;
+    const edited = editedTextureAssets[index]!;
+    if (base.name !== edited.name) {
+      const result = assetDeclarationEdit(normalized, '纹理资产', base.name, edited.name);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${edited.id}.rename`);
+    }
+    if (base.src !== edited.src) {
+      const result = assetSrcEdit(normalized, '纹理资产', edited.name, edited.src, eol);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${edited.id}.src`);
+    }
+  }
+  for (let index = editedTextureAssets.length; index < baseTextureAssets.length; index += 1) {
+    const result = assetDeclarationEdit(normalized, '纹理资产', baseTextureAssets[index]!.name, null);
+    if ('error' in result) return { ok: false, reason: result.error };
+    edits.push(result);
+    changed.push(`${baseTextureAssets[index]!.id}.removed`);
   }
 
   // 规则数值字段：耗时 / 优先级 / 每（结构本身仍由签名保护）。

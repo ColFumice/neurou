@@ -61,6 +61,7 @@ interface SustainedVoice {
   baseGain: number;
   xNorm: number;
   yNorm: number;
+  priority: number;
   lastWaveAt?: number;
   retires: RetiredVoice[];
 }
@@ -762,6 +763,7 @@ export class StringAudioEngine {
     smooth: boolean,
     loop: boolean,
     amplitudeNorm = 0.6,
+    priority = 0,
   ): number {
     const ctx = this.ctx;
     const master = this.master;
@@ -792,10 +794,26 @@ export class StringAudioEngine {
     osc.start();
     const id = ++this.voiceSeq;
     if (this.voices.size >= this.maxSustainedVoices) {
-      const oldest = this.voices.keys().next().value;
-      if (typeof oldest === 'number') this.stopSustainedSpectrum(oldest);
+      let victim: number | undefined;
+      let victimPriority = Number.POSITIVE_INFINITY;
+      for (const [voiceId, voice] of this.voices) {
+        if (voice.priority < victimPriority) {
+          victim = voiceId;
+          victimPriority = voice.priority;
+        }
+      }
+      if (victim !== undefined) this.stopSustainedSpectrum(victim);
     }
-    this.voices.set(id, { osc, gain, pan, baseGain: target, xNorm: x, yNorm: clamp(yNorm, 0, 1), retires: [] });
+    this.voices.set(id, {
+      osc,
+      gain,
+      pan,
+      baseGain: target,
+      xNorm: x,
+      yNorm: clamp(yNorm, 0, 1),
+      priority,
+      retires: [],
+    });
     return id;
   }
 

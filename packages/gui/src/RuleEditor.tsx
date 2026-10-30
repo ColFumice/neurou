@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { IRRule } from '@neurou/core';
 
 export interface RuleEditorRule {
@@ -12,12 +12,16 @@ export interface RuleEditorRule {
 
 export interface RuleEditorProps {
   rules: RuleEditorRule[];
+  getSource: (id: string) => string;
+  onApplySource: (id: string, source: string) => void;
   onAdjust: (id: string, field: 'cost' | 'priority' | 'cooldown', delta: number) => void;
   onClose: () => void;
 }
 
-export function RuleEditor({ rules, onAdjust, onClose }: RuleEditorProps): JSX.Element {
+export function RuleEditor({ rules, getSource, onApplySource, onAdjust, onClose }: RuleEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [selected, setSelected] = useState(rules[0]?.id ?? '');
+  const [draft, setDraft] = useState(selected ? getSource(selected) : '');
   useEffect(() => {
     rootRef.current?.focus();
   }, []);
@@ -42,7 +46,15 @@ export function RuleEditor({ rules, onAdjust, onClose }: RuleEditorProps): JSX.E
         {rules.length === 0 ? <span className="waveform-editor__empty">无可编辑规则</span> : null}
         {rules.map((rule) => (
           <div className="rule-editor__row" key={rule.id} data-rule-id={rule.id}>
-            <span className="rule-editor__name">{rule.name}</span>
+            <span
+              className="rule-editor__name"
+              onClick={() => {
+                setSelected(rule.id);
+                setDraft(getSource(rule.id));
+              }}
+            >
+              {rule.name}
+            </span>
             <em>{rule.kind === 'action' ? '动作' : rule.kind === 'forcing' ? '力迫' : '和弦'}</em>
             {rule.kind === 'action' ? (
               <span className="rule-editor__field" data-rule-field="cost">
@@ -71,7 +83,25 @@ export function RuleEditor({ rules, onAdjust, onClose }: RuleEditorProps): JSX.E
           </div>
         ))}
       </div>
+      <textarea
+        className="rule-editor__source"
+        data-rule-source="true"
+        data-rule-selected={selected}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') event.currentTarget.blur();
+        }}
+      />
       <div className="waveform-editor__actions">
+        <span
+          data-rule-apply="true"
+          onClick={() => {
+            if (selected) onApplySource(selected, draft);
+          }}
+        >
+          应用源文本
+        </span>
         <span data-rule-close="true" onClick={onClose}>关闭</span>
       </div>
     </div>

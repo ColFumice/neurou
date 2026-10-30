@@ -86,6 +86,56 @@ export function setAssetSource(
   };
 }
 
+/** v6.8：重命名未被引用的音频/纹理资产。 */
+export function renameAsset(
+  ir: WorldIR,
+  kind: 'audio' | 'texture',
+  id: string,
+  nextName: string,
+): EditResult {
+  const name = nextName.trim();
+  if (!name) return fail('资产名不能为空');
+  if (kind === 'audio') {
+    const assets = ir.audioAssets ?? [];
+    if (!assets.some((asset) => asset.id === id)) return fail(`没有音频资产「${id}」`);
+    if (assets.some((asset) => asset.id === name)) return fail(`音频资产「${name}」已存在`);
+    if (ir.bgm?.asset === id) return fail('该音频资产被「配乐」引用，不能重命名');
+    return {
+      ok: true,
+      ir: {
+        ...ir,
+        audioAssets: assets.map((asset) => (asset.id === id ? { ...asset, id: name, name } : asset)),
+      },
+    };
+  }
+  const assets = ir.textureAssets ?? [];
+  if (!assets.some((asset) => asset.id === id)) return fail(`没有纹理资产「${id}」`);
+  if (assets.some((asset) => asset.id === name)) return fail(`纹理资产「${name}」已存在`);
+  const used = (ir.ports ?? []).some((port) => port.textureAsset?.name === id);
+  if (used) return fail('该纹理资产被视觉端口引用，不能重命名');
+  return {
+    ok: true,
+    ir: {
+      ...ir,
+      textureAssets: assets.map((asset) => (asset.id === id ? { ...asset, id: name, name } : asset)),
+    },
+  };
+}
+
+/** v6.8：删除未被引用的音频/纹理资产。 */
+export function removeAsset(ir: WorldIR, kind: 'audio' | 'texture', id: string): EditResult {
+  if (kind === 'audio') {
+    if (!(ir.audioAssets ?? []).some((asset) => asset.id === id)) return fail(`没有音频资产「${id}」`);
+    if (ir.bgm?.asset === id) return fail('该音频资产被「配乐」引用，不能删除');
+    return { ok: true, ir: { ...ir, audioAssets: (ir.audioAssets ?? []).filter((asset) => asset.id !== id) } };
+  }
+  if (!(ir.textureAssets ?? []).some((asset) => asset.id === id)) return fail(`没有纹理资产「${id}」`);
+  if ((ir.ports ?? []).some((port) => port.textureAsset?.name === id)) {
+    return fail('该纹理资产被视觉端口引用，不能删除');
+  }
+  return { ok: true, ir: { ...ir, textureAssets: (ir.textureAssets ?? []).filter((asset) => asset.id !== id) } };
+}
+
 /** 改一根数值弦的基线（调律台拖弦 / 拨弦写回都用它）。 */
 export function setStringBaseline(ir: WorldIR, id: string, value: number): EditResult {
   const string = ir.strings.find((s) => s.id === id);
