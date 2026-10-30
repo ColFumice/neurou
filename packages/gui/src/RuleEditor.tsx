@@ -35,7 +35,6 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLin
       tabIndex={-1}
       ref={rootRef}
       onKeyDown={(event) => {
-        event.stopPropagation();
         if (event.code === 'Escape' || event.code === 'F7') {
           event.preventDefault();
           onClose();
@@ -54,6 +53,9 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLin
           <div className="rule-editor__row" key={rule.id} data-rule-id={rule.id}>
             <span
               className="rule-editor__name"
+              data-modal-item
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 setSelected(rule.id);
                 setDraft(getSource(rule.id));
@@ -102,13 +104,16 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLin
       <div className="waveform-editor__actions">
         <span
           data-rule-apply="true"
+          data-modal-item
+          role="button"
+          tabIndex={0}
           onClick={() => {
             if (selected) onApplySource(selected, draft);
           }}
         >
           应用源文本
         </span>
-        <span data-rule-close="true" onClick={onClose}>关闭</span>
+        <span data-rule-close="true" data-modal-item role="button" tabIndex={0} onClick={onClose}>关闭</span>
       </div>
     </div>
   );

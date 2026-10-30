@@ -247,13 +247,30 @@ const browser = await chromium.launch({
   headless: true,
   args: ['--autoplay-policy=no-user-gesture-required'],
 });
+
+// v7.0：初始进入界面（无 ?world= 时）
+const startPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await startPage.goto(URL, { waitUntil: 'networkidle' });
+await startPage.waitForSelector('[data-testid="start-screen"]', { timeout: 10000 });
+const startApp = startPage.locator('[data-testid="ink-app"]');
+const startRoot = startPage.locator('[data-testid="start-screen"]');
+check('初始界面出现文本菜单', (await startApp.getAttribute('data-start-open')) === 'true' && (await startRoot.locator('button[data-start-item]').count()) === 8, String(await startRoot.locator('button[data-start-item]').count()));
+await startPage.keyboard.press('ArrowDown');
+await startPage.waitForTimeout(120);
+check('初始界面方向键移动', (await startRoot.getAttribute('data-start-selected')) === '1', String(await startRoot.getAttribute('data-start-selected')));
+await startPage.keyboard.press('Enter');
+await startPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await startPage.waitForTimeout(400);
+check('初始界面 Enter 进入世界', (await startApp.getAttribute('data-world-file')) === 'examples/vertical-story.nro', String(await startApp.getAttribute('data-world-file')));
+await startPage.close();
+
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.on('console', (m) => {
   if (m.type() === 'error' && !m.text().includes('favicon')) consoleErrors.push(m.text());
 });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
-await page.goto(URL, { waitUntil: 'networkidle' });
+await page.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="string-field"]');
 await page.waitForTimeout(900);
 
@@ -1718,6 +1735,11 @@ await graphPage.keyboard.press('F9');
 await graphPage.waitForTimeout(300);
 check('F9 打开章节路线图', (await graphApp.getAttribute('data-chapter-graph-open')) === 'true' && (await graphPage.locator('[data-testid="chapter-graph"] .chapter-graph-node').count()) >= 13, `${await graphApp.getAttribute('data-chapter-graph-open')}/${await graphPage.locator('[data-testid="chapter-graph"] .chapter-graph-node').count()}`);
 check('章节图高亮当前章节', (await graphPage.locator('[data-chapter-file="examples/garden.nro"]').getAttribute('class'))?.includes('chapter-graph-node--current') === true, '');
+await graphPage.mouse.click(10, 10);
+await graphPage.waitForTimeout(250);
+check('点击章节图外部关闭', (await graphApp.getAttribute('data-chapter-graph-open')) === 'false', String(await graphApp.getAttribute('data-chapter-graph-open')));
+await graphPage.keyboard.press('F9');
+await graphPage.waitForTimeout(250);
 await graphPage.keyboard.press('Escape');
 await graphPage.waitForTimeout(250);
 check('Esc 关闭章节路线图', (await graphApp.getAttribute('data-chapter-graph-open')) === 'false', String(await graphApp.getAttribute('data-chapter-graph-open')));
@@ -2001,6 +2023,12 @@ await editorPage.keyboard.press('F6');
 await editorPage.waitForTimeout(300);
 const editorOverlay = editorPage.locator('[data-testid="waveform-editor"]');
 check('F6 打开波形/资源编辑器', (await editorApp.getAttribute('data-editor-open')) === 'true' && (await editorOverlay.count()) === 1, String(await editorApp.getAttribute('data-editor-open')));
+check('F6 使用黑色圆角模态', (await editorPage.locator('[data-testid="editor-modal"] .modal-window').count()) === 1);
+const selectedBeforeNav = String(await editorOverlay.getAttribute('data-editor-selected'));
+await editorPage.keyboard.press('ArrowDown');
+await editorPage.keyboard.press('Enter');
+await editorPage.waitForTimeout(150);
+check('F6 方向键+回车选择', String(await editorOverlay.getAttribute('data-editor-selected')) !== selectedBeforeNav, `${selectedBeforeNav}→${await editorOverlay.getAttribute('data-editor-selected')}`);
 const editorStringsAttr = String((await editorOverlay.getAttribute('data-editor-strings')) ?? '');
 check('编辑器列出持续弦与资源', editorStringsAttr.split(',').filter(Boolean).length >= 4 && Boolean(await editorOverlay.getAttribute('data-editor-selected')), editorStringsAttr);
 const bandValuesBeforeEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
@@ -2041,6 +2069,11 @@ check('编辑器绘制写回文件波形', /波形 /s.test(tunerFileAfterEditor)
 await editorPage.keyboard.press('Escape');
 await editorPage.waitForTimeout(250);
 check('Esc 关闭编辑器', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
+await editorPage.keyboard.press('F6');
+await editorPage.waitForTimeout(300);
+await editorPage.mouse.click(8, 8);
+await editorPage.waitForTimeout(250);
+check('点击编辑器外部关闭', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
 await editorPage.keyboard.press('?');
 await editorPage.waitForTimeout(200);
 check('? 打开手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'true' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 1);

@@ -149,7 +149,6 @@ export function WaveformEditor({
       tabIndex={-1}
       ref={rootRef}
       onKeyDown={(event) => {
-        event.stopPropagation();
         if (event.code === 'Escape' || event.code === 'F6') {
           event.preventDefault();
           onClose();
@@ -169,6 +168,9 @@ export function WaveformEditor({
               key={item.id}
               className={`waveform-editor__string${index === selected ? ' waveform-editor__string--selected' : ''}`}
               data-editor-string={item.id}
+              data-modal-item
+              role="button"
+              tabIndex={0}
               onClick={() => setSelected(index)}
             >
               {item.name}
@@ -198,6 +200,9 @@ export function WaveformEditor({
               <span
                 key={preset.value}
                 data-editor-preset={preset.value}
+                data-modal-item
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   if (!current) return;
                   onPreset(current.id, current.kind, preset.value);
@@ -207,7 +212,7 @@ export function WaveformEditor({
                 {preset.label}
               </span>
             ))}
-            <span data-editor-reset="true" onClick={() => {
+            <span data-editor-reset="true" data-modal-item role="button" tabIndex={0} onClick={() => {
                 if (!current) return;
                 onReset(current.id, current.kind);
                 setWave([...getWave(current.id, current.kind)]);
@@ -215,7 +220,7 @@ export function WaveformEditor({
             >
               重置
             </span>
-            <span data-editor-post={postLevel} onClick={() => onPostLevel((postLevel + 1) % 3)}>
+            <span data-editor-post={postLevel} data-modal-item role="button" tabIndex={0} onClick={() => onPostLevel((postLevel + 1) % 3)}>
               后处理 {postLevel.toFixed(2)}
             </span>
             <input
@@ -228,7 +233,7 @@ export function WaveformEditor({
               value={postLevel}
               onChange={(event) => onPostLevel(Number(event.target.value))}
             />
-            <span data-editor-close="true" onClick={onClose}>
+            <span data-editor-close="true" data-modal-item role="button" tabIndex={0} onClick={onClose}>
               关闭
             </span>
           </div>
@@ -241,6 +246,9 @@ export function WaveformEditor({
               key={`${asset.kind}:${asset.name}`}
               className={assetSelected === asset.id ? 'waveform-editor__asset--selected' : ''}
               data-editor-asset={asset.name}
+              data-modal-item
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 setAssetSelected(asset.id);
                 setAssetSrc(asset.src);
@@ -301,6 +309,9 @@ export function WaveformEditor({
                         <span
                           key={choice.id}
                           data-editor-asset-replace={choice.name}
+                          data-modal-item
+                          role="button"
+                          tabIndex={0}
                           onClick={() => onAssetReplace(asset.id, asset.kind, choice.id)}
                         >
                           {choice.name}
@@ -316,6 +327,9 @@ export function WaveformEditor({
                     <span
                       className="waveform-editor__asset-delete"
                       data-editor-asset-delete="true"
+                      data-modal-item
+                      role="button"
+                      tabIndex={0}
                       onClick={() => onAssetDelete(asset.id, asset.kind)}
                     >
                       删除资产

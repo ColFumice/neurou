@@ -46,6 +46,8 @@ import {
 import { Engine, createEngine } from '@neurou/engine';
 import { WaveformEditor, type EditorAsset, type EditorString } from './WaveformEditor.js';
 import { RuleEditor } from './RuleEditor.js';
+import { Modal } from './Modal.js';
+import { StartScreen, type StartItem } from './StartScreen.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -178,6 +180,17 @@ const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
 );
 const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 
+const START_ITEMS: StartItem[] = [
+  { id: 'tuner', label: '进入调律台', note: '八弦 · 默认', file: '' },
+  { id: 'story', label: '潮汐之间', note: '垂直故事', file: 'examples/vertical-story.nro' },
+  { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
+  { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
+  { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
+  { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
+  { id: 'graph', label: '章节路线', note: 'F9', file: '' },
+  { id: 'help', label: '手势帮助', note: '?', file: '' },
+];
+
 function chapterLabel(file: string): string {
   const node = CHAPTER_GRAPH.find((item) => item.file === file);
   return node?.title || node?.name || file.replace(/^examples\//, '').replace(/\.nro$/, '');
@@ -211,6 +224,7 @@ function seedFromUrl(): number {
 }
 
 const WORLD_FILE = worldFileFromUrl();
+const HAS_WORLD_QUERY = new URLSearchParams(window.location.search).has('world');
 const INITIAL_SEED = seedFromUrl();
 sustainedWaves.configure(WORLD_FILE);
 
@@ -444,6 +458,7 @@ export function App() {
   const [saveError, setSaveError] = useState('');
   const [saveErrorLine, setSaveErrorLine] = useState<number | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
@@ -1463,6 +1478,7 @@ export function App() {
       data-save-error={saveError}
       data-save-error-line={saveErrorLine ?? ''}
       data-help-open={helpOpen ? 'true' : 'false'}
+      data-start-open={startOpen ? 'true' : 'false'}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
       data-coupling-edits={couplingEdits}
@@ -1493,17 +1509,50 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
+      {startOpen ? (
+        <StartScreen
+          items={START_ITEMS}
+          onChoose={(item) => {
+            if (item.id === 'graph') {
+              setStartOpen(false);
+              setChapterGraphOpen(true);
+              return;
+            }
+            if (item.id === 'help') {
+              setStartOpen(false);
+              setHelpOpen(true);
+              return;
+            }
+            if (!item.file) {
+              setStartOpen(false);
+              return;
+            }
+            window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
+          }}
+        />
+      ) : null}
       {helpOpen ? (
-        <div className="help-overlay" data-testid="help-overlay">
-          <div className="help-overlay__title">手势</div>
-          <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
-          <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则</div>
-          <div>Space 预览 · Ctrl+Z 撤销 · R 结局后重开 · ? 帮助</div>
-          <div>Esc 关闭</div>
-        </div>
+        <Modal onClose={() => setHelpOpen(false)} className="help-modal" testId="help-modal">
+          <div className="help-overlay" data-testid="help-overlay">
+            <div className="help-overlay__title">手势</div>
+            <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
+            <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则 · F9 章节路线</div>
+            <div>Space 预览 · Ctrl+Z 撤销 · R 结局后重开 · ? 帮助</div>
+            <div
+              data-modal-item
+              tabIndex={0}
+              role="button"
+              onClick={() => setHelpOpen(false)}
+              onKeyDown={() => undefined}
+            >
+              关闭
+            </div>
+          </div>
+        </Modal>
       ) : null}
       {ruleOpen ? (
-        <RuleEditor
+        <Modal onClose={() => setRuleOpen(false)} className="rule-modal" testId="rule-modal">
+          <RuleEditor
           rules={(() => {
             let rules = worldIR?.rules ?? [];
             if (projectMode && source && worldIR) {
@@ -1603,9 +1652,11 @@ export function App() {
           errorLine={saveErrorLine ?? undefined}
           onClose={() => setRuleOpen(false)}
         />
+        </Modal>
       ) : null}
       {editorOpen ? (
-        <WaveformEditor
+        <Modal onClose={() => setEditorOpen(false)} className="editor-modal" testId="editor-modal">
+          <WaveformEditor
           strings={editorStrings}
           assets={editorAssets}
           getWave={readEditorWave}
@@ -1682,6 +1733,7 @@ export function App() {
           errorLine={saveErrorLine ?? undefined}
           onClose={() => setEditorOpen(false)}
         />
+        </Modal>
       ) : null}
       {chapterIntro && chapterTitle ? (
         <div className="chapter-intro" data-testid="chapter-intro">
@@ -1706,33 +1758,55 @@ export function App() {
         </div>
       ) : null}
       {chapterGraphOpen ? (
-        <div className="chapter-graph" data-testid="chapter-graph">
-          {CHAPTER_GRAPH.map((node) => (
+        <Modal onClose={() => setChapterGraphOpen(false)} className="chapter-modal" testId="chapter-modal">
+          <div className="chapter-graph" data-testid="chapter-graph">
+            <div className="chapter-graph-title">章节路线</div>
+            {CHAPTER_GRAPH.length === 0 ? (
+              <div className="chapter-graph-empty">这个世界还没有章节路线图。</div>
+            ) : null}
+            {CHAPTER_GRAPH.map((node) => (
+              <div
+                key={node.file}
+                className={`chapter-graph-node${node.file === WORLD_FILE ? ' chapter-graph-node--current' : ''}`}
+                data-chapter-file={node.file}
+                data-modal-item
+                role="button"
+                tabIndex={0}
+                onClick={() => goChapter(node.file)}
+              >
+                <span>{chapterLabel(node.file)}</span>
+                {node.next.length > 0 ? (
+                  <span className="chapter-graph-next">→ {node.next.map((file) => chapterLabel(file)).join(' / ')}</span>
+                ) : null}
+              </div>
+            ))}
             <div
-              key={node.file}
-              className={`chapter-graph-node${node.file === WORLD_FILE ? ' chapter-graph-node--current' : ''}`}
-              data-chapter-file={node.file}
+              className="chapter-graph-close"
+              data-modal-item
+              role="button"
+              tabIndex={0}
+              onClick={() => setChapterGraphOpen(false)}
             >
-              <span>{chapterLabel(node.file)}</span>
-              {node.next.length > 0 ? (
-                <span className="chapter-graph-next">→ {node.next.map((file) => chapterLabel(file)).join(' / ')}</span>
-              ) : null}
+              关闭
             </div>
-          ))}
-        </div>
+          </div>
+        </Modal>
       ) : null}
       {sceneMenuOpen ? (
-        <div className="scene-menu" data-testid="scene-menu">
-          {universe?.scenes().map((scene, index) => (
-            <span
-              key={scene.id}
-              className={`scene-row${index === sceneSelected ? ' scene-row--selected' : ''}`}
-              data-scene-row={scene.id}
-            >
-              {scene.name}
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="popup-scrim" data-testid="scene-scrim" onMouseDown={() => setSceneMenuOpen(false)} />
+          <div className="scene-menu" data-testid="scene-menu">
+            {universe?.scenes().map((scene, index) => (
+              <span
+                key={scene.id}
+                className={`scene-row${index === sceneSelected ? ' scene-row--selected' : ''}`}
+                data-scene-row={scene.id}
+              >
+                {scene.name}
+              </span>
+            ))}
+          </div>
+        </>
       ) : null}
       {previewOpen && screen === 'strings' ? (
         <div className="preview-mask" data-testid="preview-mask">
@@ -1779,17 +1853,20 @@ export function App() {
         </div>
       ) : null}
       {slotMenuOpen ? (
-        <div className="slot-menu" data-testid="slot-menu">
-          {slotInfos.map((info) => (
-            <span
-              key={info.slot}
-              className={`slot-row${info.slot === slotSelected ? ' slot-row--selected' : ''}`}
-              data-slot-row={info.slot}
-            >
-              {info.slot} · {info.exists ? `${info.tick} 拍${info.ended ? ' · 完' : ''}` : '空'}
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="popup-scrim" data-testid="slot-scrim" onMouseDown={() => setSlotMenuOpen(false)} />
+          <div className="slot-menu" data-testid="slot-menu">
+            {slotInfos.map((info) => (
+              <span
+                key={info.slot}
+                className={`slot-row${info.slot === slotSelected ? ' slot-row--selected' : ''}`}
+                data-slot-row={info.slot}
+              >
+                {info.slot} · {info.exists ? `${info.tick} 拍${info.ended ? ' · 完' : ''}` : '空'}
+              </span>
+            ))}
+          </div>
+        </>
       ) : null}
     </div>
   );
