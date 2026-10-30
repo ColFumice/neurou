@@ -37,7 +37,7 @@ pnpm install
 pnpm check          # 内核类型检查 / 构建
 pnpm check:gui      # GUI 类型检查
 pnpm check:docs     # 文档相对链接检查
-pnpm test           # 400 个单元测试（内核 / 运行时 / 弦物理 / 调律台 / 谱 / 音色 / 演奏 / 查谱 / 参考谱 / 关系谱）
+pnpm test           # 402 个单元测试（内核 / 运行时 / 弦物理 / 调律台 / 谱 / 音色 / 演奏 / 查谱 / 参考谱 / 关系谱）
 
 # 调律台 GUI
 pnpm gui            # http://127.0.0.1:5188/
