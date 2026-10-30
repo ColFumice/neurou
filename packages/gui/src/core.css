@@ -1009,3 +1009,8 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
 .modal-window .rule-editor { font-size: 14px; }
 .modal-window .rule-editor__list { max-height: 30vh; overflow: auto; }
 .modal-window .rule-editor textarea { min-height: 200px; font-size: 14px; line-height: 1.7; }
+
+/* v1.7.1：防止差速位移裁切左侧文字 */
+.start-list { padding-left: 38px; }
+.start-item { min-width: 0; }
+.start-left { overflow: visible; }

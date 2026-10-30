@@ -34,17 +34,35 @@ export function StringHighlight(): JSX.Element | null {
 
   useEffect(() => {
     let timer = 0;
+    let lastElement: Element | null = null;
+    let lastAt = 0;
     const show = (element: Element | null): void => {
       if (!matchesTarget(element)) return;
+      const now = Date.now();
+      if (element === lastElement && now - lastAt < 900) return;
+      lastElement = element;
+      lastAt = now;
       const rect = element.getBoundingClientRect();
-      setTarget({ x: rect.left, y: rect.top, w: rect.width, h: rect.height, key: Date.now() });
+      setTarget({ x: rect.left, y: rect.top, w: rect.width, h: rect.height, key: now });
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setTarget(null), 920);
     };
-    const onFocus = (event: FocusEvent): void => show(event.target as Element | null);
-    const onClick = (event: MouseEvent): void => show(event.target as Element | null);
+    const targetOf = (event: Event): HTMLElement | null => {
+      const element = event.target;
+      return element instanceof Element ? element.closest(SELECTOR) : null;
+    };
+    const onFocus = (event: FocusEvent): void => show(targetOf(event));
+    const onClick = (event: MouseEvent): void => show(targetOf(event));
+    const onPointerOver = (event: PointerEvent): void => show(targetOf(event));
+    const onPointerOut = (event: PointerEvent): void => {
+      const element = targetOf(event);
+      const related = event.relatedTarget;
+      if (element && (!(related instanceof Node) || !element.contains(related))) lastElement = null;
+    };
     window.addEventListener('focusin', onFocus, true);
     window.addEventListener('click', onClick, true);
+    window.addEventListener('pointerover', onPointerOver, true);
+    window.addEventListener('pointerout', onPointerOut, true);
     const observer = new MutationObserver((records) => {
       for (const record of records) {
         if (record.type === 'attributes' && record.target instanceof HTMLElement) {
@@ -70,20 +88,33 @@ export function StringHighlight(): JSX.Element | null {
       window.clearTimeout(timer);
       window.removeEventListener('focusin', onFocus, true);
       window.removeEventListener('click', onClick, true);
+      window.removeEventListener('pointerover', onPointerOver, true);
+      window.removeEventListener('pointerout', onPointerOut, true);
       observer.disconnect();
     };
   }, []);
 
   if (!target) return null;
   const { x, y, w, h, key } = target;
-  const arcs = [
-    { o: 0.95, c: '#ff7a1a', d: 0, lift: 18 },
-    { o: 0.72, c: '#ff9b3d', d: 40, lift: 28 },
-    { o: 0.55, c: '#ffb35c', d: 80, lift: 38 },
-    { o: 0.4, c: '#ffc77d', d: 120, lift: 46 },
-    { o: 0.28, c: '#ffd7a1', d: 170, lift: 54 },
-    { o: 0.18, c: '#ffe4bd', d: 220, lift: 62 },
-  ];
+  const rnd = (index: number): number => {
+    const value = Math.sin(key * 0.0013 + index * 12.9898) * 43758.5453;
+    return value - Math.floor(value);
+  };
+  const centerY = y + h / 2;
+  const arcs = Array.from({ length: 6 }, (_, index) => {
+    const offset = (index - 2.5) * 3.2 + (rnd(index) - 0.5) * 2;
+    const amp = 5 + rnd(index + 10) * 12;
+    const phase = rnd(index + 20) * Math.PI * 2;
+    const stretch = 0.18 + rnd(index + 30) * 0.34;
+    const c1x = x + w * stretch;
+    const c2x = x + w * (1 - stretch);
+    return {
+      d: `M ${x - 22} ${centerY + offset} C ${c1x} ${centerY + offset - amp * Math.cos(phase)}, ${c2x} ${centerY + offset + amp * Math.sin(phase)}, ${x + w + 22} ${centerY - offset}`,
+      opacity: 0.85 - index * 0.1,
+      color: index % 2 === 0 ? '#ff7a1a' : '#ffb15a',
+      delay: Math.round(rnd(index + 40) * 160),
+    };
+  });
   return (
     <svg
       key={key}
@@ -93,24 +124,19 @@ export function StringHighlight(): JSX.Element | null {
       height="100%"
       aria-hidden="true"
     >
-      {arcs.map((arc, index) => {
-        const up = index % 2 === 0;
-        const yy = up ? y - arc.lift : y + h + arc.lift;
-        const c1 = up ? y - h * 0.7 - arc.lift : y + h * 1.7 + arc.lift;
-        return (
-          <path
-            key={index}
-            d={`M ${x - 18} ${yy} C ${x + w * 0.2} ${c1}, ${x + w * 0.8} ${c1}, ${x + w + 18} ${yy}`}
-            fill="none"
-            stroke={arc.c}
-            strokeOpacity={arc.o}
-            strokeWidth={1.4 - index * 0.12}
-            strokeLinecap="round"
-            className="string-highlight__arc"
-            style={{ animationDelay: `${arc.d}ms` }}
-          />
-        );
-      })}
+      {arcs.map((arc, index) => (
+        <path
+          key={index}
+          d={arc.d}
+          fill="none"
+          stroke={arc.color}
+          strokeOpacity={arc.opacity}
+          strokeWidth={1.5 - index * 0.13}
+          strokeLinecap="round"
+          className="string-highlight__arc"
+          style={{ animationDelay: `${arc.delay}ms` }}
+        />
+      ))}
     </svg>
   );
 }
