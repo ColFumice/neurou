@@ -340,6 +340,12 @@ export function App() {
   const [universe, setUniverse] = useState<Engine | null>(null);
   /** 编辑后的图（阈值等结构编辑在它上面生效），写回以它为准。 */
   const [worldIR, setWorldIR] = useState<WorldIR | null>(null);
+  /** v5.48：模块弦只读保护。 */
+  const moduleStringIds = useMemo(() => {
+    if (!projectMode || !source || !worldIR) return new Set<string>();
+    const entryIds = new Set(projectEntryStrings(WORLD_FILE, source, worldIR).map((string) => string.id));
+    return new Set(worldIR.strings.filter((string) => !entryIds.has(string.id)).map((string) => string.id));
+  }, [projectMode, source, worldIR]);
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
@@ -1252,6 +1258,7 @@ export function App() {
       data-testid="ink-app"
       data-world-file={WORLD_FILE}
       data-project={projectMode ? 'true' : 'false'}
+      data-module-strings={[...moduleStringIds].join(',')}
       data-project-modules={projectModules.map((module) => module.path).join(',')}
       data-seed={INITIAL_SEED}
       data-version={__NEUROU_VERSION__}
@@ -1522,6 +1529,11 @@ export function App() {
     if (transitionRef.current) return;
     const lane = lanes.find((l) => l.kind === kind);
     if (!lane) return;
+    if (moduleStringIds.has(lane.id)) {
+      setSaveError('模块内的弦是只读的');
+      setSaveState('error');
+      return;
+    }
     universe.inject(lane.id, value);
     setVersion((v) => v + 1);
     if (persist) scheduleSave();
@@ -1544,6 +1556,11 @@ export function App() {
 
   const onEditWaveform = (stringId: string, waveform: number[]): void => {
     if (transitionRef.current) return;
+    if (moduleStringIds.has(stringId)) {
+      setSaveError('模块内的弦是只读的');
+      setSaveState('error');
+      return;
+    }
     const current = worldIRRef.current;
     if (!current) return;
     const result = setStringWaveform(current, stringId, waveform);
@@ -1565,6 +1582,11 @@ export function App() {
     if (transitionRef.current) return;
     const lane = lanes.find((l) => l.kind === kind);
     if (!lane) return;
+    if (moduleStringIds.has(lane.id)) {
+      setSaveError('模块内的弦是只读的');
+      setSaveState('error');
+      return;
+    }
     const result = setStringThreshold(worldIR, lane.id, which, value);
     if (!result.ok) {
       setSaveError(result.error);

@@ -1787,6 +1787,15 @@ await modularPage.waitForTimeout(800);
 const modularApp = modularPage.locator('[data-testid="ink-app"]');
 check('模块世界标记为项目', (await modularApp.getAttribute('data-project')) === 'true', String(await modularApp.getAttribute('data-project')));
 check('模块世界可观测依赖', (await modularApp.getAttribute('data-project-modules'))?.includes('examples/modules/rain.nro') === true, String(await modularApp.getAttribute('data-project-modules')));
+check('模块弦被标记为只读', (await modularApp.getAttribute('data-module-strings'))?.includes('雨.雨量') === true, String(await modularApp.getAttribute('data-module-strings')));
+const modularFileBefore = readFileSync('examples/modular.nro', 'utf8');
+await modularPage.evaluate(() => window.__neurouString.setValue('叙事', 40));
+await modularPage.waitForTimeout(300);
+check(
+  '模块弦编辑被拒绝且文件不变',
+  ((await modularApp.getAttribute('data-save-error')) ?? '').includes('模块') && readFileSync('examples/modular.nro', 'utf8') === modularFileBefore,
+  String(await modularApp.getAttribute('data-save-error')),
+);
 await modularPage.keyboard.press('Space');
 await modularPage.waitForTimeout(300);
 check('现象层显示模块依赖', (await modularPage.locator('[data-testid="preview-modules"] span').count()) === 2, String(await modularPage.locator('[data-testid="preview-modules"] span').count()));
