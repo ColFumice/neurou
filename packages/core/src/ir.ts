@@ -295,6 +295,8 @@ export interface IRPort {
   textureAsset?: { name: string; src: string };
   /** v6.15：音频端口参数自动化包络（0..1），周期 = bands.length * 4 拍。 */
   automation?: number[];
+  /** v6.16：视觉端口后处理链参数（0..1）。 */
+  post?: { vignette: number; grain: number; tint: number };
 }
 
 /** v5.30：视觉纹理资产。 */

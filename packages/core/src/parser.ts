@@ -455,6 +455,24 @@ class Parser {
           }
           decl.automation = bands;
           this.finishLine();
+        } else if (key === '后处理') {
+          const postStart = this.peek();
+          const post: { vignette?: number; grain?: number; tint?: number; span: Span } = {
+            span: this.spanFrom(postStart),
+          };
+          while (!this.atLineEnd()) {
+            const field = this.readName('后处理字段');
+            const value = this.readNumber('后处理强度');
+            if (field === '暗角') post.vignette = value;
+            else if (field === '颗粒') post.grain = value;
+            else if (field === '色偏') post.tint = value;
+            else {
+              this.fail(`后处理里不认识「${field}」。`, this.peek().span, '可用：暗角、颗粒、色偏。');
+              break;
+            }
+          }
+          decl.post = post;
+          this.finishLine();
         } else {
           this.fail(`端口里不认识「${key}」。`, this.peek().span, '可用：参数 <参数名> <弦名>、纹理 <图案> <尺度>、贴图 <资产名>、自动化 <采样...>。');
           this.skipToLineEnd();

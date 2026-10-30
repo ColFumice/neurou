@@ -237,6 +237,8 @@ export interface PortDecl extends DeclBase {
   textureAsset?: string;
   /** v6.15：音频端口参数自动化包络（0..1），周期 = bands.length * 4 拍。 */
   automation?: number[];
+  /** v6.16：视觉端口后处理链（暗角/颗粒/色偏）。 */
+  post?: { vignette?: number; grain?: number; tint?: number; span: Span };
 }
 
 /** v5.11/v5.12：命名空间；v5.12 起接纳除世界/嵌套命名空间外的全部声明。 */

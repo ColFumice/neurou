@@ -19,6 +19,8 @@ export interface BackendPortFrame {
   textureAsset?: IRPort['textureAsset'];
   /** v6.15：音频端口自动化包络的当前采样（0..1）。 */
   automation?: number;
+  /** v6.16：视觉端口后处理链参数。 */
+  post?: IRPort['post'];
 }
 
 export type BackendCompileResult =

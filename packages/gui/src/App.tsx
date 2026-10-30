@@ -1442,6 +1442,7 @@ export function App() {
         .filter((port) => port.kind === '视觉' && port.textureAsset)
         .map((port) => port.textureAsset!.name)
         .join(',')}
+      data-glsl-post-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉' && port.post).length}
       data-faust-status={faustStatus}
       data-faust-ports={(worldIR?.ports ?? []).filter((port) => port.kind === '音频').length}
       data-faust-automation={(worldIR?.ports ?? [])
@@ -1741,6 +1742,7 @@ export function App() {
                   key={`${index}-${artifact.bindings.map((binding) => binding.uniform).join(',')}`}
                   artifact={artifact}
                   postLevel={postLevel}
+                  post={(worldIR?.ports ?? []).filter((port) => port.kind === '视觉')[index]?.post}
                   values={artifact.bindings.map((binding) => {
                     const value = universe?.get(binding.string);
                     return typeof value === 'number' ? value : 0;

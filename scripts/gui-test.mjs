@@ -1804,6 +1804,14 @@ await storyPage.evaluate(() => window.__neurouString.setValue('叙事', 90));
 await storyPage.waitForTimeout(1200);
 check('垂直故事：高信任走到安顿', (await storyField.getAttribute('data-ending')) === '安顿', String(await storyField.getAttribute('data-ending')));
 check('垂直故事：结局在拍内触发', Number(await storyField.getAttribute('data-ending-tick')) > 0, String(await storyField.getAttribute('data-ending-tick')));
+await storyPage.keyboard.press('Space');
+await storyPage.waitForTimeout(500);
+check(
+  '垂直故事：视觉后处理链生效',
+  Number(await storyApp.getAttribute('data-glsl-post-ports')) === 1 &&
+    String(await storyPage.locator('[data-testid="preview-glsl"]').first().getAttribute('data-glsl-post')) === '0.4,0.2,0.15',
+  `${await storyApp.getAttribute('data-glsl-post-ports')}/${await storyPage.locator('[data-testid="preview-glsl"]').first().getAttribute('data-glsl-post')}`,
+);
 await storyPage.close();
 
 // v5.16：多文件模块世界在 GUI 中只读打开，依赖可观测

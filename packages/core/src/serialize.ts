@@ -319,6 +319,12 @@ function portBlock(w: Writer, port: IRPort): void {
   for (const param of port.params) w.line(1, `参数 ${param.name} ${param.string}`);
   if (port.texture) w.line(1, `纹理 ${port.texture.pattern} ${numberText(port.texture.scale)}`);
   if (port.textureAsset) w.line(1, `贴图 ${port.textureAsset.name}`);
+  if (port.post) {
+    w.line(
+      1,
+      `后处理 暗角 ${numberText(port.post.vignette)} 颗粒 ${numberText(port.post.grain)} 色偏 ${numberText(port.post.tint)}`,
+    );
+  }
   if (port.automation) w.line(1, `自动化 ${port.automation.map((value) => numberText(value)).join(' ')}`);
   w.blank();
 }

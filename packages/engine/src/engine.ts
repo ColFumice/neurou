@@ -268,6 +268,7 @@ export class Engine {
         params,
         ...(port.texture ? { texture: port.texture } : {}),
         ...(port.textureAsset ? { textureAsset: port.textureAsset } : {}),
+        ...(port.post ? { post: port.post } : {}),
         ...(automation === undefined ? {} : { automation }),
       };
     }

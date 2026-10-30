@@ -2127,6 +2127,28 @@ class Compiler {
         }
       }
       let automation: number[] | undefined;
+      let post: IRPort['post'];
+      if (d.post) {
+        if (d.kind !== '视觉') {
+          this.error('NRO2003', `音频端口「${d.name}」不能声明后处理。`, d.post.span);
+        } else {
+          const fields: [keyof NonNullable<IRPort['post']>, number | undefined][] = [
+            ['vignette', d.post.vignette],
+            ['grain', d.post.grain],
+            ['tint', d.post.tint],
+          ];
+          for (const [field, value] of fields) {
+            if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > 1)) {
+              this.error('NRO2003', `视觉端口「${d.name}」的后处理「${field}」应在 0..1。`, d.post.span);
+            }
+          }
+          post = {
+            vignette: d.post.vignette ?? 0.55,
+            grain: d.post.grain ?? 0.035,
+            tint: d.post.tint ?? 0,
+          };
+        }
+      }
       if (d.automation) {
         if (d.kind !== '音频') {
           this.error('NRO2003', `视觉端口「${d.name}」不能声明音频自动化。`, d.span);
@@ -2146,6 +2168,7 @@ class Compiler {
         ...(texture ? { texture } : {}),
         ...(textureAsset ? { textureAsset } : {}),
         ...(automation ? { automation } : {}),
+        ...(post ? { post } : {}),
       });
     }
   }

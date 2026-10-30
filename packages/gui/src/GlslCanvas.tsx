@@ -6,11 +6,16 @@ export function GlslCanvas({
   artifact,
   values,
   postLevel = 1,
+  post,
 }: {
   artifact: GlslArtifact;
   values: number[];
   postLevel?: number;
+  post?: { vignette: number; grain: number; tint: number };
 }): JSX.Element {
+  const vignette = post?.vignette ?? 0.55;
+  const grain = post?.grain ?? 0.035;
+  const tint = post?.tint ?? 0;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const valuesRef = useRef(values);
   valuesRef.current = values;
@@ -102,12 +107,16 @@ out vec4 outColor;
 uniform sampler2D uScene;
 uniform float uTime;
 uniform float uPost;
+uniform float uVignette;
+uniform float uGrain;
+uniform float uTint;
 void main() {
   vec4 color = texture(uScene, vUv);
   vec2 d = vUv - 0.5;
-  float vignette = 1.0 - dot(d, d) * 0.55 * uPost;
-  float grain = (fract(sin(dot(vUv * vec2(1024.0 + uTime, 768.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.035 * uPost;
-  outColor = vec4(color.rgb * vignette + grain, color.a);
+  float vignette = 1.0 - dot(d, d) * uVignette * uPost;
+  float grain = (fract(sin(dot(vUv * vec2(1024.0 + uTime, 768.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * uGrain * uPost;
+  vec3 tinted = mix(color.rgb, color.rgb * vec3(1.12, 0.96, 0.86), uTint);
+  outColor = vec4(tinted * vignette + grain, color.a);
 }`,
     );
     const postProgram = gl.createProgram();
@@ -119,6 +128,9 @@ void main() {
     const postSceneLocation = postProgram ? gl.getUniformLocation(postProgram, 'uScene') : null;
     const postTimeLocation = postProgram ? gl.getUniformLocation(postProgram, 'uTime') : null;
     const postLevelLocation = postProgram ? gl.getUniformLocation(postProgram, 'uPost') : null;
+    const postVignetteLocation = postProgram ? gl.getUniformLocation(postProgram, 'uVignette') : null;
+    const postGrainLocation = postProgram ? gl.getUniformLocation(postProgram, 'uGrain') : null;
+    const postTintLocation = postProgram ? gl.getUniformLocation(postProgram, 'uTint') : null;
     const sceneTexture = gl.createTexture();
     const sceneFramebuffer = gl.createFramebuffer();
     let sceneWidth = 0;
@@ -201,6 +213,9 @@ void main() {
         if (postSceneLocation) gl.uniform1i(postSceneLocation, 0);
         if (postTimeLocation) gl.uniform1f(postTimeLocation, (now - start) / 1000);
         if (postLevelLocation) gl.uniform1f(postLevelLocation, postLevel);
+        if (postVignetteLocation) gl.uniform1f(postVignetteLocation, vignette);
+        if (postGrainLocation) gl.uniform1f(postGrainLocation, grain);
+        if (postTintLocation) gl.uniform1f(postTintLocation, tint);
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -223,7 +238,17 @@ void main() {
       if (postVertex) gl.deleteShader(postVertex);
       if (postFragment) gl.deleteShader(postFragment);
     };
-  }, [artifact, postLevel]);
+  }, [artifact, postLevel, vignette, grain, tint]);
 
-  return <canvas ref={canvasRef} className="preview-glsl" data-testid="preview-glsl" data-glsl-passes="2" data-post-level={postLevel} aria-hidden="true" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="preview-glsl"
+      data-testid="preview-glsl"
+      data-glsl-passes="2"
+      data-post-level={postLevel}
+      data-glsl-post={`${vignette},${grain},${tint}`}
+      aria-hidden="true"
+    />
+  );
 }
