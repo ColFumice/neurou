@@ -1508,7 +1508,11 @@ export function App() {
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
     >
-      <div className={`scene-layer${helpOpen || editorOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''}`}>
+      <div
+        className={`scene-layer${startOpen ? ' scene-layer--start' : ''}${
+          helpOpen || editorOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''
+        }`}
+      >
         {children}
       </div>
       {startOpen ? (

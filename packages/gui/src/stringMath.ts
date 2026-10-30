@@ -142,16 +142,16 @@ const ROWS: readonly RowSpec[] = [
  * 所以上面两行 = 向上拨，下面两行 = 向下拨；离弦越远幅度越大。
  */
 export function layoutKeyboard(width = LOGICAL_W, height = LOGICAL_H, fillRows = false): KeyCell[] {
-  const rowH = height / 5.2;
-  const top = (height - rowH * ROWS.length) / 2;
+  const rowH = fillRows ? height / ROWS.length : height / 5.2;
+  const top = fillRows ? 0 : (height - rowH * ROWS.length) / 2;
   const cells: KeyCell[] = [];
   for (let row = 0; row < ROWS.length; row++) {
     const spec = ROWS[row]!;
     const keyW = fillRows ? width / spec.codes.length : width / 15;
     const span = spec.codes.length * keyW;
     const left = fillRows ? 0 : (width - span) / 2 + spec.shift * keyW;
-    const y = top + row * rowH + rowH * 0.09;
-    const h = rowH * 0.82;
+    const y = top + row * rowH + (fillRows ? 0 : rowH * 0.04);
+    const h = fillRows ? rowH : rowH * 0.92;
     for (let col = 0; col < spec.codes.length; col++) {
       const x = left + col * keyW;
       const cell: KeyCell = {
