@@ -59,7 +59,11 @@ export function Modal({ onClose, children, className = '', testId }: ModalProps)
             event.stopPropagation();
             const step = event.code === 'ArrowDown' ? 1 : -1;
             const next = index < 0 ? 0 : (index + step + list.length) % list.length;
-            list[next]?.focus();
+            const target = list[next];
+            target?.focus();
+            if (target?.dataset.modalItem && target.dataset.modalNoArrow === undefined) {
+              target.click();
+            }
           } else if (event.code === 'Home' || event.code === 'End') {
             event.preventDefault();
             list[event.code === 'Home' ? 0 : list.length - 1]?.focus();

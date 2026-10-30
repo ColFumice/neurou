@@ -105,6 +105,7 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLin
         <span
           data-rule-apply="true"
           data-modal-item
+          data-modal-no-arrow
           role="button"
           tabIndex={0}
           onClick={() => {
@@ -113,7 +114,7 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLin
         >
           应用源文本
         </span>
-        <span data-rule-close="true" data-modal-item role="button" tabIndex={0} onClick={onClose}>关闭</span>
+        <span data-rule-close="true" data-modal-item data-modal-no-arrow role="button" tabIndex={0} onClick={onClose}>关闭</span>
       </div>
     </div>
   );

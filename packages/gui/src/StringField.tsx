@@ -570,6 +570,8 @@ export function StringField({
 
     const audio = getStringAudio();
     const keys = layoutKeyboard();
+    /** v7.1：持续型弦的键盘映射铺满全屏，采样更细。 */
+    const sustainedKeys = layoutKeyboard(LOGICAL_W, LOGICAL_H, true);
     const focusDispBuf = new Float32Array(STRING_N);
     /** v5.39：持续波形平滑显示缓存 + 拖尾帧。 */
     const sustainedDisplayWaves = new Map<string, Float32Array>();
@@ -577,6 +579,8 @@ export function StringField({
     let sustainedTrailKind: string | null = null;
     let sustainedWaveFrameAt = 0;
     let lastWaveCommitAt = 0;
+    const baselineDisplay: number[] = [];
+    let baselineFrameAt = 0;
     const trailDispBuf = new Float32Array(STRING_N);
     const curveBufs: number[][] = [];
     let sims: StringSim[] = [];
@@ -690,8 +694,23 @@ export function StringField({
       return KIND_VISUAL[kindOf(index)];
     }
 
+    function updateBaselineDisplay(now: number): void {
+      const dt = baselineFrameAt > 0 ? Math.min(0.05, Math.max(0.008, (now - baselineFrameAt) / 1000)) : 1 / 60;
+      baselineFrameAt = now;
+      for (let index = 0; index < lanesNow.length; index += 1) {
+        const target = valueToY((lanesNow[index]?.norm ?? 0) * 100);
+        const current = baselineDisplay[index];
+        if (current === undefined || interactionOf(index) === '持续') {
+          baselineDisplay[index] = target;
+          continue;
+        }
+        const ease = 1 - Math.exp(-dt * 8);
+        baselineDisplay[index] = current + (target - current) * ease;
+      }
+    }
+
     function baselineOf(index: number): number {
-      return valueToY((lanesNow[index]?.norm ?? 0) * 100);
+      return baselineDisplay[index] ?? valueToY((lanesNow[index]?.norm ?? 0) * 100);
     }
 
     function focusGeom(): { xL: number; xR: number; width: number } {
@@ -1074,6 +1093,7 @@ export function StringField({
       alphaScale: number,
       withBleed: boolean,
       baselineOffset = 0,
+      widthScale = 1,
     ): void {
       const geom = focusGeom();
       const baseline = focusBaseline() + baselineOffset;
@@ -1113,29 +1133,32 @@ export function StringField({
       target.lineJoin = 'round';
       if (withBleed) {
         target.strokeStyle = rgba(ink, 0.05 * alphaScale);
-        target.lineWidth = baseWidth * 3;
+        target.lineWidth = baseWidth * widthScale * 3;
         target.stroke(fullPath);
       }
       for (let band = 0; band < BAND_COUNT; band += 1) {
         const ratio = BAND_COUNT <= 1 ? 1 : band / (BAND_COUNT - 1);
         target.strokeStyle = rgba(ink, (FOCUS_ALPHA - 0.02 + 0.09 * ratio) * alphaScale);
-        target.lineWidth = baseWidth + profile.peakWidth * ratio * 0.9;
+        target.lineWidth = (baseWidth + profile.peakWidth * ratio * 0.9) * widthScale;
         target.stroke(paths[band]!);
       }
     }
 
     /** 非焦点弦：不同粗细 / 不同透明度的细线（有耦合波时略深一点）。 */
-    function drawOtherString(index: number): void {
+    function drawOtherString(index: number, now: number): void {
       const sim = sims[index];
       if (!sim) return;
       const profile = profileOf(index);
-      const baseline = baselineOf(index);
+      const wander =
+        Math.sin(now * 0.00034 + index * 1.7) * 0.9 + Math.sin(now * 0.00013 + index * 0.7) * 0.45;
+      const baseline = baselineOf(index) + wander;
       const u = sim.u();
       const count = u.length;
       const stepX = LOGICAL_W / (count - 1);
       const amplitude = sim.amplitude();
       const isLinkTarget = linkTargetIndex === index;
-      const width = Math.max(profile.restWidth * OTHER_WIDTH_SCALE, isLinkTarget ? 1.6 : 0);
+      const breath = 0.9 + 0.18 * (0.5 + 0.5 * Math.sin(now * 0.00085 + index * 1.1));
+      const width = Math.max(profile.restWidth * OTHER_WIDTH_SCALE, isLinkTarget ? 1.6 : 0) * breath;
       const baseAlpha = OTHER_ALPHA + ((index % 3) - 1) * OTHER_ALPHA_STEP;
       const readonly = readOnlyRef.current.has(lanesNow[index]?.id ?? '');
       const alpha = (isLinkTarget
@@ -1601,6 +1624,7 @@ export function StringField({
 
     /* —— 场景 —— */
     function renderStringsScene(now: number): void {
+      updateBaselineDisplay(now);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (trailActive) ctx.drawImage(trailCanvas, 0, 0);
@@ -1608,7 +1632,7 @@ export function StringField({
 
       const geom = focusGeom();
       for (let i = 0; i < lanesNow.length; i += 1) {
-        if (i !== focusIdx) drawOtherString(i);
+        if (i !== focusIdx) drawOtherString(i, now);
       }
 
       // 共振虚影（±5px 两层极淡倒影）；按住 pin 时关掉，避免静态峰被重影干扰。
@@ -1645,7 +1669,9 @@ export function StringField({
             strokeFocus(ctx, trail, 0.075 * (1 - i / 9), false);
           }
           ctx.filter = 'none';
-          strokeFocus(ctx, disp, 1, false);
+          const wander = Math.sin(now * 0.00038 + focusIdx * 1.7) * 1.2;
+          const widthScale = 0.9 + 0.16 * (0.5 + 0.5 * Math.sin(now * 0.0009 + focusIdx * 1.3));
+          strokeFocus(ctx, disp, 1, false, wander, widthScale);
           ctx.restore();
         } else if (pinsNow.length > 0) {
           // 按住期间：整条焦点弦单一路径、常态宽度；只留峰顶圆点。
@@ -2416,11 +2442,11 @@ export function StringField({
         cycleRef.current?.(kindOf(focusIdx), event.code === 'ArrowRight' ? 1 : -1);
         return;
       }
-      const key = keyByCode(keys, event.code);
+      const interaction = interactionOf(focusIdx);
+      const key = keyByCode(interaction === '持续' ? sustainedKeys : keys, event.code);
       if (!key) return;
       event.preventDefault();
       const label = event.key.length === 1 ? event.key : key.label;
-      const interaction = interactionOf(focusIdx);
       if (interaction === '头判') {
         // 头判：按下即发声/判定，不进入按住拉弦。
         pluckFocus(key.cx, key.cy, event.code, label, true, true, true);

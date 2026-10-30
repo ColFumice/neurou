@@ -1508,7 +1508,9 @@ export function App() {
       data-transition={transition ? transition.dir : ''}
       data-loading={loading ? 'true' : 'false'}
     >
-      {children}
+      <div className={`scene-layer${helpOpen || editorOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''}`}>
+        {children}
+      </div>
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
@@ -1540,6 +1542,7 @@ export function App() {
             <div>Space 预览 · Ctrl+Z 撤销 · R 结局后重开 · ? 帮助</div>
             <div
               data-modal-item
+              data-modal-no-arrow
               tabIndex={0}
               role="button"
               onClick={() => setHelpOpen(false)}
@@ -1770,6 +1773,7 @@ export function App() {
                 className={`chapter-graph-node${node.file === WORLD_FILE ? ' chapter-graph-node--current' : ''}`}
                 data-chapter-file={node.file}
                 data-modal-item
+                data-modal-no-arrow
                 role="button"
                 tabIndex={0}
                 onClick={() => goChapter(node.file)}
@@ -1783,6 +1787,7 @@ export function App() {
             <div
               className="chapter-graph-close"
               data-modal-item
+              data-modal-no-arrow
               role="button"
               tabIndex={0}
               onClick={() => setChapterGraphOpen(false)}

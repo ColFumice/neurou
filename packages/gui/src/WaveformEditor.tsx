@@ -89,7 +89,7 @@ export function WaveformEditor({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(40, 38, 34, 0.16)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i += 1) {
       const y = (i / 4) * H;
@@ -98,8 +98,8 @@ export function WaveformEditor({
       ctx.lineTo(W, y);
       ctx.stroke();
     }
-    ctx.strokeStyle = 'rgba(40, 38, 34, 0.82)';
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.94)';
+    ctx.lineWidth = 1.8;
     trace(ctx, waveRef.current);
     ctx.stroke();
   }, [wave, current?.id]);
@@ -212,7 +212,7 @@ export function WaveformEditor({
                 {preset.label}
               </span>
             ))}
-            <span data-editor-reset="true" data-modal-item role="button" tabIndex={0} onClick={() => {
+            <span data-editor-reset="true" data-modal-item data-modal-no-arrow role="button" tabIndex={0} onClick={() => {
                 if (!current) return;
                 onReset(current.id, current.kind);
                 setWave([...getWave(current.id, current.kind)]);
@@ -233,7 +233,7 @@ export function WaveformEditor({
               value={postLevel}
               onChange={(event) => onPostLevel(Number(event.target.value))}
             />
-            <span data-editor-close="true" data-modal-item role="button" tabIndex={0} onClick={onClose}>
+            <span data-editor-close="true" data-modal-item data-modal-no-arrow role="button" tabIndex={0} onClick={onClose}>
               关闭
             </span>
           </div>
@@ -310,6 +310,7 @@ export function WaveformEditor({
                           key={choice.id}
                           data-editor-asset-replace={choice.name}
                           data-modal-item
+                          data-modal-no-arrow
                           role="button"
                           tabIndex={0}
                           onClick={() => onAssetReplace(asset.id, asset.kind, choice.id)}
@@ -328,6 +329,7 @@ export function WaveformEditor({
                       className="waveform-editor__asset-delete"
                       data-editor-asset-delete="true"
                       data-modal-item
+                      data-modal-no-arrow
                       role="button"
                       tabIndex={0}
                       onClick={() => onAssetDelete(asset.id, asset.kind)}

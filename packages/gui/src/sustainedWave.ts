@@ -6,7 +6,7 @@
  */
 import { STRING_INTERACTIONS, STRING_KINDS, type IRString, type StringKind } from '@neurou/core';
 
-export const SUSTAINED_WAVE_BANDS = 32;
+export const SUSTAINED_WAVE_BANDS = 48;
 export const SUSTAINED_KINDS = STRING_KINDS.filter((kind) => STRING_INTERACTIONS[kind] === '持续');
 
 interface WaveEntry {
