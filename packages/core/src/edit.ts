@@ -99,11 +99,11 @@ export function renameAsset(
     const assets = ir.audioAssets ?? [];
     if (!assets.some((asset) => asset.id === id)) return fail(`没有音频资产「${id}」`);
     if (assets.some((asset) => asset.id === name)) return fail(`音频资产「${name}」已存在`);
-    if (ir.bgm?.asset === id) return fail('该音频资产被「配乐」引用，不能重命名');
     return {
       ok: true,
       ir: {
         ...ir,
+        ...(ir.bgm?.asset === id ? { bgm: { ...ir.bgm, asset: name } } : {}),
         audioAssets: assets.map((asset) => (asset.id === id ? { ...asset, id: name, name } : asset)),
       },
     };
@@ -111,12 +111,19 @@ export function renameAsset(
   const assets = ir.textureAssets ?? [];
   if (!assets.some((asset) => asset.id === id)) return fail(`没有纹理资产「${id}」`);
   if (assets.some((asset) => asset.id === name)) return fail(`纹理资产「${name}」已存在`);
-  const used = (ir.ports ?? []).some((port) => port.textureAsset?.name === id);
-  if (used) return fail('该纹理资产被视觉端口引用，不能重命名');
   return {
     ok: true,
     ir: {
       ...ir,
+      ...(ir.ports
+        ? {
+            ports: ir.ports.map((port) =>
+              port.textureAsset?.name === id
+                ? { ...port, textureAsset: { ...port.textureAsset, name } }
+                : port,
+            ),
+          }
+        : {}),
       textureAssets: assets.map((asset) => (asset.id === id ? { ...asset, id: name, name } : asset)),
     },
   };
@@ -130,9 +137,6 @@ export function removeAsset(ir: WorldIR, kind: 'audio' | 'texture', id: string):
     return { ok: true, ir: { ...ir, audioAssets: (ir.audioAssets ?? []).filter((asset) => asset.id !== id) } };
   }
   if (!(ir.textureAssets ?? []).some((asset) => asset.id === id)) return fail(`没有纹理资产「${id}」`);
-  if ((ir.ports ?? []).some((port) => port.textureAsset?.name === id)) {
-    return fail('该纹理资产被视觉端口引用，不能删除');
-  }
   return { ok: true, ir: { ...ir, textureAssets: (ir.textureAssets ?? []).filter((asset) => asset.id !== id) } };
 }
 

@@ -406,6 +406,8 @@ declare global {
       };
       /** v5.34：持续型弦当前发声音数（验收用）。 */
       sustainedStrings: () => number;
+      /** v6.10：当前持续 voice 的优先级（验收用）。 */
+      voicePriorities: () => number[];
       /** v5.35：焦点弦当前显示波形的峰谷差（验收用）。 */
       focusWaveSpread: () => number;
       /** 增删耦合的 link 目标（验收用）。 */
@@ -2848,6 +2850,7 @@ export function StringField({
         };
       },
       sustainedStrings: () => sustainedKeyVoices.size + (mouseSustainId !== null ? 1 : 0),
+      voicePriorities: () => audio.voicePriorities(),
       focusWaveSpread: () => {
         const disp = focusDisplayU(performance.now(), false);
         let low = Number.POSITIVE_INFINITY;

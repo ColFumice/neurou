@@ -131,5 +131,8 @@ describe('Engine facade（v5.2）', () => {
     expect(next.state.tick).toBe(engine.state.tick);
     expect(next.state.values).toEqual(engine.state.values);
     expect(next.restoreHostSnapshot({ ...roundtrip, abi: 'neurou-host/2' as typeof HOST_ABI })).toBe(false);
+    const legacy = { ...roundtrip } as Record<string, unknown>;
+    delete legacy.stateVersion;
+    expect(next.restoreHostSnapshot(legacy as unknown as typeof roundtrip)).toBe(true);
   });
 });

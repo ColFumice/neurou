@@ -451,7 +451,24 @@ export function App() {
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
   const [editorOpen, setEditorOpen] = useState(false);
   const [ruleOpen, setRuleOpen] = useState(false);
-  const [postLevel, setPostLevel] = useState(1);
+  const POST_LEVEL_KEY = `neurou.post.level:${WORLD_FILE}`;
+  const [postLevel, setPostLevelState] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(POST_LEVEL_KEY);
+      const value = raw === null ? 1 : Number(raw);
+      return Number.isFinite(value) ? Math.max(0, Math.min(2, value)) : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const setPostLevel = (value: number): void => {
+    setPostLevelState(value);
+    try {
+      window.localStorage.setItem(POST_LEVEL_KEY, String(value));
+    } catch {
+      /* 隐私模式忽略 */
+    }
+  };
   const [spectrumIndex, setSpectrumIndex] = useState(0);
   const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);

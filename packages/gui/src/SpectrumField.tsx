@@ -95,6 +95,7 @@ declare global {
       setBand: (bandIndex: number, value: number) => void;
       easeTick: () => number[];
       auditions: () => number;
+      voicePriorities: () => number[];
       bandTargets: () => number[];
     };
   }
@@ -1317,6 +1318,7 @@ export function SpectrumField({ spectra, index, onCycleSpectrum, onEditBand, onE
         return displayed.map((value) => round4(value));
       },
       auditions: () => auditionsNow,
+      voicePriorities: () => audio.voicePriorities(),
       bandTargets: () => targets.map((value) => round4(value)),
     };
 

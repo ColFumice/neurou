@@ -88,10 +88,13 @@ function structuralSignature(ir: WorldIR): string {
       mode: s.mode,
       articulation: s.articulation,
     })),
-    bgm: ir.bgm ?? null,
+    bgm: ir.bgm ? { ...ir.bgm, asset: '*' } : null,
     systems: ir.systems ?? [],
     scenes: ir.scenes ?? [],
-    ports: ir.ports ?? [],
+    ports: (ir.ports ?? []).map((port) => ({
+      ...port,
+      textureAsset: port.textureAsset ? { src: port.textureAsset.src } : undefined,
+    })),
     namespaces: ir.namespaces ?? [],
     functions: ir.functions ?? [],
     // 关系谱的格子值可做行级 patch；行/列结构、曲线或采样元数据变化
@@ -436,6 +439,26 @@ function ruleBlockEnd(text: string, start: number): number {
   return text.length;
 }
 
+function bgmAssetEdit(text: string, oldName: string, nextName: string): TextEdit | { error: string } {
+  const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^([ \\t]*配乐[ \\t]+)(${escaped})(?=[ \\t]|$)`, 'm');
+  const match = pattern.exec(text);
+  if (!match) return { error: '找不到「配乐」行，无法更新资产引用' };
+  const start = match.index + (match[1]?.length ?? 0);
+  return { start, end: start + (match[2]?.length ?? 0), text: nextName };
+}
+
+function textureRefEdits(text: string, oldName: string, nextName: string): TextEdit[] {
+  const escaped = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`^([ \\t]*贴图[ \\t]+)(${escaped})(?=[ \\t]*(?:#.*)?$)`, 'gm');
+  const edits: TextEdit[] = [];
+  for (const match of text.matchAll(pattern)) {
+    const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+    edits.push({ start, end: start + (match[2]?.length ?? 0), text: nextName });
+  }
+  return edits;
+}
+
 function assetDeclarationEdit(
   text: string,
   label: '音频资产' | '纹理资产',
@@ -619,6 +642,12 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
       changed.push(`${edited.id}.rename`);
+      if (baseIR.bgm?.asset === base.name && editedIR.bgm?.asset === edited.name) {
+        const bgm = bgmAssetEdit(normalized, base.name, edited.name);
+        if ('error' in bgm) return { ok: false, reason: bgm.error };
+        edits.push(bgm);
+        changed.push('bgm.asset');
+      }
     }
     if (base.src !== edited.src) {
       const result = assetSrcEdit(normalized, '音频资产', edited.name, edited.src, eol);
@@ -646,6 +675,8 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
       if ('error' in result) return { ok: false, reason: result.error };
       edits.push(result);
       changed.push(`${edited.id}.rename`);
+      const refs = textureRefEdits(normalized, base.name, edited.name);
+      if (refs.length > 0) edits.push(...refs);
     }
     if (base.src !== edited.src) {
       const result = assetSrcEdit(normalized, '纹理资产', edited.name, edited.src, eol);

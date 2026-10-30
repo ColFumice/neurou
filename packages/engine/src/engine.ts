@@ -159,7 +159,9 @@ export class Engine {
 
   /** v6.5：从 Host 快照恢复；只接受同一 ABI 的 stateVersion 1。 */
   restoreHostSnapshot(snapshot: HostSnapshot): boolean {
-    if (snapshot.abi !== HOST_ABI || snapshot.stateVersion !== 1) return false;
+    if (snapshot.abi !== HOST_ABI) return false;
+    const version = snapshot.stateVersion ?? 1;
+    if (version !== 1) return false;
     this.restore(snapshot.state);
     return true;
   }

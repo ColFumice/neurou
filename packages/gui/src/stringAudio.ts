@@ -901,6 +901,11 @@ export class StringAudioEngine {
     }
   }
 
+  /** v6.10：当前持续 voice 的优先级快照（诊断/验收）。 */
+  voicePriorities(): number[] {
+    return [...this.voices.values()].map((voice) => voice.priority);
+  }
+
   stopSustainedSpectrum(id: number): void {
     const ctx = this.ctx;
     const voice = this.voices.get(id);

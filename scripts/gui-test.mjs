@@ -1100,6 +1100,7 @@ const retargetBefore = await bandsOf();
 const retargetSelectedBefore = await page.evaluate(() => window.__neurouSpectrum?.state().selected ?? null);
 await page.keyboard.down('ArrowUp');
 await page.waitForTimeout(140);
+check('F2 合奏 voice 带高优先级', (await page.evaluate(() => window.__neurouSpectrum?.voicePriorities() ?? [])).includes(10), JSON.stringify(await page.evaluate(() => window.__neurouSpectrum?.voicePriorities() ?? [])));
 await page.keyboard.press('ArrowRight');
 await page.waitForTimeout(160);
 const retargetSelectedAfter = await page.evaluate(() => window.__neurouSpectrum?.state().selected ?? null);
@@ -1961,6 +1962,11 @@ if ((await postRange.count()) > 0) {
   });
   await editorPage.waitForTimeout(150);
   check('后处理可任意调参', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')) === '1.35', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')));
+  check(
+    '后处理参数按世界持久化',
+    (await editorPage.evaluate(() => window.localStorage.getItem('neurou.post.level:examples/tuner.nro'))) === '1.35',
+    String(await editorPage.evaluate(() => window.localStorage.getItem('neurou.post.level:examples/tuner.nro'))),
+  );
 }
 const bandValuesAfterEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
 check('编辑器预设改变波形', bandValuesAfterEditor !== bandValuesBeforeEditor);
