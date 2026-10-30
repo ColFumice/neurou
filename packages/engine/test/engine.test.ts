@@ -126,5 +126,10 @@ describe('Engine facade（v5.2）', () => {
     const roundtrip = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
     expect(roundtrip.abi).toBe(HOST_ABI);
     expect(roundtrip.values['能量']).toBe(5);
+    const next = createEngine(result.ir, { seed: 1 });
+    expect(next.restoreHostSnapshot(roundtrip)).toBe(true);
+    expect(next.state.tick).toBe(engine.state.tick);
+    expect(next.state.values).toEqual(engine.state.values);
+    expect(next.restoreHostSnapshot({ ...roundtrip, abi: 'neurou-host/2' as typeof HOST_ABI })).toBe(false);
   });
 });

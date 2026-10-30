@@ -35,6 +35,8 @@ export const HOST_ABI = 'neurou-host/1' as const;
 
 export interface HostSnapshot {
   abi: typeof HOST_ABI;
+  /** 快照状态结构版本；v1 内自增，破坏性变更升 ABI。 */
+  stateVersion: 1;
   description: EngineDescription;
   values: Record<string, RuntimeValue>;
   state: WorldState;
@@ -148,10 +150,18 @@ export class Engine {
   toHostSnapshot(): HostSnapshot {
     return {
       abi: HOST_ABI,
+      stateVersion: 1,
       description: this.describe(),
       values: { ...this.state.values },
       state: this.snapshot(),
     };
+  }
+
+  /** v6.5：从 Host 快照恢复；只接受同一 ABI 的 stateVersion 1。 */
+  restoreHostSnapshot(snapshot: HostSnapshot): boolean {
+    if (snapshot.abi !== HOST_ABI || snapshot.stateVersion !== 1) return false;
+    this.restore(snapshot.state);
+    return true;
   }
 
   inject(id: string, value: RuntimeValue): number {

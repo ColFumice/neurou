@@ -24,6 +24,8 @@ const before = engine.toHostSnapshot();
 engine.inject('视觉.色温', 42);
 engine.step();
 const after = engine.toHostSnapshot();
+const restored = createEngine(compiled.ir, { seed: 99 });
+const restoredOk = restored.restoreHostSnapshot(after);
 
 console.log(
   JSON.stringify(
@@ -37,6 +39,7 @@ console.log(
       ],
       scenes: after.description.scenes,
       ports: after.description.ports,
+      restored: { ok: restoredOk, tick: restored.state.tick, color: restored.get('视觉.色温') },
     },
     null,
     2,
