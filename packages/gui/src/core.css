@@ -1023,3 +1023,39 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
   -webkit-backdrop-filter: blur(20px) saturate(0.9);
   pointer-events: auto;
 }
+
+/* v1.8：节拍器与记忆模式状态 */
+.metronome {
+  position: fixed;
+  left: 22px;
+  top: 22px;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(10, 10, 12, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: #f6f6f3;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+.metronome--off {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.metronome strong { font-family: var(--serif); letter-spacing: .12em; font-size: 13px; display: block; }
+.metronome span { display: block; font-size: 10px; opacity: .55; margin-top: 2px; }
+.metronome__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff8a3c;
+  box-shadow: 0 0 12px rgba(255, 138, 60, .65);
+}
+.metronome__dot--accent { background: #fff; box-shadow: 0 0 16px rgba(255,255,255,.9); }
+.metronome__hint { font-size: 9px; opacity: .35; margin-left: 8px; max-width: 150px; line-height: 1.5; }

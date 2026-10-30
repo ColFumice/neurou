@@ -52,6 +52,7 @@ import { FlowField } from './FlowField.js';
 import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
+import { Metronome } from './Metronome.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -1626,7 +1627,7 @@ export function App() {
             </div>
             <div className="help-section">
               <div className="help-section__title">5 · 记忆与发布</div>
-              <div>F12 记忆模式录制当前界面演奏为循环声部，切换界面自动退出。完成后 pnpm build && pnpm release。</div>
+              <div>F11 节拍器可设 BPM 与每几拍响一次；F12 记忆模式录制当前界面演奏为循环声部，切换界面自动退出。完成后 pnpm build && pnpm release。</div>
             </div>
             <div
               data-modal-item
@@ -1966,7 +1967,8 @@ export function App() {
           </div>
         </>
       ) : null}
-      <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
+      <MemoryMode active={memoryMode} screen={screen} worldFile={WORLD_FILE} onExit={() => setMemoryMode(false)} />
+      <Metronome />
       <StringHighlight />
       <CursorLayer />
     </div>
