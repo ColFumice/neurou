@@ -361,3 +361,37 @@ body {
   overflow-wrap: anywhere;
 }
 .waveform-editor__empty { opacity: 0.35; }
+
+/* v6.3：规则 / 动作编辑器 */
+.rule-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  font-size: 13px;
+}
+.rule-editor__row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(11, 11, 11, 0.08);
+}
+.rule-editor__row em {
+  font-style: normal;
+  opacity: 0.45;
+  margin-left: -10px;
+}
+.rule-editor__name { font-family: var(--serif); min-width: 90px; }
+.rule-editor__field { display: flex; align-items: center; gap: 8px; opacity: 0.8; }
+.rule-editor__field button {
+  border: 1px solid rgba(11, 11, 11, 0.18);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+}
+.rule-editor__field strong { font-weight: 500; min-width: 22px; text-align: center; }

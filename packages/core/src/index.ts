@@ -39,6 +39,7 @@ export {
   setStringBaseline,
   setStringThreshold,
   setStringWaveform,
+  setRuleNumberField,
   setCouplingStrength,
   setCouplingStrengthBetween,
   addCoupling,

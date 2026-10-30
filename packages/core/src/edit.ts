@@ -48,6 +48,22 @@ export function setStringWaveform(ir: WorldIR, id: string, values: readonly numb
   };
 }
 
+/** v6.3：改规则的数值字段（耗时/优先级/每）。 */
+export function setRuleNumberField(
+  ir: WorldIR,
+  id: string,
+  field: 'cost' | 'priority' | 'cooldown',
+  value: number,
+): EditResult {
+  const rule = ir.rules.find((item) => item.id === id);
+  if (!rule) return fail(`没有规则「${id}」`);
+  if (!Number.isFinite(value) || value < 0) return fail('规则字段必须是非负数字');
+  return {
+    ok: true,
+    ir: { ...ir, rules: ir.rules.map((item) => (item.id === id ? { ...item, [field]: round(value) } : item)) },
+  };
+}
+
 /** 改一根数值弦的基线（调律台拖弦 / 拨弦写回都用它）。 */
 export function setStringBaseline(ir: WorldIR, id: string, value: number): EditResult {
   const string = ir.strings.find((s) => s.id === id);

@@ -1877,6 +1877,23 @@ await slicePage.keyboard.press('Space');
 await slicePage.waitForTimeout(500);
 check('垂直切片：预览同时出现视觉与音频', (await slicePage.locator('[data-testid="preview-glsl"]').count()) === 1 && (await slicePage.locator('[data-testid="preview-audio"]').count()) === 1, String(await slicePage.locator('[data-testid="preview-glsl"]').count()));
 check('垂直切片：两 pass 与 Faust 节点', (await slicePage.locator('[data-testid="preview-glsl"][data-glsl-passes="2"]').count()) === 1 && Number(await sliceApp.getAttribute('data-faust-nodes')) >= 1, `${await sliceApp.getAttribute('data-faust-nodes')}`);
+await slicePage.keyboard.press('Space');
+await slicePage.waitForTimeout(300);
+const sliceFileBeforeRuleEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
+await slicePage.keyboard.press('F7');
+await slicePage.waitForTimeout(300);
+const ruleOverlay = slicePage.locator('[data-testid="rule-editor"]');
+check('F7 打开规则/动作编辑器', (await sliceApp.getAttribute('data-rule-editor-open')) === 'true' && (await ruleOverlay.count()) === 1, String(await sliceApp.getAttribute('data-rule-editor-open')));
+check('规则编辑器列出动作', Number(await ruleOverlay.getAttribute('data-rule-count')) >= 1 && (await ruleOverlay.locator('[data-rule-id="action:安抚"]').count()) === 1, String(await ruleOverlay.getAttribute('data-rule-count')));
+await ruleOverlay.locator('[data-rule-id="action:安抚"] [data-rule-field="cost"] button[data-rule-step="1"]').click();
+await slicePage.waitForTimeout(1100);
+const sliceFileAfterRuleEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
+check('规则编辑写回状态 = saved', (await sliceApp.getAttribute('data-save-state')) === 'saved' && (await sliceApp.getAttribute('data-save-mode')) === 'patch', `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-mode')}/${await sliceApp.getAttribute('data-save-error')}`);
+check('规则编辑更新耗时行', sliceFileAfterRuleEdit.includes('耗时 2') && sliceFileAfterRuleEdit !== sliceFileBeforeRuleEdit);
+writeFileSync('examples/vertical-slice.nro', sliceFileBeforeRuleEdit, 'utf8');
+await slicePage.keyboard.press('Escape');
+await slicePage.waitForTimeout(200);
+check('Esc 关闭规则编辑器', (await sliceApp.getAttribute('data-rule-editor-open')) === 'false' && (await ruleOverlay.count()) === 0);
 await slicePage.close();
 
 // v5.59：F6 波形 / 资源编辑器

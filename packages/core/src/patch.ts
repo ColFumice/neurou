@@ -1,4 +1,4 @@
-import type { IRCoupling, IRMatrix, IRSpectrum, IRString, WorldIR } from './ir.js';
+import type { IRCoupling, IRMatrix, IRRule, IRSpectrum, IRString, WorldIR } from './ir.js';
 import { stringBlockLines } from './serialize.js';
 
 /**
@@ -119,7 +119,7 @@ function structuralSignature(ir: WorldIR): string {
       phaseSource: m.phaseSource,
     })),
     loops: ir.loops.map((loop) => ({ name: loop.name, polarity: loop.polarity, edgeCount: loop.edges.length })),
-    rules: ir.rules,
+    rules: ir.rules.map((rule) => ({ ...rule, cost: 0, priority: 0, cooldown: 0 })),
     axioms: ir.axioms,
     signals: ir.signals,
     phases: ir.phases,
@@ -395,6 +395,42 @@ function stringWaveformEdit(
   };
 }
 
+function ruleBlockEnd(text: string, start: number): number {
+  let pos = text.indexOf('\n', start);
+  if (pos < 0) return text.length;
+  pos += 1;
+  while (pos < text.length) {
+    const end = text.indexOf('\n', pos);
+    const lineEnd = end < 0 ? text.length : end;
+    const line = text.slice(pos, lineEnd);
+    if (line.trim() === '' || /^\S/.test(line)) return pos;
+    if (end < 0) return text.length;
+    pos = end + 1;
+  }
+  return text.length;
+}
+
+function ruleNumberFieldEdit(
+  text: string,
+  rule: IRRule,
+  label: string,
+  value: number,
+  eol: string,
+): TextEdit | { error: string } {
+  if (!rule.span) return { error: `规则「${rule.id}」没有源位置` };
+  const lines = linesIn(text, rule.span.start.offset, ruleBlockEnd(text, rule.span.start.offset));
+  const target = lines.find((line) => new RegExp(`^\\s*${label}(?=\\s|$)`).test(contentOf(text, line)));
+  if (!target) return { error: `规则「${rule.id}」没有「${label}」行，无法行级写回` };
+  const content = contentOf(text, target);
+  const match = new RegExp(`^(\\s*${label}\\s+)(-?\\d+(?:\\.\\d+)?)(\\s*(?:#.*)?)$`).exec(content);
+  if (!match) return { error: `规则「${rule.id}」的「${label}」行格式无法识别` };
+  return {
+    start: target.contentStart,
+    end: target.contentEnd,
+    text: `${match[1]}${formatNumber(value)}${match[3]}`,
+  };
+}
+
 function couplingStrengthEdit(
   text: string,
   coupling: IRCoupling,
@@ -495,6 +531,31 @@ export function patchWorldText(baseText: string, baseIR: WorldIR, editedIR: Worl
   }
   if (addedStrings.length > 0) {
     edits.push(insertStringsEdit(normalized, baseIR, addedStrings, eol));
+  }
+
+  // 规则数值字段：耗时 / 优先级 / 每（结构本身仍由签名保护）。
+  for (const edited of editedIR.rules) {
+    const base = baseIR.rules.find((rule) => rule.id === edited.id);
+    if (!base) return { ok: false, reason: `规则「${edited.id}」是新增的，需要回退规范序列化` };
+    const fields: { key: 'cost' | 'priority' | 'cooldown'; label: string }[] = [
+      { key: 'cost', label: '耗时' },
+      { key: 'priority', label: '优先级' },
+      { key: 'cooldown', label: '每' },
+    ];
+    for (const field of fields) {
+      const before = base[field.key];
+      const after = edited[field.key];
+      if (Math.abs(before - after) < 1e-9) continue;
+      const result = ruleNumberFieldEdit(normalized, base, field.label, after, eol);
+      if ('error' in result) return { ok: false, reason: result.error };
+      edits.push(result);
+      changed.push(`${edited.id}.${field.key}`);
+    }
+  }
+  for (const base of baseIR.rules) {
+    if (!editedIR.rules.some((rule) => rule.id === base.id)) {
+      return { ok: false, reason: `规则「${base.id}」被删除，需要回退规范序列化` };
+    }
   }
 
   for (const edited of editedIR.spectra) {

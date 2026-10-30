@@ -16,6 +16,7 @@ import {
   setCouplingStrengthBetween,
   setStringThreshold,
   setStringWaveform,
+  setRuleNumberField,
   STRING_INTERACTIONS,
   setSpectrumBand,
   setSpectrumBands,
@@ -36,6 +37,7 @@ import {
 } from '@neurou/core';
 import { Engine, createEngine } from '@neurou/engine';
 import { WaveformEditor, type EditorAsset, type EditorString } from './WaveformEditor.js';
+import { RuleEditor } from './RuleEditor.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
@@ -433,6 +435,7 @@ export function App() {
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
   const [editorOpen, setEditorOpen] = useState(false);
+  const [ruleOpen, setRuleOpen] = useState(false);
   const [spectrumIndex, setSpectrumIndex] = useState(0);
   const [matrixIndex, setMatrixIndex] = useState(0);
   const [bandEdits, setBandEdits] = useState(0);
@@ -1287,6 +1290,17 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // F7：规则 / 动作数值编辑器。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'F7' || event.ctrlKey || event.metaKey || event.altKey) return;
+      event.preventDefault();
+      setRuleOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const shell = (children: ReactNode | null, loading: boolean) => (
     <div
       className="ink-app"
@@ -1362,6 +1376,7 @@ export function App() {
       data-string-removes={stringRemoves}
       data-screen={screen}
       data-editor-open={editorOpen ? 'true' : 'false'}
+      data-rule-editor-open={ruleOpen ? 'true' : 'false'}
       data-spectrum-index={spectrumIndex}
       data-spectrum-count={worldIR?.spectra.length ?? 0}
       data-spectrum-band-edits={bandEdits}
@@ -1382,6 +1397,41 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
+      {ruleOpen ? (
+        <RuleEditor
+          rules={(() => {
+            let rules = worldIR?.rules ?? [];
+            if (projectMode && source && worldIR) {
+              try {
+                const base = compileProjectFromFiles(WORLD_FILE, projectSources);
+                if (typeof base.entryOffset === 'number') {
+                  rules = projectEntryView(worldIR, base.entryOffset, source.length).rules;
+                }
+              } catch {
+                /* 项目入口视图不可用时只读主图规则 */
+              }
+            }
+            return rules.map((rule) => ({
+              id: rule.id,
+              name: rule.name,
+              kind: rule.kind,
+              cost: rule.cost,
+              priority: rule.priority,
+              cooldown: rule.cooldown,
+            }));
+          })()}
+          onAdjust={(id, field, delta) => {
+            const current = worldIRRef.current;
+            const rule = current?.rules.find((item) => item.id === id);
+            if (!current || !rule) return;
+            const result = setRuleNumberField(current, id, field, Math.max(0, rule[field] + delta));
+            if (!result.ok) return;
+            applyWorldIR(result.ir);
+            scheduleSave();
+          }}
+          onClose={() => setRuleOpen(false)}
+        />
+      ) : null}
       {editorOpen ? (
         <WaveformEditor
           strings={editorStrings}
