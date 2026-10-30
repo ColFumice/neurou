@@ -10,6 +10,11 @@
  */
 import { SourceFile } from './source.js';
 import { compile, type CompileResult } from './compiler.js';
+import { parse } from './parser.js';
+import { patchWorldText, type PatchResult } from './patch.js';
+import { DiagnosticBag } from './diagnostics.js';
+import type { Decl, EntityDecl, NamespaceDecl, StringDecl } from './ast.js';
+import type { IRString, WorldIR } from './ir.js';
 
 export interface ProjectSources {
   /** 路径 → 源码；路径使用 `/`，相对当前工作目录。 */
@@ -148,4 +153,67 @@ export function projectGraph(
 
   visit(entry);
   return out;
+}
+
+/**
+ * v5.47：入口文件里的弦声明（带入口文本 span）。
+ * 只用于入口弦字段写回；模块弦不会进入结果。
+ */
+export function projectEntryStrings(entryPath: string, source: string, ir: WorldIR): IRString[] {
+  let program;
+  try {
+    program = parse(new SourceFile(entryPath, source), new DiagnosticBag());
+  } catch {
+    return [];
+  }
+  const spans = new Map<string, StringDecl['span']>();
+  const visit = (decls: Decl[], prefix = ''): void => {
+    for (const decl of decls) {
+      if (decl.k === 'string') {
+        const id = prefix ? `${prefix}.${decl.name}` : decl.name;
+        spans.set(id, decl.span);
+      } else if (decl.k === 'entity') {
+        const entity = decl as EntityDecl;
+        const owner = prefix ? `${prefix}.${entity.name}` : entity.name;
+        for (const string of entity.strings) spans.set(`${owner}.${string.name}`, string.span);
+      } else if (decl.k === 'namespace') {
+        const namespace = decl as NamespaceDecl;
+        visit(namespace.decls, prefix ? `${prefix}.${namespace.name}` : namespace.name);
+      }
+    }
+  };
+  visit(program.decls);
+  const out: IRString[] = [];
+  for (const [id, span] of spans) {
+    const string = ir.strings.find((candidate) => candidate.id === id);
+    if (string) out.push({ ...string, span });
+  }
+  return out;
+}
+
+/** 仅对入口弦字段做行级 patch，用入口文本自己的 span。 */
+export function patchProjectEntry(
+  entryText: string,
+  baseStrings: readonly IRString[],
+  editedStrings: readonly IRString[],
+): PatchResult {
+  const mini = (strings: readonly IRString[]): WorldIR =>
+    ({
+      format: 'neurou/ir-0.1',
+      name: 'entry',
+      meta: {},
+      entities: [],
+      strings,
+      spectra: [],
+      matrices: [],
+      couplings: [],
+      rules: [],
+      actions: [],
+      forcings: [],
+      endings: [],
+      phases: [],
+      axioms: [],
+      loops: [],
+    }) as unknown as WorldIR;
+  return patchWorldText(entryText, mini(baseStrings), mini(editedStrings));
 }

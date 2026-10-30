@@ -6,6 +6,8 @@ import {
   compileText,
   findCoupling,
   patchWorldText,
+  patchProjectEntry,
+  projectEntryStrings,
   projectGraph,
   removeCoupling,
   removeString,
@@ -997,10 +999,6 @@ export function App() {
 
   /** 写回闸门：先尝试行级 patch（保注释/排版），失败回退规范序列化；结果必须编译通过。 */
   const doSave = async (): Promise<void> => {
-    if (projectMode) {
-      setSaveState('disabled');
-      return;
-    }
     if (!DEV) {
       setSaveState('disabled');
       return;
@@ -1012,6 +1010,82 @@ export function App() {
     try {
       const candidate = withCurrentBaselines(latestIR, universe);
       let text: string | null = null;
+      // v5.47：模块世界只允许入口文件的弦字段写回；模块/其它结构保持只读。
+      if (projectMode) {
+        const baseSource = baseText.current;
+        const baseProjectIR = baseIR.current;
+        if (!baseSource || !baseProjectIR) {
+          setSaveError('模块世界缺少入口源文本');
+          setSaveState('error');
+          return;
+        }
+        const entryBase = projectEntryStrings(WORLD_FILE, baseSource, baseProjectIR);
+        if (entryBase.length === 0) {
+          setSaveError('入口文件没有可写回的弦');
+          setSaveState('error');
+          return;
+        }
+        const entryIds = new Set(entryBase.map((string) => string.id));
+        const moduleChanged = candidate.strings.some((string) => {
+          if (entryIds.has(string.id)) return false;
+          const before = baseProjectIR.strings.find((item) => item.id === string.id);
+          return !before || JSON.stringify(before) !== JSON.stringify(string);
+        });
+        if (moduleChanged) {
+          setSaveError('模块内的弦是只读的；只能在入口文件里编辑');
+          setSaveState('error');
+          return;
+        }
+        const nonStringChanged =
+          JSON.stringify({
+            spectra: candidate.spectra,
+            matrices: candidate.matrices,
+            couplings: candidate.couplings,
+            rules: candidate.rules,
+            meta: candidate.meta,
+          }) !==
+          JSON.stringify({
+            spectra: baseProjectIR.spectra,
+            matrices: baseProjectIR.matrices,
+            couplings: baseProjectIR.couplings,
+            rules: baseProjectIR.rules,
+            meta: baseProjectIR.meta,
+          });
+        if (nonStringChanged) {
+          setSaveError('模块世界暂只支持入口弦字段写回');
+          setSaveState('error');
+          return;
+        }
+        const editedEntry = entryBase.map((base) => {
+          const edited = candidate.strings.find((string) => string.id === base.id);
+          return edited ? { ...edited, span: base.span } : base;
+        });
+        const patch = patchProjectEntry(baseSource, entryBase, editedEntry);
+        if (!patch.ok) {
+          setSaveError(`入口写回失败：${patch.reason}`);
+          setSaveState('error');
+          return;
+        }
+        const check = compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: patch.text });
+        if (!check.ok) {
+          setSaveError(check.diagnostics.errors[0]?.message ?? '入口写回后项目编译失败');
+          setSaveState('error');
+          return;
+        }
+        if (!(await writeFile(patch.text))) throw new Error('写回失败');
+        baseText.current = patch.text;
+        baseIR.current = check.ir;
+        setSaveMode('patch');
+        undoStack.current.push(savedText.current);
+        savedText.current = patch.text;
+        redoStack.current = [];
+        setUndoDepth(undoStack.current.length);
+        setRedoDepth(0);
+        setSaveError('');
+        setSaves((n) => n + 1);
+        setSaveState('saved');
+        return;
+      }
       // 1) 行级 patch：只改被编辑的行，保留注释与排版
       if (baseText.current && baseIR.current) {
         const patch = patchWorldText(baseText.current, baseIR.current, candidate);
@@ -1060,10 +1134,6 @@ export function App() {
   };
 
   const scheduleSave = (): void => {
-    if (projectMode) {
-      setSaveState('disabled');
-      return;
-    }
     if (!DEV) {
       setSaveState('disabled');
       return;

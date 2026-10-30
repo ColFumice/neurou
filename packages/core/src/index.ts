@@ -26,6 +26,8 @@ export {
   compileProjectFromFiles,
   normalizeProjectPath,
   projectGraph,
+  projectEntryStrings,
+  patchProjectEntry,
   type ProjectModule,
   ProjectError,
   type ProjectSources,
