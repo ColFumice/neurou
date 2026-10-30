@@ -1790,6 +1790,21 @@ await scenesPage.waitForTimeout(300);
 check('Enter 切到昼场景', (await scenesApp.getAttribute('data-preview-scene')) === '昼', String(await scenesApp.getAttribute('data-preview-scene')));
 await scenesPage.close();
 
+// v6.14：垂直故事——两条路线
+const storyPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await storyPage.goto(`${URL}?world=${encodeURIComponent('examples/vertical-story.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await storyPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
+await storyPage.waitForTimeout(700);
+const storyApp = storyPage.locator('[data-testid="ink-app"]');
+const storyField = storyPage.locator('[data-testid="string-field"]');
+check('垂直故事：世界与 8 弦', (await storyField.getAttribute('data-world')) === '潮汐之间' && Number(await storyField.getAttribute('data-lane-count')) === 8, `${await storyField.getAttribute('data-world')}/${await storyField.getAttribute('data-lane-count')}`);
+check('垂直故事：两场景与视/音频端口', (await storyApp.getAttribute('data-engine-scenes')) === '夜,昼' && (await storyApp.getAttribute('data-glsl-ports')) === '1' && (await storyApp.getAttribute('data-faust-ports')) === '1', `${await storyApp.getAttribute('data-engine-scenes')}/${await storyApp.getAttribute('data-glsl-ports')}/${await storyApp.getAttribute('data-faust-ports')}`);
+await storyPage.evaluate(() => window.__neurouString.setValue('叙事', 90));
+await storyPage.waitForTimeout(1200);
+check('垂直故事：高信任走到安顿', (await storyField.getAttribute('data-ending')) === '安顿', String(await storyField.getAttribute('data-ending')));
+check('垂直故事：结局在拍内触发', Number(await storyField.getAttribute('data-ending-tick')) > 0, String(await storyField.getAttribute('data-ending-tick')));
+await storyPage.close();
+
 // v5.16：多文件模块世界在 GUI 中只读打开，依赖可观测
 const modularPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await modularPage.goto(`${URL}?world=${encodeURIComponent('examples/modular.nro')}&fresh=1`, { waitUntil: 'networkidle' });
