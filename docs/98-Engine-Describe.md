@@ -28,7 +28,8 @@ interface EngineDescription {
 
 - 只读摘要，不包含值/谱/矩阵细节；
 - 不替代 `observe()` 帧；
-- 不承诺稳定 ABI。
+- 不承诺稳定 ABI；
+- v5.54 起包含 `phase`、`ended`、`endedName`。
 
 ## GUI 可观测（v5.52）
 

@@ -112,5 +112,6 @@ describe('Engine facade（v5.2）', () => {
     expect(description.systems).toEqual(['潮汐']);
     expect(description.strings).toBe(1);
     expect(description.functions).toBe(0);
+    expect(description.ended).toBe(false);
   });
 });
