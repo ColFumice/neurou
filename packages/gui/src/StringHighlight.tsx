@@ -75,15 +75,9 @@ export function StringHighlight(): JSX.Element | null {
             return;
           }
         }
-        if (record.type === 'childList') {
-          const selected = document.querySelector(
-            '.start-item--selected, .scene-row--selected, .slot-row--selected, .chapter-choice--selected, .chapter-graph-node--current',
-          );
-          if (matchesTarget(selected)) show(selected);
-        }
       }
     });
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'aria-selected'], subtree: true, childList: true });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'aria-selected'], subtree: true });
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener('focusin', onFocus, true);
@@ -101,6 +95,7 @@ export function StringHighlight(): JSX.Element | null {
     return value - Math.floor(value);
   };
   const centerY = y + h / 2;
+  const gradientId = `hl-fade-${key}`;
   const arcs = Array.from({ length: 6 }, (_, index) => {
     const offset = (index - 2.5) * 3.2 + (rnd(index) - 0.5) * 2;
     const amp = 5 + rnd(index + 10) * 12;
@@ -109,9 +104,8 @@ export function StringHighlight(): JSX.Element | null {
     const c1x = x + w * stretch;
     const c2x = x + w * (1 - stretch);
     return {
-      d: `M ${x - 22} ${centerY + offset} C ${c1x} ${centerY + offset - amp * Math.cos(phase)}, ${c2x} ${centerY + offset + amp * Math.sin(phase)}, ${x + w + 22} ${centerY - offset}`,
+      d: `M ${x - 52} ${centerY + offset} C ${c1x} ${centerY + offset - amp * Math.cos(phase)}, ${c2x} ${centerY + offset + amp * Math.sin(phase)}, ${x + w + 52} ${centerY - offset}`,
       opacity: 0.85 - index * 0.1,
-      color: index % 2 === 0 ? '#ff7a1a' : '#ffb15a',
       delay: Math.round(rnd(index + 40) * 160),
     };
   });
@@ -124,12 +118,21 @@ export function StringHighlight(): JSX.Element | null {
       height="100%"
       aria-hidden="true"
     >
+      <defs>
+        <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={x - 70} y1={centerY} x2={x + w + 70} y2={centerY}>
+          <stop offset="0" stopColor="#ff7a1a" stopOpacity="0" />
+          <stop offset="0.16" stopColor="#ff7a1a" stopOpacity="0.9" />
+          <stop offset="0.5" stopColor="#ffb15a" stopOpacity="1" />
+          <stop offset="0.84" stopColor="#ff7a1a" stopOpacity="0.9" />
+          <stop offset="1" stopColor="#ff7a1a" stopOpacity="0" />
+        </linearGradient>
+      </defs>
       {arcs.map((arc, index) => (
         <path
           key={index}
           d={arc.d}
           fill="none"
-          stroke={arc.color}
+          stroke={`url(#${gradientId})`}
           strokeOpacity={arc.opacity}
           strokeWidth={1.5 - index * 0.13}
           strokeLinecap="round"
