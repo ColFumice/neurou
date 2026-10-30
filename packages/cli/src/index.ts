@@ -24,6 +24,7 @@ const HELP = `neurou ${VERSION} · 雨若
   neurou sim <文件.nro> [选项]           跑批量模拟，出音准仪报告
   neurou run <文件.nro> [选项]           进入这个世界，逐拍游玩
   neurou ir <文件.nro> [--out 路径]      导出弦网络图（JSON）
+  neurou describe <文件.nro>            打印 Engine Host 摘要（JSON）
   neurou fmt <文件.nro> [--write] [--out 路径]
                                         把图重新排成规范 .nro（默认打印到 stdout）
   neurou init <名字>                     生成一个可运行的世界模板
@@ -238,6 +239,21 @@ async function main(): Promise<void> {
         return;
       }
       await play(world.ir, color);
+      return;
+    }
+    case 'describe': {
+      if (!args.file) {
+        console.error('用法：neurou describe <文件.nro>');
+        process.exitCode = 2;
+        return;
+      }
+      const world = load(args.file);
+      if (!world || !world.ok) {
+        process.exitCode = 1;
+        return;
+      }
+      const engine = createEngine(world.ir);
+      console.log(JSON.stringify(engine.describe(), null, 2));
       return;
     }
     case 'ir': {
