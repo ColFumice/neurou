@@ -41,6 +41,7 @@ export interface EngineDescription {
   endedName?: string;
   scenes: string[];
   systems: string[];
+  activeSystems: string[];
   ports: { name: string; kind: '视觉' | '音频' }[];
   strings: number;
   audioAssets: number;
@@ -76,6 +77,7 @@ export class Engine {
       ...(this.universe.state.ended ? { endedName: this.universe.state.ended.name } : {}),
       scenes: (this.ir.scenes ?? []).map((scene) => scene.name),
       systems: (this.ir.systems ?? []).map((system) => system.name),
+      activeSystems: this.activeSystems(),
       ports: (this.ir.ports ?? []).map((port) => ({ name: port.name, kind: port.kind })),
       strings: this.ir.strings.length,
       audioAssets: (this.ir.audioAssets ?? []).length,
