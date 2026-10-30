@@ -437,7 +437,15 @@ function ruleNumberFieldEdit(
   if (!rule.span) return { error: `规则「${rule.id}」没有源位置` };
   const lines = linesIn(text, rule.span.start.offset, ruleBlockEnd(text, rule.span.start.offset));
   const target = lines.find((line) => new RegExp(`^\\s*${label}(?=\\s|$)`).test(contentOf(text, line)));
-  if (!target) return { error: `规则「${rule.id}」没有「${label}」行，无法行级写回` };
+  if (!target) {
+    const last = lines[lines.length - 1];
+    if (!last) return { error: `规则「${rule.id}」没有可插入字段的位置` };
+    return {
+      start: last.end,
+      end: last.end,
+      text: `${eol}  ${label} ${formatNumber(value)}`,
+    };
+  }
   const content = contentOf(text, target);
   const match = new RegExp(`^(\\s*${label}\\s+)(-?\\d+(?:\\.\\d+)?)(\\s*(?:#.*)?)$`).exec(content);
   if (!match) return { error: `规则「${rule.id}」的「${label}」行格式无法识别` };

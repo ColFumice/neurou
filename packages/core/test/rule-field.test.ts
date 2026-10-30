@@ -14,6 +14,10 @@ const WORLD = `世界 规则字段
   效果
     甲 += 3
 
+动作 等
+  效果
+    甲 += 1
+
 力迫 崩
   当 甲 > 60
   效果
@@ -43,5 +47,21 @@ describe('规则数值字段写回（v6.3）', () => {
     if (!next.ok) return;
     expect(next.ir.rules.find((rule) => rule.kind === 'action')?.cost).toBe(3);
     expect(next.ir.rules.find((rule) => rule.kind === 'forcing')?.priority).toBe(9);
+  });
+
+  it('缺失数值行可插入', () => {
+    const compiled = compileText(WORLD, 'rules-insert.nro');
+    if (!compiled.ok) throw new Error('compile failed');
+    const wait = compiled.ir.rules.find((rule) => rule.kind === 'action' && rule.name === '等');
+    if (!wait) throw new Error('rule missing');
+    const edited = setRuleNumberField(compiled.ir, wait.id, 'cost', 2);
+    if (!edited.ok) throw new Error(edited.error);
+    const patch = patchWorldText(WORLD, compiled.ir, edited.ir);
+    if (!patch.ok) throw new Error(patch.reason);
+    expect(patch.text).toContain('耗时 2');
+    const next = compileText(patch.text, 'rules-insert-patched.nro');
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(next.ir.rules.find((rule) => rule.name === '等')?.cost).toBe(2);
   });
 });
