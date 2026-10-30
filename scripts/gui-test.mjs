@@ -1949,6 +1949,21 @@ const sliceFileAfterRawRule = readFileSync('examples/vertical-slice.nro', 'utf8'
 check('规则源文本应用并写回', sliceFileAfterRawRule.includes('信任 += 8') && (await sliceApp.getAttribute('data-save-mode')) === 'rule-source' && (await sliceApp.getAttribute('data-save-error')) === '', `${await sliceApp.getAttribute('data-save-mode')}/${await sliceApp.getAttribute('data-save-error')}`);
 check('规则源应用后关闭编辑器', (await sliceApp.getAttribute('data-rule-editor-open')) === 'false' && (await ruleOverlay.count()) === 0);
 writeFileSync('examples/vertical-slice.nro', sliceFileBeforeRawRule, 'utf8');
+await slicePage.keyboard.press('F7');
+await slicePage.waitForTimeout(300);
+const invalidRuleSource = slicePage.locator('[data-rule-source="true"]');
+const invalidSource = String(await invalidRuleSource.inputValue()).replace('信任 += 8', '信任 +=');
+await invalidRuleSource.fill(invalidSource);
+await slicePage.locator('[data-rule-apply="true"]').click();
+await slicePage.waitForTimeout(300);
+check(
+  '规则源编译错误带行号',
+  String(await sliceApp.getAttribute('data-save-error-line')) !== '' && String(await sliceApp.getAttribute('data-save-error')).includes('行'),
+  `${await sliceApp.getAttribute('data-save-error-line')}/${await sliceApp.getAttribute('data-save-error')}`,
+);
+check('规则编辑器显示错误行', Number(await slicePage.locator('[data-rule-error-line]').getAttribute('data-rule-error-line')) > 0, String(await slicePage.locator('[data-rule-error-line]').count()));
+await slicePage.keyboard.press('Escape');
+await slicePage.waitForTimeout(200);
 await slicePage.close();
 
 // v5.59：F6 波形 / 资源编辑器
@@ -2002,6 +2017,12 @@ check('编辑器绘制写回文件波形', /波形 /s.test(tunerFileAfterEditor)
 await editorPage.keyboard.press('Escape');
 await editorPage.waitForTimeout(250);
 check('Esc 关闭编辑器', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
+await editorPage.keyboard.press('?');
+await editorPage.waitForTimeout(200);
+check('? 打开手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'true' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 1);
+await editorPage.keyboard.press('Escape');
+await editorPage.waitForTimeout(200);
+check('Esc 关闭手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'false' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 0);
 await editorPage.close();
 
 await browser.close();

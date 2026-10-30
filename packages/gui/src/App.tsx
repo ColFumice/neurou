@@ -442,6 +442,8 @@ export function App() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | 'rule-source' | ''>('');
   const [saveError, setSaveError] = useState('');
+  const [saveErrorLine, setSaveErrorLine] = useState<number | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   /** 耦合编辑计数与最后一次编辑（供验收/调试）。 */
@@ -1137,8 +1139,7 @@ export function App() {
         }
         const check = compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: patch.text });
         if (!check.ok) {
-          setSaveError(check.diagnostics.errors[0]?.message ?? '入口写回后项目编译失败');
-          setSaveState('error');
+          recordDiagnostic(check.diagnostics.errors[0]);
           return;
         }
         if (!(await writeFile(patch.text))) throw new Error('写回失败');
@@ -1180,8 +1181,7 @@ export function App() {
       const check = compileText(text, `${WORLD_FILE}.edit`);
       if (!check.ok) {
         const first = check.diagnostics.errors[0];
-        setSaveError(first ? `${first.code}: ${first.message}` : '编辑后的世界编译不过去');
-        setSaveState('error');
+        recordDiagnostic(first);
         return;
       }
       baseText.current = text;
@@ -1350,6 +1350,45 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editorOpen, ruleOpen]);
 
+  // F1 / ?：手势帮助层（无常驻文字）。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== '?' || event.ctrlKey || event.metaKey || event.altKey) return;
+      event.preventDefault();
+      setHelpOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!helpOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.code !== 'Escape') return;
+      event.preventDefault();
+      setHelpOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [helpOpen]);
+
+  const recordDiagnostic = (diagnostic?: {
+    code: string;
+    message: string;
+    span?: { start: { line: number } };
+  }): void => {
+    if (!diagnostic) {
+      setSaveError('编辑后的世界编译不过去');
+      setSaveErrorLine(null);
+      setSaveState('error');
+      return;
+    }
+    const line = diagnostic.span ? diagnostic.span.start.line + 1 : null;
+    setSaveError(`${diagnostic.code}: ${diagnostic.message}${line ? ` · 第 ${line} 行` : ''}`);
+    setSaveErrorLine(line);
+    setSaveState('error');
+  };
+
   const shell = (children: ReactNode | null, loading: boolean) => (
     <div
       className="ink-app"
@@ -1416,6 +1455,8 @@ export function App() {
       data-save-state={saveState}
       data-save-mode={saveMode}
       data-save-error={saveError}
+      data-save-error-line={saveErrorLine ?? ''}
+      data-help-open={helpOpen ? 'true' : 'false'}
       data-undo-depth={undoDepth}
       data-redo-depth={redoDepth}
       data-coupling-edits={couplingEdits}
@@ -1446,6 +1487,15 @@ export function App() {
       data-loading={loading ? 'true' : 'false'}
     >
       {children}
+      {helpOpen ? (
+        <div className="help-overlay" data-testid="help-overlay">
+          <div className="help-overlay__title">手势</div>
+          <div>Tab 切弦 · ←/→ 同类弦 · 拖动改基线 · 拨弦发声</div>
+          <div>F2 谱 · F3 关系谱 · F6 波形/资源 · F7 规则</div>
+          <div>Space 预览 · Ctrl+Z 撤销 · R 结局后重开 · ? 帮助</div>
+          <div>Esc 关闭</div>
+        </div>
+      ) : null}
       {ruleOpen ? (
         <RuleEditor
           rules={(() => {
@@ -1527,8 +1577,7 @@ export function App() {
                 ? compileProjectFromFiles(WORLD_FILE, { ...projectSources, [WORLD_FILE]: replaced.text })
                 : compileText(replaced.text, `${WORLD_FILE}.rule-source`);
               if (!check.ok) {
-                setSaveError(check.diagnostics.errors[0]?.message ?? '规则源编译失败');
-                setSaveState('error');
+                recordDiagnostic(check.diagnostics.errors[0]);
                 return;
               }
               if (!(await writeFile(replaced.text))) throw new Error('写回失败');
@@ -1545,6 +1594,7 @@ export function App() {
               apply(replaced.text);
             })();
           }}
+          errorLine={saveErrorLine ?? undefined}
           onClose={() => setRuleOpen(false)}
         />
       ) : null}
@@ -1623,6 +1673,7 @@ export function App() {
           }}
           postLevel={postLevel}
           onPostLevel={(value) => setPostLevel(value)}
+          errorLine={saveErrorLine ?? undefined}
           onClose={() => setEditorOpen(false)}
         />
       ) : null}

@@ -15,10 +15,11 @@ export interface RuleEditorProps {
   getSource: (id: string) => string;
   onApplySource: (id: string, source: string) => void;
   onAdjust: (id: string, field: 'cost' | 'priority' | 'cooldown', delta: number) => void;
+  errorLine?: number;
   onClose: () => void;
 }
 
-export function RuleEditor({ rules, getSource, onApplySource, onAdjust, onClose }: RuleEditorProps): JSX.Element {
+export function RuleEditor({ rules, getSource, onApplySource, onAdjust, errorLine, onClose }: RuleEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState(rules[0]?.id ?? '');
   const [draft, setDraft] = useState(selected ? getSource(selected) : '');
@@ -42,6 +43,11 @@ export function RuleEditor({ rules, getSource, onApplySource, onAdjust, onClose 
       }}
     >
       <div className="waveform-editor__title">规则 / 动作</div>
+      {errorLine ? (
+        <div className="waveform-editor__error" data-rule-error-line={errorLine}>
+          编译错误 · 第 {errorLine} 行
+        </div>
+      ) : null}
       <div className="rule-editor__list">
         {rules.length === 0 ? <span className="waveform-editor__empty">无可编辑规则</span> : null}
         {rules.map((rule) => (

@@ -30,6 +30,7 @@ export interface WaveformEditorProps {
   onAssetReplace: (id: string, kind: '音频' | '纹理', nextId: string) => void;
   postLevel: number;
   onPostLevel: (value: number) => void;
+  errorLine?: number;
   onClose: () => void;
 }
 
@@ -61,6 +62,7 @@ export function WaveformEditor({
   onAssetReplace,
   postLevel,
   onPostLevel,
+  errorLine,
   onClose,
 }: WaveformEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -155,6 +157,11 @@ export function WaveformEditor({
       }}
     >
       <div className="waveform-editor__title">波形 / 资源</div>
+      {errorLine ? (
+        <div className="waveform-editor__error" data-editor-error-line={errorLine}>
+          编译错误 · 第 {errorLine} 行
+        </div>
+      ) : null}
       <div className="waveform-editor__body">
         <div className="waveform-editor__strings">
           {strings.map((item, index) => (
