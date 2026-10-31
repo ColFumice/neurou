@@ -11,6 +11,7 @@ export interface StartItem {
 export interface StartScreenProps {
   items: StartItem[];
   onChoose: (item: StartItem) => void;
+  onAddWorld?: () => void;
   leaving?: boolean;
   entering?: boolean;
 }
@@ -19,7 +20,7 @@ export interface StartScreenProps {
  * 进入界面：左半屏白底黑字文本菜单；世界收进二级文件夹。
  * 方向键 + Enter / 鼠标都可以选择。
  */
-export function StartScreen({ items, onChoose, leaving = false, entering = false }: StartScreenProps): JSX.Element {
+export function StartScreen({ items, onChoose, onAddWorld, leaving = false, entering = false }: StartScreenProps): JSX.Element {
   const [selected, setSelected] = useState(0);
   const [folderIndex, setFolderIndex] = useState<number | null>(null);
   const [folderSelected, setFolderSelected] = useState(0);
@@ -190,6 +191,20 @@ export function StartScreen({ items, onChoose, leaving = false, entering = false
               <em>{child.note}</em>
             </button>
           ))}
+          {onAddWorld ? (
+            <button
+              type="button"
+              className="start-folder__add"
+              data-testid="add-world"
+              onClick={() => {
+                setFolderHovered(null);
+                onAddWorld();
+              }}
+            >
+              <span>＋ 添加世界</span>
+              <em>新建</em>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1189,3 +1189,78 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
   border-color: rgba(255,138,60,.55);
   background: rgba(255,138,60,.16);
 }
+
+/* v1.20：世界栏添加世界 */
+.start-folder__add {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 4px 8px;
+  border: 0;
+  border-top: 1px solid rgba(0,0,0,.12);
+  background: transparent;
+  color: rgba(20,20,20,.62);
+  font: inherit;
+  text-align: left;
+  cursor: none;
+  transition: color 180ms ease, transform 180ms ease;
+}
+.start-folder__add:hover { color: #ff8a3c; transform: translateX(3px); }
+.start-folder__add em { font-style: normal; font-size: 10px; opacity: .55; }
+
+/* v1.20：F7 当前元素 DSL 编辑 */
+.context-dsl {
+  position: fixed;
+  inset: 0;
+  z-index: 460;
+  display: grid;
+  place-items: center;
+  padding: 4vh 4vw;
+  background: rgba(5,6,12,.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.context-dsl__panel {
+  width: min(1000px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(8,9,16,.94);
+  color: #f4f4f0;
+  padding: 20px 22px;
+  box-shadow: 0 30px 90px rgba(0,0,0,.45);
+}
+.context-dsl__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.context-dsl__kicker { font-size: 10px; letter-spacing: .18em; opacity: .45; }
+.context-dsl__title { font-family: var(--serif); font-size: 20px; margin-top: 4px; }
+.context-dsl__close { font-size: 11px; opacity: .6; cursor: none; }
+.context-dsl__hint { font-size: 11px; opacity: .45; margin: 10px 0 14px; line-height: 1.6; }
+.context-dsl__source {
+  flex: 1;
+  min-height: 38vh;
+  resize: vertical;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  background: rgba(0,0,0,.32);
+  color: #ecebe6;
+  padding: 14px 16px;
+  font: 12px/1.7 var(--mono, monospace);
+  outline: none;
+}
+.context-dsl__error { color: #ff9b7a; font-size: 11px; margin-top: 8px; }
+.context-dsl__foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; font-size: 11px; opacity: .6; }
+.context-dsl__apply {
+  appearance: none;
+  border: 1px solid rgba(255,138,60,.5);
+  border-radius: 999px;
+  background: rgba(255,138,60,.16);
+  color: #ffd2aa;
+  padding: 7px 16px;
+  font-size: 11px;
+  cursor: none;
+}
+.context-dsl__apply:disabled { opacity: .3; }

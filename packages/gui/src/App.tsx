@@ -49,6 +49,7 @@ import { RuleEditor } from './RuleEditor.js';
 import { Modal } from './Modal.js';
 import { StartScreen, type StartItem } from './StartScreen.js';
 import { FlowField } from './FlowField.js';
+import { ContextDslEditor } from './ContextDslEditor.js';
 import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -68,14 +69,14 @@ import { compileFaust, type FaustArtifact } from './faustBackend.js';
 import { FaustFallback } from './faustAudio.js';
 import { FaustWasmHost } from './faustWasm.js';
 import { sustainedWaves, type WavePreset } from './sustainedWave.js';
-import bundledSource from '../../../examples/tuner.nro?raw';
+import bundledSource from '../../../examples/testbed.nro?raw';
 
 // v2.18：F2/F3 大组件按需加载，首屏只带八弦调律台；挂载后空闲预取，按键时无等待。
 const SpectrumField = lazy(async () => ({ default: (await import('./SpectrumField.js')).SpectrumField }));
 const MatrixField = lazy(async () => ({ default: (await import('./MatrixField.js')).MatrixField }));
 
 const TICK_MS = 480;
-const DEFAULT_WORLD_FILE = 'examples/tuner.nro';
+const DEFAULT_WORLD_FILE = 'examples/testbed.nro';
 const SAVE_DEBOUNCE_MS = 700;
 const DEV = import.meta.env.DEV;
 
@@ -186,24 +187,36 @@ const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
 );
 const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 
-const START_ITEMS: StartItem[] = [
+const BASE_START_ITEMS: StartItem[] = [
   { id: 'tuner', label: '进入调律台', note: '八弦 · 默认', file: '' },
   {
     id: 'worlds',
     label: '世界',
-    note: '6 个',
-    children: [
-      { id: 'story', label: '潮汐之间', note: '垂直故事', file: 'examples/vertical-story.nro' },
-      { id: 'slice', label: '垂直切片', note: '全能力世界', file: 'examples/vertical-slice.nro' },
-      { id: 'spectra', label: '谱之境', note: 'F2 谱', file: 'examples/spectra.nro' },
-      { id: 'texture', label: '纹理雨', note: '视觉端口', file: 'examples/texture-rain.nro' },
-      { id: 'flow', label: '等值线流场', note: '全屏声场', file: 'examples/flow-field.nro' },
-      { id: 'audio', label: '音频端口', note: 'Faust', file: 'examples/audio-ports.nro' },
-    ],
+    note: '1 个',
+    children: [{ id: 'testbed', label: '测试世界', note: '全能力试验场', file: 'examples/testbed.nro' }],
   },
   { id: 'graph', label: '章节路线', note: 'Shift+F9', file: '' },
   { id: 'help', label: '操作说明', note: '完整流程', file: '' },
 ];
+
+function startItemsFor(localWorlds: LocalWorld[]): StartItem[] {
+  return BASE_START_ITEMS.map((item) => {
+    if (item.id !== 'worlds') return item;
+    return {
+      ...item,
+      note: `${1 + localWorlds.length} 个`,
+      children: [
+        ...(item.children ?? []),
+        ...localWorlds.map((world) => ({
+          id: `local-${world.id}`,
+          label: world.name,
+          note: '本机',
+          file: `local:${world.id}`,
+        })),
+      ],
+    };
+  });
+}
 
 function chapterLabel(file: string): string {
   const node = CHAPTER_GRAPH.find((item) => item.file === file);
@@ -216,17 +229,61 @@ function previewCueText(cue: EmittedCue['cue']): string {
   return cue.text ?? cue.k;
 }
 
+const LOCAL_WORLDS_KEY = 'neurou.localWorlds.v1';
+
+interface LocalWorld {
+  id: string;
+  name: string;
+  source: string;
+  createdAt: number;
+}
+
+function readLocalWorlds(): LocalWorld[] {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_WORLDS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is LocalWorld => Boolean(item && typeof item === 'object' && typeof (item as LocalWorld).id === 'string' && typeof (item as LocalWorld).source === 'string'))
+      .map((item) => ({ ...item, name: item.name || item.id }));
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalWorlds(worlds: LocalWorld[]): void {
+  try {
+    window.localStorage.setItem(LOCAL_WORLDS_KEY, JSON.stringify(worlds));
+  } catch {
+    /* 隐私模式 */
+  }
+}
+
+function localWorldFromFile(file: string): LocalWorld | null {
+  if (!file.startsWith('local:')) return null;
+  const id = file.slice('local:'.length);
+  return readLocalWorlds().find((world) => world.id === id) ?? null;
+}
+
 function bundledSourceFor(file: string): string {
+  const local = localWorldFromFile(file);
+  if (local) return local.source;
   return BUNDLED_PROJECT[file] ?? bundledSource;
+}
+
+function isLocalWorldFile(file: string): boolean {
+  return file.startsWith('local:');
 }
 
 /**
  * 用 `?world=examples/xxx.nro` 打开任意示例世界；dev 支持文件系统，生产只认内联世界。
- * 只认 examples/ 下的一层 .nro，避免路径穿越。
+ * `?world=local:<id>` 打开本机世界栏里新增的世界。
  */
 function worldFileFromUrl(): string {
   const raw = new URLSearchParams(window.location.search).get('world');
   if (raw && /^examples\/[^/\\]+\.nro$/.test(raw) && (DEV || raw in BUNDLED_WORLDS)) return raw;
+  if (raw && raw.startsWith('local:') && localWorldFromFile(raw)) return raw;
   return DEFAULT_WORLD_FILE;
 }
 
@@ -318,10 +375,16 @@ function useWorldSource(file: string): {
   reload: () => Promise<void>;
   apply: (text: string) => void;
 } {
-  const [source, setSource] = useState<string | null>(DEV ? null : bundledSourceFor(file));
+  const [source, setSource] = useState<string | null>(() =>
+    isLocalWorldFile(file) ? bundledSourceFor(file) : DEV ? null : bundledSourceFor(file),
+  );
   const [rev, setRev] = useState(0);
   useEffect(() => {
     if (!DEV) return;
+    if (isLocalWorldFile(file)) {
+      setSource(bundledSourceFor(file));
+      return;
+    }
     let alive = true;
     fetchWorld(file)
       .then((text) => {
@@ -335,6 +398,11 @@ function useWorldSource(file: string): {
     };
   }, [file]);
   const reload = async (): Promise<void> => {
+    if (isLocalWorldFile(file)) {
+      setSource(bundledSourceFor(file));
+      setRev((r) => r + 1);
+      return;
+    }
     if (!DEV) return;
     try {
       const text = await fetchWorld(file);
@@ -387,6 +455,7 @@ export function App() {
     const entryIds = new Set(projectEntryStrings(WORLD_FILE, source, worldIR).map((string) => string.id));
     return new Set(worldIR.strings.filter((string) => !entryIds.has(string.id)).map((string) => string.id));
   }, [projectMode, source, worldIR]);
+
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
@@ -436,7 +505,7 @@ export function App() {
   const faustWasmRef = useRef<FaustWasmHost[]>([]);
   const [saves, setSaves] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | 'rule-source' | ''>('');
+  const [saveMode, setSaveMode] = useState<'patch' | 'fallback' | 'rule-source' | 'f7-dsl' | ''>('');
   const [saveError, setSaveError] = useState('');
   const [saveErrorLine, setSaveErrorLine] = useState<number | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -444,6 +513,8 @@ export function App() {
   const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
   const [startLeaving, setStartLeaving] = useState(false);
   const [startEntering, setStartEntering] = useState(false);
+  const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
+  const startItems = useMemo(() => startItemsFor(localWorlds), [localWorlds]);
   const [memoryMode, setMemoryMode] = useState(false);
   const [memoryKind, setMemoryKind] = useState<StringKind>('叙事');
   const [focusKind, setFocusKind] = useState<StringKind>('叙事');
@@ -459,6 +530,8 @@ export function App() {
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
   const [ruleOpen, setRuleOpen] = useState(false);
+  const [dslOpen, setDslOpen] = useState(false);
+  const [dslError, setDslError] = useState('');
   const POST_LEVEL_KEY = `neurou.post.level:${WORLD_FILE}`;
   const [postLevel, setPostLevelState] = useState(() => {
     try {
@@ -853,6 +926,17 @@ export function App() {
     return () => window.removeEventListener('keydown', onEscape, true);
   }, [memoryMode, screen, memoryFxOpen, flowMode]);
 
+  const addWorld = (): void => {
+    const name = window.prompt('新世界名称', '新世界')?.trim();
+    if (!name) return;
+    const source = bundledSource.replace(/^世界\s+.*$/m, `世界 ${name}`);
+    const id = `w${Date.now().toString(36)}`;
+    const worlds = [...readLocalWorlds(), { id, name, source, createdAt: Date.now() }];
+    writeLocalWorlds(worlds);
+    setLocalWorlds(worlds);
+    window.location.assign(`?world=${encodeURIComponent(`local:${id}`)}&fresh=1`);
+  };
+
   const chooseStart = (item: StartItem): void => {
     if (startLeaving) return;
     setStartLeaving(true);
@@ -863,6 +947,75 @@ export function App() {
       else if (item.id === 'help') setHelpOpen(true);
       else if (item.file) window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
     }, 470);
+  };
+
+  const dslContext = useMemo(() => {
+    const text = (source ?? '').replace(/\r\n?/g, '\n');
+    const blockOf = (span: { start: { offset: number }; end: { offset: number } } | undefined): string =>
+      span ? text.slice(span.start.offset, span.end.offset).trimEnd() : '';
+    let label = '世界声明';
+    let block = '';
+    let readOnly = false;
+    if (flowMode) {
+      label = `流场 · ${focusKind}`;
+      block = `# 流场节点（FlowNode）\n# 当前界面通过 F10 节点面板编辑；.nrm 侧车保存。\n# target: ${focusKind}\n`;
+      readOnly = true;
+    } else if (screen === 'spectrum' && worldIR) {
+      const spectrum = worldIR.spectra[Math.min(spectrumIndex, worldIR.spectra.length - 1)];
+      if (spectrum) {
+        label = `谱 · ${spectrum.name}`;
+        block = blockOf(spectrum.span);
+      }
+    } else if (screen === 'matrix' && worldIR) {
+      const matrix = worldIR.matrices[Math.min(matrixIndex, worldIR.matrices.length - 1)];
+      if (matrix) {
+        label = `关系谱 · ${matrix.name}`;
+        block = blockOf(matrix.span);
+      }
+    } else if (worldIR) {
+      const string = worldIR.strings.find((item) => item.kind === focusKind);
+      if (string) {
+        label = `${focusKind}弦 · ${string.name}`;
+        block = blockOf(string.span);
+      }
+    }
+    if (!block) readOnly = true;
+    if (!block) block = `# ${label}\n# 当前界面没有可独立编辑的 DSL 块。`;
+    return { label, block, readOnly, text };
+  }, [source, worldIR, screen, spectrumIndex, matrixIndex, focusKind, flowMode]);
+
+  const applyDsl = (next: string): void => {
+    if (dslContext.readOnly || !source) return;
+    const current = dslContext.text;
+    const labelIndex = current.indexOf(dslContext.block);
+    if (labelIndex < 0) {
+      setDslError('无法定位当前元素声明，请刷新后重试');
+      return;
+    }
+    const nextSource = current.slice(0, labelIndex) + next + current.slice(labelIndex + dslContext.block.length);
+    const check = compileText(nextSource, `${WORLD_FILE}.f7`);
+    if (!check.ok) {
+      setDslError(check.diagnostics.errors[0]?.message ?? 'DSL 编译失败');
+      return;
+    }
+    void (async () => {
+      if (!(await writeFile(nextSource))) {
+        setDslError('写回失败');
+        return;
+      }
+      undoStack.current.push(savedText.current);
+      savedText.current = nextSource;
+      redoStack.current = [];
+      setUndoDepth(undoStack.current.length);
+      setRedoDepth(0);
+      setSaves((count) => count + 1);
+      setSaveMode('f7-dsl');
+      setSaveError('');
+      setSaveState('saved');
+      setDslError('');
+      setDslOpen(false);
+      apply(nextSource);
+    })();
   };
 
   const enterStart = (): void => {
@@ -1143,6 +1296,13 @@ export function App() {
   }, [universe, worldIR, version, selected, transition, frame]);
 
   const writeFile = async (text: string): Promise<boolean> => {
+    if (isLocalWorldFile(WORLD_FILE)) {
+      const id = WORLD_FILE.slice('local:'.length);
+      const worlds = readLocalWorlds();
+      const next = worlds.map((world) => (world.id === id ? { ...world, source: text } : world));
+      writeLocalWorlds(next);
+      return next.some((world) => world.id === id);
+    }
     if (!DEV) {
       setSaveState('disabled');
       return false;
@@ -1162,7 +1322,7 @@ export function App() {
 
   /** 写回闸门：先尝试行级 patch（保注释/排版），失败回退规范序列化；结果必须编译通过。 */
   const doSave = async (): Promise<void> => {
-    if (!DEV) {
+    if (!DEV && !isLocalWorldFile(WORLD_FILE)) {
       setSaveState('disabled');
       return;
     }
@@ -1293,7 +1453,7 @@ export function App() {
   };
 
   const scheduleSave = (): void => {
-    if (!DEV) {
+    if (!DEV && !isLocalWorldFile(WORLD_FILE)) {
       setSaveState('disabled');
       return;
     }
@@ -1416,28 +1576,38 @@ export function App() {
   }, []);
 
 
-  // F7：规则 / 动作数值编辑器。
+  // F7：当前界面元素的 DSL 声明编辑；Shift+F7 保留规则/动作编辑器。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'F7' || event.ctrlKey || event.metaKey || event.altKey) return;
       event.preventDefault();
-      setRuleOpen((open) => !open);
+      event.stopImmediatePropagation();
+      if (event.shiftKey) {
+        setDslOpen(false);
+        setRuleOpen((open) => !open);
+      } else {
+        setRuleOpen(false);
+        setDslError('');
+        setDslOpen((open) => !open);
+      }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
-  // 规则编辑器打开时 Esc 关闭。
+  // 规则编辑器 / F7 DSL 打开时 Esc 关闭。
   useEffect(() => {
-    if (!ruleOpen) return;
+    if (!ruleOpen && !dslOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'Escape') return;
       event.preventDefault();
       setRuleOpen(false);
+      setDslOpen(false);
+      setDslError('');
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [ruleOpen]);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [ruleOpen, dslOpen]);
 
   // F1 / ?：手势帮助层（无常驻文字）。
   useEffect(() => {
@@ -1605,7 +1775,8 @@ export function App() {
       ) : null}
       {startOpen ? (
         <StartScreen
-          items={START_ITEMS}
+          items={startItems}
+          onAddWorld={addWorld}
           leaving={startLeaving}
           entering={startEntering}
           onChoose={chooseStart}
@@ -1625,7 +1796,7 @@ export function App() {
             </div>
             <div className="help-section">
               <div className="help-section__title">3 · 编辑元素</div>
-              <div>F7 规则/动作 · Shift+F9 章节路线 · 弹窗内方向键直接选择。</div>
+              <div>F7 当前元素 DSL · Shift+F7 规则/动作 · Shift+F9 章节路线。</div>
             </div>
             <div className="help-section">
               <div className="help-section__title">4 · 流场</div>
@@ -1647,6 +1818,20 @@ export function App() {
             </div>
           </div>
         </Modal>
+      ) : null}
+      {dslOpen ? (
+        <ContextDslEditor
+          context={dslContext.label}
+          hint="当前界面元素对应的声明式源码；只替换这一块，编译通过后写回世界。"
+          source={dslContext.block}
+          readOnly={dslContext.readOnly}
+          error={dslError}
+          onApply={applyDsl}
+          onClose={() => {
+            setDslOpen(false);
+            setDslError('');
+          }}
+        />
       ) : null}
       {ruleOpen ? (
         <Modal onClose={() => setRuleOpen(false)} className="rule-modal" testId="rule-modal">

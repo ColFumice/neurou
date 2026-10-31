@@ -13,7 +13,7 @@ const dist = join(root, 'packages/gui/dist');
 const out = join(root, 'release/neurou');
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const worlds = readdirSync(join(root, 'examples'))
-  .filter((name) => name.endsWith('.nro') && !name.startsWith('_acceptance'))
+  .filter((name) => name === 'testbed.nro')
   .sort()
   .map((name) => `examples/${name}`);
 
@@ -31,7 +31,7 @@ const manifest = {
   entry: 'index.html',
   worlds,
   url: {
-    world: '?world=examples%2Ftuner.nro',
+    world: '?world=examples%2Ftestbed.nro',
     seed: '?seed=7',
   },
   save: 'disabled',
