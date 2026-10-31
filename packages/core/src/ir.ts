@@ -380,6 +380,19 @@ export interface IRFlowProfile {
   span?: Span;
 }
 
+/** v1.33：世界内实时小游戏绑定。 */
+export interface IRGame {
+  name: string;
+  module: string;
+  resultString: string;
+  /** 编译期解析出的弦 id；校验失败时缺省。 */
+  resultStringId?: string;
+  winScore: number;
+  winAction?: string;
+  description?: string;
+  span?: Span;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -392,6 +405,8 @@ export interface WorldIR {
   audioConfigs?: IRAudioConfig[];
   /** v1.21：流场节点覆盖层。 */
   flowProfiles?: IRFlowProfile[];
+  /** v1.33：世界内实时小游戏。 */
+  games?: IRGame[];
   /** v3.7：信号音频 cue 可用的资产。 */
   audioAssets?: IRAudioAsset[];
   /** v5.30：视觉端口可绑定的纹理资产。 */

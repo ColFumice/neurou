@@ -18,6 +18,7 @@ import type {
   FormDecl,
   FunctionDecl,
   FunctionLocal,
+  GameDecl,
   LoopDecl,
   LoopEdgeAst,
   MatrixDecl,
@@ -38,7 +39,7 @@ import type {
   TextureAssetDecl,
   WorldDecl,
 } from './ast.js';
-import { SYSTEM_PHASES, STRING_KINDS } from './ast.js';
+import { SYSTEM_PHASES, STRING_KINDS, GAME_MODULES } from './ast.js';
 import { DECL_KEYWORDS, STRING_KEYWORDS, isStringKeyword } from './ast.js';
 import { type DiagnosticBag } from './diagnostics.js';
 import { tokenize, type Token } from './lexer.js';
@@ -272,6 +273,7 @@ class Parser {
     if (kw === '音频资产') return this.parseAudioAsset();
     if (kw === '音频配置') return this.parseAudioConfig();
     if (kw === '流场') return this.parseFlowProfile();
+    if (kw === '游戏') return this.parseGame();
     if (kw === '纹理资产') return this.parseTextureAsset();
     if (kw === '配乐') return this.parseBgm();
     if (kw === '系统') return this.parseSystem();
@@ -372,6 +374,56 @@ class Parser {
       this.exitBlock();
     }
     return { k: 'flowProfile', kind: kind ?? '叙事', nodes, span: this.spanFrom(start) };
+  }
+
+  /** v1.33：世界内实时小游戏绑定。 */
+  private parseGame(): GameDecl {
+    const start = this.advance();
+    const name = this.readQualifiedName('游戏名');
+    this.finishLine();
+    let module = '俄罗斯方块';
+    let resultString = '';
+    let winScore = 100;
+    let winAction: string | undefined;
+    let description: string | undefined;
+    if (this.enterBlock('游戏')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('游戏字段');
+        switch (key) {
+          case '模块': {
+            const value = this.readName('游戏模块');
+            if (!(GAME_MODULES as readonly string[]).includes(value)) {
+              this.fail(`游戏模块「${value}」不存在。`, this.peek().span, `可用：${GAME_MODULES.join('、')}。`);
+            }
+            module = value;
+            break;
+          }
+          case '结果弦':
+            resultString = this.readQualifiedName('结果弦');
+            break;
+          case '胜利分数':
+            winScore = this.readNumber('胜利分数');
+            break;
+          case '胜利动作':
+            winAction = this.readQualifiedName('胜利动作');
+            break;
+          case '描述':
+            description = this.readText('游戏描述');
+            break;
+          default:
+            this.fail(`游戏里不认识「${key}」。`, this.peek().span, '可用：模块、结果弦、胜利分数、胜利动作、描述。');
+            this.skipToLineEnd();
+            continue;
+        }
+        this.finishLine();
+      }
+      this.exitBlock();
+    }
+    return { k: 'game', name, module, resultString, winScore, winAction, description, span: this.spanFrom(start) };
   }
 
   /** v3.7：音频资产声明。路径校验在编译器（只允许 audio/ 下的一层音频文件）。 */

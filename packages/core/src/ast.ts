@@ -411,6 +411,21 @@ export interface FlowProfileDecl extends DeclBase {
   nodes: number[][];
 }
 
+/** v1.33：世界内实时小游戏绑定。 */
+export interface GameDecl extends DeclBase {
+  k: 'game';
+  name: string;
+  module: string;
+  /** 结果写回的目标弦名。 */
+  resultString: string;
+  /** 达到该分数触发胜利动作。 */
+  winScore: number;
+  winAction?: string;
+  description?: string;
+}
+
+export const GAME_MODULES = ['俄罗斯方块'] as const;
+
 export type Decl =
   | WorldDecl
   | EntityDecl
@@ -435,7 +450,8 @@ export type Decl =
   | NamespaceDecl
   | FunctionDecl
   | AudioConfigDecl
-  | FlowProfileDecl;
+  | FlowProfileDecl
+  | GameDecl;
 
 export interface Program {
   decls: Decl[];
@@ -456,6 +472,7 @@ export const DECL_KEYWORDS = [
   '关系弦',
   '音频配置',
   '流场',
+  '游戏',
   '耦合',
   '回路',
   '力迫',

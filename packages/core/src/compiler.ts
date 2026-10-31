@@ -16,6 +16,7 @@ import type {
   ForcingDecl,
   FormDecl,
   FunctionDecl,
+  GameDecl,
   LoopDecl,
   MatrixDecl,
   Program,
@@ -44,6 +45,7 @@ import type {
   IREntity,
   IREnding,
   IRFlowProfile,
+  IRGame,
   IRLoop,
   IRMatrix,
   IRPhase,
@@ -146,6 +148,8 @@ class Compiler {
   private readonly spectrumNames = new Set<string>();
   private readonly audioConfigs: IRAudioConfig[] = [];
   private readonly flowProfiles: IRFlowProfile[] = [];
+  private readonly gameDecls: GameDecl[] = [];
+  private readonly games: IRGame[] = [];
   private readonly audioAssets: IRAudioAsset[] = [];
   private readonly audioAssetNames = new Set<string>();
   private readonly textureAssets: IRTextureAsset[] = [];
@@ -354,6 +358,9 @@ class Compiler {
         case 'flowProfile':
           this.declareFlowProfile(d);
           break;
+        case 'game':
+          this.declareGame(d);
+          break;
         case 'matrix':
           this.declareMatrix(d);
           break;
@@ -428,6 +435,30 @@ class Compiler {
     this.checkMatrixPhaseSources();
     this.checkTimbreReferences();
     this.checkBgm();
+    this.checkGames();
+  }
+
+  /** v1.33：游戏声明必须引用真实的结果弦与胜利动作。 */
+  private checkGames(): void {
+    for (const game of this.games) {
+      const decl = this.gameDecls.find((item) => item.name === game.name);
+      if (!decl) continue;
+      const target = [...this.strings.values()].find(
+        (item) => item.id === decl.resultString || item.name === decl.resultString,
+      );
+      if (!target) {
+        this.error('NRO2101', `游戏「${decl.name}」的结果弦「${decl.resultString}」不存在。`, decl.span, {
+          hint: '先声明目标弦，或在「结果弦」里写已有弦名。',
+        });
+      } else {
+        game.resultStringId = target.id;
+      }
+      if (decl.winAction && !this.actionDecls.has(decl.winAction)) {
+        this.error('NRO2101', `游戏「${decl.name}」的胜利动作「${decl.winAction}」不存在。`, decl.span, {
+          hint: '先声明「动作 名字」，或者删掉「胜利动作」。',
+        });
+      }
+    }
   }
 
   /** v2.7：多矩阵联动——相位源指向源矩阵的格子（曲线或标量），且不能成环。 */
@@ -576,6 +607,23 @@ class Compiler {
       layer: values[16] ?? 0,
     }));
     this.flowProfiles.push({ kind: d.kind, nodes, span: d.span });
+  }
+
+  private declareGame(d: GameDecl): void {
+    if (this.gameDecls.some((item) => item.name === d.name)) {
+      this.error('NRO2004', `游戏「${d.name}」重复声明。`, d.span, { hint: '改个名字，或者删掉重复的一项。' });
+      return;
+    }
+    this.gameDecls.push(d);
+    this.games.push({
+      name: d.name,
+      module: d.module,
+      resultString: d.resultString,
+      winScore: Number.isFinite(d.winScore) && d.winScore > 0 ? d.winScore : 100,
+      ...(d.winAction ? { winAction: d.winAction } : {}),
+      ...(d.description ? { description: d.description } : {}),
+      span: d.span,
+    });
   }
 
   private declareSpectrum(d: SpectrumDecl): void {    if (this.spectrumNames.has(d.name)) {
@@ -2511,6 +2559,7 @@ class Compiler {
       matrices: this.matrices,
       ...(this.audioConfigs.length > 0 ? { audioConfigs: this.audioConfigs } : {}),
       ...(this.flowProfiles.length > 0 ? { flowProfiles: this.flowProfiles } : {}),
+      ...(this.games.length > 0 ? { games: this.games } : {}),
       ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
       ...(this.textureAssets.length > 0 ? { textureAssets: this.textureAssets } : {}),
       ...(this.bgm ? { bgm: this.bgm } : {}),

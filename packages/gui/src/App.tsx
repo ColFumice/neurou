@@ -626,7 +626,12 @@ export function App() {
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
-  const [gameBinding, setGameBinding] = useState<{ kind: StringKind; name: string } | null>(null);
+  const [gameBinding, setGameBinding] = useState<{
+    kind: StringKind;
+    name: string;
+    winScore: number;
+    winAction?: string;
+  } | null>(null);
   const [gameToast, setGameToast] = useState('');
   const gameToastTimer = useRef<number | null>(null);
   const [ruleOpen, setRuleOpen] = useState(false);
@@ -1544,13 +1549,22 @@ export function App() {
       if (startOpen || settingsOpen || helpOpen || ruleOpen || dslOpen || chapterGraphOpen) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const lane = lanes.find((item) => item.kind === focusKind);
-      setGameBinding({ kind: focusKind, name: lane?.name ?? focusKind });
+      const game = worldIR?.games?.[0];
+      const lane =
+        lanes.find((item) => item.id === game?.resultStringId) ??
+        lanes.find((item) => item.name === game?.resultString) ??
+        lanes.find((item) => item.kind === focusKind);
+      setGameBinding({
+        kind: lane?.kind ?? focusKind,
+        name: lane?.name ?? focusKind,
+        winScore: game?.winScore ?? 100,
+        ...(game?.winAction ? { winAction: game.winAction } : {}),
+      });
       setScreen('tetris');
     };
     window.addEventListener('keydown', onGameKey, true);
     return () => window.removeEventListener('keydown', onGameKey, true);
-  }, [chapterGraphOpen, dslOpen, focusKind, helpOpen, lanes, ruleOpen, settingsOpen, startOpen]);
+  }, [chapterGraphOpen, dslOpen, focusKind, helpOpen, lanes, ruleOpen, settingsOpen, startOpen, worldIR]);
 
   const writeFile = async (text: string): Promise<boolean> => {
     if (isLocalWorldFile(WORLD_FILE)) {
@@ -2488,10 +2502,15 @@ export function App() {
     const ratio = Math.max(0, Math.min(1, result.score / 200));
     const value = lane.min + ratio * (lane.max - lane.min);
     onInject(binding.kind, value, true);
+    let won = false;
+    if (binding.winAction && result.score >= binding.winScore && universe?.dispatch(binding.winAction)) {
+      won = true;
+      setVersion((v) => v + 1);
+    }
     const message =
       language === 'en'
-        ? `Result → ${binding.name}: ${result.score} pts`
-        : `游戏结果已写入「${binding.name}」：${result.score} 分`;
+        ? `Result → ${binding.name}: ${result.score} pts${won ? ` · ${binding.winAction}` : ''}`
+        : `游戏结果已写入「${binding.name}」：${result.score} 分${won ? ` · 触发「${binding.winAction}」` : ''}`;
     setGameToast(message);
     if (gameToastTimer.current !== null) window.clearTimeout(gameToastTimer.current);
     gameToastTimer.current = window.setTimeout(() => setGameToast(''), 3200);

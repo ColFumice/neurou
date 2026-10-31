@@ -12,6 +12,7 @@ import type {
   IRPhase,
   IRFunction,
   IRFlowProfile,
+  IRGame,
   IRPort,
   IRRule,
   IRScene,
@@ -500,6 +501,16 @@ function flowProfileBlock(w: Writer, profile: IRFlowProfile): void {
   w.blank();
 }
 
+function gameBlock(w: Writer, game: IRGame): void {
+  w.line(0, `游戏 ${game.name}`);
+  w.line(1, `模块 ${game.module}`);
+  w.line(1, `结果弦 ${game.resultString}`);
+  w.line(1, `胜利分数 ${numberText(game.winScore)}`);
+  if (game.winAction) w.line(1, `胜利动作 ${game.winAction}`);
+  if (game.description) w.line(1, `描述 ${stringText(game.description)}`);
+  w.blank();
+}
+
 export function serialize(ir: WorldIR): string {
   const w = new Writer();
   worldHeader(w, ir);
@@ -554,6 +565,7 @@ export function serialize(ir: WorldIR): string {
   for (const matrix of ir.matrices) matrixBlock(w, matrix);
   for (const config of ir.audioConfigs ?? []) audioConfigBlock(w, config);
   for (const profile of ir.flowProfiles ?? []) flowProfileBlock(w, profile);
+  for (const game of ir.games ?? []) gameBlock(w, game);
   for (const system of ir.systems ?? []) systemBlock(w, system);
   for (const scene of ir.scenes ?? []) sceneBlock(w, scene);
   for (const port of ir.ports ?? []) portBlock(w, port);
