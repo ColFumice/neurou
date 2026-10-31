@@ -1,0 +1,189 @@
+/**
+ * v1.35：Game SDK v1。
+ *
+ * 把俄罗斯方块里已经验证过的实时能力抽成可复用的宿主契约：
+ *   - 固定步长主循环；
+ *   - 输入队列；
+ *   - 开始 / 暂停 / 继续；
+ *   - 结果只回传一次；
+ *   - 快照 / 恢复；
+ *   - 游戏模块注册。
+ *
+ * 渲染仍由各场景负责；SDK 只统一“时间、输入、生命周期、结果”。
+ */
+import type { IRGame } from '@neurou/core';
+import { FixedStepLoop } from './gameLoop.js';
+import { TetrisEngine, type TetrisAction } from './tetrisEngine.js';
+
+export type GameReason = 'over' | 'exit';
+
+export interface GameResult {
+  score: number;
+  lines: number;
+  level: number;
+  reason: GameReason;
+}
+
+/**
+ * 一个游戏模块只需要提供：
+ *   - create(seed)：新局状态；
+ *   - step(state, command, fixedMs)：每个固定步；
+ *   - score/lines/level/over：结果读取。
+ */
+export interface GameModule<TState, TCommand> {
+  id: string;
+  title: { zh: string; en: string };
+  create(seed: number): TState;
+  step(state: TState, command: TCommand | undefined, fixedMs: number): void;
+  score(state: TState): number;
+  lines(state: TState): number;
+  level(state: TState): number;
+  isOver(state: TState): boolean;
+}
+
+export interface GameSessionSnapshot<TState> {
+  tick: number;
+  paused: boolean;
+  pending: number;
+  state: TState;
+}
+
+/** 输入/暂停/结果统一会话。场景只负责渲染与按键映射。 */
+export class GameSession<TState, TCommand> {
+  readonly module: GameModule<TState, TCommand>;
+  readonly loop: FixedStepLoop<TCommand>;
+  state: TState;
+  private started = false;
+  private resultSent = false;
+
+  constructor(module: GameModule<TState, TCommand>, seed = 1) {
+    this.module = module;
+    this.loop = new FixedStepLoop<TCommand>({ stepMs: 1000 / 60 });
+    this.state = module.create(seed);
+  }
+
+  get isStarted(): boolean {
+    return this.started;
+  }
+
+  get isPaused(): boolean {
+    return this.loop.isPaused;
+  }
+
+  start(seed: number): void {
+    this.state = this.module.create(seed);
+    this.loop.clearInputs();
+    this.loop.resetTick();
+    this.loop.resetAccumulator();
+    this.loop.resume();
+    this.started = true;
+    this.resultSent = false;
+  }
+
+  input(command: TCommand): void {
+    if (!this.started) return;
+    this.loop.enqueue(command);
+  }
+
+  pause(): void {
+    this.loop.pause();
+  }
+
+  resume(): void {
+    this.loop.resume();
+  }
+
+  togglePause(): boolean {
+    return this.loop.togglePause();
+  }
+
+  /** 推进真实时间；返回实际步数。 */
+  advance(deltaMs: number): number {
+    if (!this.started) return 0;
+    return this.loop.advance(deltaMs, (command) => {
+      this.module.step(this.state, command, this.loop.stepMs);
+    }).steps;
+  }
+
+  finish(reason: GameReason): GameResult | null {
+    if (!this.started || this.resultSent) return null;
+    this.resultSent = true;
+    return {
+      score: this.module.score(this.state),
+      lines: this.module.lines(this.state),
+      level: this.module.level(this.state),
+      reason,
+    };
+  }
+
+  snapshot(): GameSessionSnapshot<TState> {
+    return {
+      tick: this.loop.tick,
+      paused: this.loop.isPaused,
+      pending: this.loop.pendingInputs,
+      state: this.state,
+    };
+  }
+}
+
+/** 俄罗斯方块模块状态：引擎 + 重力累积。 */
+export interface TetrisModuleState {
+  engine: TetrisEngine;
+  gravityAccumulator: number;
+}
+
+export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
+  id: 'tetris',
+  title: { zh: '俄罗斯方块', en: 'Tetris' },
+  create(seed: number): TetrisModuleState {
+    return { engine: new TetrisEngine(seed), gravityAccumulator: 0 };
+  },
+  step(state, command, fixedMs): void {
+    const engine = state.engine;
+    if (engine.isOver) return;
+    if (command) engine.apply(command);
+    state.gravityAccumulator += fixedMs;
+    if (state.gravityAccumulator >= engine.gravityMs) {
+      state.gravityAccumulator = 0;
+      engine.tick();
+    }
+  },
+  score: (state) => state.engine.scoreValue,
+  lines: (state) => state.engine.linesValue,
+  level: (state) => state.engine.levelValue,
+  isOver: (state) => state.engine.isOver,
+};
+
+export interface GameModuleInfo {
+  id: string;
+  /** 与 `游戏 模块` 字段对齐。 */
+  moduleName: string;
+  title: { zh: string; en: string };
+}
+
+/** v1.35：已注册的游戏模块；`游戏 模块 名字` 必须命中这里。 */
+export const GAME_MODULES: readonly GameModuleInfo[] = [
+  { id: 'tetris', moduleName: '俄罗斯方块', title: TETRIS_MODULE.title },
+];
+
+export function gameModuleForName(name: string): GameModuleInfo | undefined {
+  return GAME_MODULES.find((item) => item.moduleName === name || item.id === name);
+}
+
+/**
+ * 多游戏选择：
+ *   1. 优先结果弦正好是当前弦的游戏；
+ *   2. 其次当前弦类型的游戏（按结果弦类型）；
+ *   3. 最后回退第一个游戏。
+ */
+export function selectGameForFocus(
+  games: readonly IRGame[] | undefined,
+  focus: { id: string; name: string; kind: string },
+): IRGame | undefined {
+  if (!games || games.length === 0) return undefined;
+  return (
+    games.find((game) => game.resultStringId === focus.id) ??
+    games.find((game) => game.resultString === focus.name) ??
+    games[0]
+  );
+}

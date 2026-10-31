@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FixedStepLoop } from './gameLoop.js';
+import { GameSession, TETRIS_MODULE } from './gameSdk.js';
 import type { Language } from './i18n.js';
 import {
   BOARD_H,
@@ -98,13 +98,11 @@ interface TetrisSceneProps {
 
 export function TetrisScene({ language, bindingLabel, onResult, onExit }: TetrisSceneProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const engineRef = useRef<TetrisEngine>(new TetrisEngine(1));
-  const loopRef = useRef(new FixedStepLoop<TetrisAction>({ stepMs: 1000 / 60 }));
+  const sessionRef = useRef(new GameSession(TETRIS_MODULE, 1));
+  const engineRef = useRef<TetrisEngine>(sessionRef.current.state.engine);
   const phaseRef = useRef<Phase>('ready');
-  const gravityRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const lastRef = useRef(0);
-  const resultSentRef = useRef(false);
   const [phase, setPhase] = useState<Phase>('ready');
   const [best, setBest] = useState(() => loadBest());
   const text = TEXT[language];
@@ -293,49 +291,34 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
 
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
-    engineRef.current = new TetrisEngine(seed);
-    loopRef.current = new FixedStepLoop<TetrisAction>({ stepMs: 1000 / 60 });
-    gravityRef.current = 0;
+    sessionRef.current.start(seed);
+    engineRef.current = sessionRef.current.state.engine;
     lastRef.current = 0;
-    resultSentRef.current = false;
     setPhaseBoth('playing');
     draw();
   }, [draw, setPhaseBoth]);
 
   const togglePause = useCallback(() => {
     if (phaseRef.current === 'playing') {
-      loopRef.current.pause();
+      sessionRef.current.pause();
       setPhaseBoth('paused');
     } else if (phaseRef.current === 'paused') {
-      loopRef.current.resume();
+      sessionRef.current.resume();
       setPhaseBoth('playing');
       lastRef.current = 0;
     }
   }, [setPhaseBoth]);
 
-  const emitResult = useCallback(
-    (reason: 'over' | 'exit') => {
-      if (resultSentRef.current) return;
-      resultSentRef.current = true;
-      onResult?.({
-        score: engineRef.current.scoreValue,
-        lines: engineRef.current.linesValue,
-        level: engineRef.current.levelValue,
-        reason,
-      });
-    },
-    [onResult],
-  );
-
   const finish = useCallback(() => {
+    const result = sessionRef.current.finish('over');
     const score = engineRef.current.scoreValue;
     if (score > loadBest()) {
       saveBest(score);
       setBest(score);
     }
-    emitResult('over');
+    if (result) onResult?.(result);
     setPhaseBoth('over');
-  }, [emitResult, setPhaseBoth]);
+  }, [onResult, setPhaseBoth]);
 
   // 固定 60Hz 主循环。
   useEffect(() => {
@@ -343,17 +326,11 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
       const dt = lastRef.current ? time - lastRef.current : 0;
       lastRef.current = time;
       if (phaseRef.current === 'playing') {
-        const loop = loopRef.current;
-        const engine = engineRef.current;
-        const result = loop.advance(dt, (action) => {
-          if (action) engine.apply(action);
-          gravityRef.current += loop.stepMs;
-          if (gravityRef.current >= engine.gravityMs) {
-            gravityRef.current = 0;
-            engine.tick();
-          }
-        });
-        if (result.steps > 0) {
+        const session = sessionRef.current;
+        const steps = session.advance(dt);
+        const engine = session.state.engine;
+        engineRef.current = engine;
+        if (steps > 0) {
           draw();
           if (engine.isOver) finish();
         }
@@ -377,7 +354,8 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
       }
       const phaseNow = phaseRef.current;
       if (command === 'exit') {
-        if (phaseNow !== 'ready') emitResult('exit');
+        const result = phaseNow !== 'ready' ? sessionRef.current.finish('exit') : null;
+        if (result) onResult?.(result);
         onExit();
         return;
       }
@@ -395,11 +373,11 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
         return;
       }
       if (phaseNow !== 'playing') return;
-      loopRef.current.enqueue(command);
+      sessionRef.current.input(command);
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [emitResult, onExit, startGame, togglePause]);
+  }, [onExit, startGame, togglePause]);
 
   // 调试/验收 API。
   useEffect(() => {
@@ -416,7 +394,7 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     return () => {
       delete (window as unknown as { __neurouTetris?: typeof api }).__neurouTetris;
     };
-  }, [emitResult, onExit, startGame, togglePause]);
+  }, [onExit, startGame, togglePause]);
 
   useEffect(() => {
     draw();

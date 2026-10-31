@@ -55,6 +55,7 @@ import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
 import { TetrisScene, type TetrisResult } from './TetrisScene.js';
+import { selectGameForFocus } from './gameSdk.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
 import { Metronome } from './Metronome.js';
@@ -1549,11 +1550,16 @@ export function App() {
       if (startOpen || settingsOpen || helpOpen || ruleOpen || dslOpen || chapterGraphOpen) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const game = worldIR?.games?.[0];
+      const focusLane = lanes.find((item) => item.kind === focusKind);
+      const game = selectGameForFocus(worldIR?.games, {
+        id: focusLane?.id ?? '',
+        name: focusLane?.name ?? focusKind,
+        kind: focusKind,
+      });
       const lane =
         lanes.find((item) => item.id === game?.resultStringId) ??
         lanes.find((item) => item.name === game?.resultString) ??
-        lanes.find((item) => item.kind === focusKind);
+        focusLane;
       setGameBinding({
         kind: lane?.kind ?? focusKind,
         name: lane?.name ?? focusKind,
