@@ -1334,3 +1334,22 @@ html[data-lang="en"] .start-folder__title {
   letter-spacing: .015em;
 }
 .start-screen--settings .start-footer > div:last-child { cursor: none; }
+
+/* v1.25：F10 参数行可点击/加减 */
+.flow-screen__param { cursor: none; gap: 8px; }
+.flow-screen__param > span:first-child { flex: 1; }
+.flow-screen__param-actions { display: inline-flex; gap: 2px; opacity: .35; }
+.flow-screen__param:hover .flow-screen__param-actions,
+.flow-screen__param--selected .flow-screen__param-actions { opacity: .9; }
+.flow-screen__param-actions button {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: none;
+}
+.flow-screen__param-actions button:hover { color: #ffd2aa; border-color: rgba(255,138,60,.45); }

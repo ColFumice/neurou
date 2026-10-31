@@ -293,6 +293,11 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKi
     if (targetKind && first) applyNodeEffects(first);
   }, [targetKind]);
 
+  useEffect(() => {
+    const node = nodesRef.current[selectedRef.current];
+    if (node) applyNodeEffects(node);
+  }, [targetKind]);
+
   const envelopeOf = (node: FlowNode, now: number): number => {
     const ms = now;
     const state = gateRef.current.get(node.id);
@@ -1112,9 +1117,39 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKi
             key={spec.key}
             className={`flow-screen__param${index === param ? ' flow-screen__param--selected' : ''}`}
             data-flow-param-name={spec.key}
+            onClick={() => {
+              paramRef.current = index;
+              setParam(index);
+            }}
           >
             <span>{spec.label}</span>
             <em>{selectedNode ? spec.format(selectedNode) : '—'}</em>
+            <span className="flow-screen__param-actions">
+              <button
+                type="button"
+                aria-label={`${spec.label}-`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  paramRef.current = index;
+                  setParam(index);
+                  adjustParam(-1);
+                }}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label={`${spec.label}+`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  paramRef.current = index;
+                  setParam(index);
+                  adjustParam(1);
+                }}
+              >
+                +
+              </button>
+            </span>
           </div>
         ))}
         <div className="flow-screen__actions">

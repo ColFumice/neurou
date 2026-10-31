@@ -598,6 +598,10 @@ export function App() {
   const [language, setLanguage] = useState<Language>(() => loadLanguage());
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
+    (window as unknown as { __neurouAudio?: unknown }).__neurouAudio = getStringAudio();
+  }, []);
+
+  useEffect(() => {
     saveLanguage(language);
     applyLanguageDom(language);
   }, [language]);
