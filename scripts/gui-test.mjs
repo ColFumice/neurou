@@ -1940,47 +1940,10 @@ await slicePage.keyboard.press('Space');
 await slicePage.waitForTimeout(500);
 check('垂直切片：预览同时出现视觉与音频', (await slicePage.locator('[data-testid="preview-glsl"]').count()) === 1 && (await slicePage.locator('[data-testid="preview-audio"]').count()) === 1, String(await slicePage.locator('[data-testid="preview-glsl"]').count()));
 check('垂直切片：两 pass 与 Faust 节点', (await slicePage.locator('[data-testid="preview-glsl"][data-glsl-passes="2"]').count()) === 1 && Number(await sliceApp.getAttribute('data-faust-nodes')) >= 1 && (await slicePage.locator('[data-testid="preview-glsl"]').first().getAttribute('data-post-level')) === '1', `${await sliceApp.getAttribute('data-faust-nodes')}`);
-const sliceFileBeforeAssetEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
 await slicePage.keyboard.press('F6');
-await slicePage.waitForTimeout(300);
-check('F6 编辑器列出资源', (await slicePage.locator('[data-testid="waveform-editor"]').count()) === 1 && (await slicePage.locator('[data-editor-asset]').count()) >= 2, String(await slicePage.locator('[data-editor-asset]').count()));
-const assetSrcInput = slicePage.locator('[data-editor-asset-src="true"]');
-check('资源编辑器有路径输入', (await assetSrcInput.count()) === 1);
-await assetSrcInput.fill('audio/clock.wav');
-await assetSrcInput.press('Enter');
-await slicePage.waitForTimeout(1100);
-const sliceFileAfterAssetEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
-check('资源路径写回文件', sliceFileAfterAssetEdit.includes('audio/clock.wav') && sliceFileAfterAssetEdit !== sliceFileBeforeAssetEdit, `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`);
-writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
-await slicePage.locator('[data-editor-asset="雨纹"]').click();
-await slicePage.waitForTimeout(200);
-check(
-  '资产引用图显示贴图引用',
-  Number(await slicePage.locator('[data-editor-asset-refs]').getAttribute('data-editor-asset-refs')) > 0 && (await slicePage.locator('[data-editor-asset-delete-blocked="true"]').count()) === 1,
-  String(await slicePage.locator('[data-editor-asset-refs]').getAttribute('data-editor-asset-refs')),
-);
-await slicePage.locator('[data-editor-asset-replace="备用纹"]').click();
-await slicePage.waitForTimeout(1100);
-const sliceFileAfterReplace = readFileSync('examples/vertical-slice.nro', 'utf8');
-check(
-  '资产引用替换写回贴图',
-  sliceFileAfterReplace.includes('贴图 备用纹') && (await sliceApp.getAttribute('data-save-error')) === '',
-  `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`,
-);
-writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
-await slicePage.locator('[data-editor-asset="雨声"]').click();
-await slicePage.waitForTimeout(200);
-const assetNameInput = slicePage.locator('[data-editor-asset-name="true"]');
-if ((await assetNameInput.count()) > 0) {
-  await assetNameInput.fill('新雨声');
-  await assetNameInput.press('Enter');
-  await slicePage.waitForTimeout(1100);
-  const sliceFileAfterRename = readFileSync('examples/vertical-slice.nro', 'utf8');
-  check('资产重命名写回文件', sliceFileAfterRename.includes('音频资产 新雨声'), `${await sliceApp.getAttribute('data-save-state')}/${await sliceApp.getAttribute('data-save-error')}`);
-  writeFileSync('examples/vertical-slice.nro', sliceFileBeforeAssetEdit, 'utf8');
-}
-await slicePage.keyboard.press('Escape');
-await slicePage.waitForTimeout(200);
+await slicePage.waitForTimeout(250);
+check('F6 界面已移除', (await slicePage.locator('[data-testid="waveform-editor"]').count()) === 0 && (await slicePage.locator('[data-testid="editor-modal"]').count()) === 0);
+
 await slicePage.keyboard.press('Space');
 await slicePage.waitForTimeout(300);
 const sliceFileBeforeRuleEdit = readFileSync('examples/vertical-slice.nro', 'utf8');
@@ -2029,73 +1992,15 @@ await slicePage.waitForTimeout(200);
 await slicePage.close();
 
 // v5.59：F6 波形 / 资源编辑器
+// F6 已移除；保留帮助层验收
 const editorPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await editorPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await editorPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await editorPage.waitForTimeout(500);
 const editorApp = editorPage.locator('[data-testid="ink-app"]');
-const tunerFileBeforeEditor = readFileSync('examples/tuner.nro', 'utf8');
 await editorPage.keyboard.press('F6');
-await editorPage.waitForTimeout(300);
-const editorOverlay = editorPage.locator('[data-testid="waveform-editor"]');
-check('F6 打开波形/资源编辑器', (await editorApp.getAttribute('data-editor-open')) === 'true' && (await editorOverlay.count()) === 1, String(await editorApp.getAttribute('data-editor-open')));
-check('F6 使用黑色圆角模态', (await editorPage.locator('[data-testid="editor-modal"] .modal-window').count()) === 1);
-const editorModalRect = await editorPage.locator('[data-testid="editor-modal"] .modal-window').evaluate((element) => {
-  const rect = element.getBoundingClientRect();
-  return { width: rect.width, height: rect.height, vw: window.innerWidth, vh: window.innerHeight };
-});
-check('弹窗趋于全屏', editorModalRect.width >= editorModalRect.vw * 0.9 && editorModalRect.height >= editorModalRect.vh * 0.8, JSON.stringify(editorModalRect));
-check('橙色弦簇选中高亮', (await editorPage.locator('[data-testid="string-highlight"]').count()) >= 1);
-check('弹窗打开时底层反色', (await editorPage.locator('.scene-layer--inverted').count()) === 1);
-const selectedBeforeNav = String(await editorOverlay.getAttribute('data-editor-selected'));
-await editorPage.keyboard.press('ArrowDown');
-await editorPage.waitForTimeout(150);
-check('F6 方向键直接选择', String(await editorOverlay.getAttribute('data-editor-selected')) !== selectedBeforeNav, `${selectedBeforeNav}→${await editorOverlay.getAttribute('data-editor-selected')}`);
-const editorStringsAttr = String((await editorOverlay.getAttribute('data-editor-strings')) ?? '');
-check('编辑器列出持续弦与资源', editorStringsAttr.split(',').filter(Boolean).length >= 4 && Boolean(await editorOverlay.getAttribute('data-editor-selected')), editorStringsAttr);
-const bandValuesBeforeEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
-await editorPage.locator('[data-editor-preset="方波"]').click();
-await editorPage.waitForTimeout(1100);
-const postBefore = String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post'));
-await editorPage.locator('[data-editor-post]').click();
-await editorPage.waitForTimeout(150);
-check('编辑器可循环后处理档位', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')) !== postBefore, postBefore);
-const postRange = editorPage.locator('[data-editor-post-range="true"]');
-if ((await postRange.count()) > 0) {
-  await postRange.evaluate((element) => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(element, '1.35');
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await editorPage.waitForTimeout(150);
-  check('后处理可任意调参', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')) === '1.35', String(await editorPage.locator('[data-editor-post]').getAttribute('data-editor-post')));
-  check(
-    '后处理参数按世界持久化',
-    (await editorPage.evaluate(() => window.localStorage.getItem('neurou.post.level:examples/tuner.nro'))) === '1.35',
-    String(await editorPage.evaluate(() => window.localStorage.getItem('neurou.post.level:examples/tuner.nro'))),
-  );
-}
-const bandValuesAfterEditor = String(await editorPage.locator('[data-testid="waveform-editor-canvas"]').getAttribute('data-wave-values'));
-check('编辑器预设改变波形', bandValuesAfterEditor !== bandValuesBeforeEditor);
-check('编辑器预设写回保存', (await editorApp.getAttribute('data-save-state')) === 'saved', `${await editorApp.getAttribute('data-save-state')}/${await editorApp.getAttribute('data-save-error')}`);
-const editorBox = await editorPage.locator('[data-testid="waveform-editor-canvas"]').boundingBox();
-if (editorBox) {
-  await editorPage.mouse.move(editorBox.x + editorBox.width * 0.3, editorBox.y + editorBox.height * 0.2);
-  await editorPage.mouse.down();
-  await editorPage.mouse.move(editorBox.x + editorBox.width * 0.5, editorBox.y + editorBox.height * 0.8, { steps: 8 });
-  await editorPage.mouse.up();
-  await editorPage.waitForTimeout(1100);
-}
-const tunerFileAfterEditor = readFileSync('examples/tuner.nro', 'utf8');
-check('编辑器绘制写回文件波形', /波形 /s.test(tunerFileAfterEditor) && tunerFileAfterEditor !== tunerFileBeforeEditor);
-await editorPage.keyboard.press('Escape');
 await editorPage.waitForTimeout(250);
-check('Esc 关闭编辑器', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
-await editorPage.keyboard.press('F6');
-await editorPage.waitForTimeout(300);
-await editorPage.mouse.click(8, 8);
-await editorPage.waitForTimeout(250);
-check('点击编辑器外部关闭', (await editorApp.getAttribute('data-editor-open')) === 'false' && (await editorOverlay.count()) === 0);
+check('F6 不再打开编辑器', (await editorPage.locator('[data-testid="waveform-editor"]').count()) === 0 && (await editorPage.locator('[data-testid="editor-modal"]').count()) === 0);
 await editorPage.keyboard.press('?');
 await editorPage.waitForTimeout(200);
 check('? 打开手势帮助层', (await editorApp.getAttribute('data-help-open')) === 'true' && (await editorPage.locator('[data-testid="help-overlay"]').count()) === 1);
@@ -2175,6 +2080,9 @@ await memoryPage.waitForTimeout(220);
 check('节拍器调拍间隔', (await metronome.getAttribute('data-metronome-beats')) === '2', String(await metronome.getAttribute('data-metronome-beats')));
 await memoryPage.keyboard.press('F11');
 await memoryPage.waitForTimeout(220);
+await memoryPage.keyboard.press('Escape');
+await memoryPage.waitForTimeout(350);
+check('记忆模式 Esc 退出记忆', (await memoryApp.getAttribute('data-memory-mode')) === 'false');
 await memoryPage.close();
 
 // v1.6：全屏可绘制流场
@@ -2186,6 +2094,7 @@ const flowApp = flowPage.locator('[data-testid="ink-app"]');
 check('流场自动全屏', (await flowApp.getAttribute('data-flow-mode')) === 'true' && (await flowPage.locator('[data-testid="flow-canvas"]').count()) === 1);
 check('流场不叠加弦图层', (await flowPage.locator('.scene-layer--flow-hidden').count()) === 1);
 check('流场统一节点面板', (await flowPage.locator('[data-testid="flow-node-panel"]').count()) === 1 && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')) >= 6);
+check('非 F12 流场也有音色目标', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-target')) === '叙事', String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-target')));
 const flowSignature = async () =>
   flowPage.evaluate(() => {
     const canvas = document.querySelector('[data-testid="flow-canvas"]');

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { StringKind } from '@neurou/core';
+import { STRING_INTERACTIONS, type StringKind } from '@neurou/core';
 import { getStringAudio } from './stringAudio.js';
 
 const COLS = 64;
@@ -130,7 +130,7 @@ function saveNodes(key: string, nodes: FlowNode[]): void {
 
 interface FlowFieldProps {
   worldFile: string;
-  memoryKind?: StringKind;
+  targetKind?: StringKind;
   onClose: () => void;
 }
 
@@ -186,8 +186,8 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): JSX.Element {
-  const storageKey = memoryKind ? `${worldFile}:${memoryKind}` : worldFile;
+export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): JSX.Element {
+  const storageKey = targetKind ? `${worldFile}:${targetKind}` : worldFile;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const nodesRef = useRef<FlowNode[]>(loadNodes(storageKey));
   const ripplesRef = useRef<Array<{ x: number; y: number; start: number }>>([]);
@@ -196,6 +196,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
   const dragRef = useRef<{ nodeId: string | null; pointerId: number | null }>({ nodeId: null, pointerId: null });
   const audioRef = useRef<FlowAudio | null>(null);
   const gateRef = useRef(new Map<string, { triggeredAt: number; releasedAt: number; held: boolean; releaseLevel: number }>());
+  const sustainedVoicesRef = useRef(new Map<string, number>());
   const heldKeysRef = useRef(new Map<string, string>());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState(0);
@@ -205,10 +206,10 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
 
   const commit = (): void => {
     saveNodes(storageKey, nodesRef.current);
-    if (memoryKind) {
+    if (targetKind) {
       const node = nodesRef.current[selectedRef.current];
       if (node) {
-        getStringAudio().setKindEffects(memoryKind, {
+        getStringAudio().setKindEffects(targetKind, {
           reverb: node.depth,
           cutoff: node.cutoff,
         });
@@ -243,10 +244,24 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
       y: ((node.y + 0.5) / ROWS) * window.innerHeight,
       start: performance.now(),
     });
-    if (memoryKind) {
+    if (targetKind) {
       const audio = getStringAudio();
-      audio.setKindEffects(memoryKind, { reverb: node.depth, cutoff: node.cutoff });
-      audio.pluck(memoryKind, node.x / COLS, 1 - node.y / ROWS, 0.82, 1);
+      audio.setKindEffects(targetKind, { reverb: node.depth, cutoff: node.cutoff });
+      if (STRING_INTERACTIONS[targetKind] === '持续') {
+        const timbre = audio.getKindTimbre(targetKind);
+        const bands = timbre?.bands ?? [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3];
+        const voiceId = audio.startSustainedSpectrum(
+          bands,
+          node.x / COLS,
+          1 - node.y / ROWS,
+          timbre?.smooth ?? true,
+          timbre?.loop ?? true,
+          0.72,
+        );
+        sustainedVoicesRef.current.set(node.id, voiceId);
+      } else {
+        audio.pluck(targetKind, node.x / COLS, 1 - node.y / ROWS, 0.82, 1);
+      }
       return;
     }
     startAudio();
@@ -257,6 +272,11 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
     const state = gateRef.current.get(node.id);
     const level = envelopeOf(node, performance.now());
     gateRef.current.set(node.id, { triggeredAt: state?.triggeredAt ?? 0, releasedAt: performance.now(), held: false, releaseLevel: level });
+    const voiceId = sustainedVoicesRef.current.get(node.id);
+    if (voiceId !== undefined) {
+      getStringAudio().stopSustainedSpectrum(voiceId);
+      sustainedVoicesRef.current.delete(node.id);
+    }
     setVersion((value) => value + 1);
   };
 
@@ -360,7 +380,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
   };
 
   const startAudio = (): void => {
-    if (memoryKind) return;
+    if (targetKind) return;
     if (audioRef.current) return;
     try {
       const ctx = new AudioContext();
@@ -376,7 +396,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
   };
 
   const syncAudio = (): void => {
-    if (memoryKind) return;
+    if (targetKind) return;
     const audio = audioRef.current;
     if (!audio) return;
     for (const node of nodesRef.current) {
@@ -443,7 +463,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
   };
 
   const updateAudio = (now: number): void => {
-    if (memoryKind) return;
+    if (targetKind) return;
     const audio = audioRef.current;
     if (!audio) return;
     for (const node of nodesRef.current) {
@@ -895,7 +915,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
       data-flow-audio={audioState}
       data-flow-gates={gateCount}
       data-flow-layer={selectedNode?.layer ?? 0}
-      data-flow-target={memoryKind ?? ''}
+      data-flow-target={targetKind ?? ''}
     >
       <input
         ref={fileInputRef}
@@ -961,7 +981,7 @@ export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): J
         onContextMenu={(event) => event.preventDefault()}
       />
       <div className="flow-screen__hud">
-        <strong>{memoryKind ? `流场 · ${memoryKind} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
+        <strong>{targetKind ? `流场 · ${targetKind} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
         <span>拖节点移动 · 滚轮半径 · 数字/字母键触发节点 · Tab 切换 · [ ] 参数 · - = 调整 · C 复制 · Delete 删除 · PageUp/Down 层级 · E 导出 .nrm · I 导入 · M 静音 · F10/Esc 返回</span>
       </div>
       <div className="flow-screen__node-panel" data-testid="flow-node-panel">

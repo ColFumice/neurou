@@ -44,7 +44,6 @@ import {
   type WorldIR,
 } from '@neurou/core';
 import { Engine, createEngine } from '@neurou/engine';
-import { WaveformEditor, type EditorAsset, type EditorString } from './WaveformEditor.js';
 import { RuleEditor } from './RuleEditor.js';
 import { Modal } from './Modal.js';
 import { StartScreen, type StartItem } from './StartScreen.js';
@@ -242,9 +241,6 @@ const HAS_WORLD_QUERY = new URLSearchParams(window.location.search).has('world')
 const INITIAL_SEED = seedFromUrl();
 sustainedWaves.configure(WORLD_FILE);
 
-/** 编辑器读波形：模块级稳定引用，避免父组件每帧重置编辑器。 */
-const readEditorWave = (id: string, kind: StringKind): readonly number[] => sustainedWaves.getFor(id, kind);
-
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'disabled';
 
 /** 撤销/重做的缓动时长与类型。 */
@@ -390,35 +386,6 @@ export function App() {
     const entryIds = new Set(projectEntryStrings(WORLD_FILE, source, worldIR).map((string) => string.id));
     return new Set(worldIR.strings.filter((string) => !entryIds.has(string.id)).map((string) => string.id));
   }, [projectMode, source, worldIR]);
-  const editorStrings = useMemo<EditorString[]>(
-    () =>
-      (worldIR?.strings ?? [])
-        .filter(
-          (string) =>
-            STRING_INTERACTIONS[string.kind] === '持续' &&
-            string.domain.type === 'number' &&
-            !moduleStringIds.has(string.id),
-        )
-        .map((string) => ({ id: string.id, name: string.name, kind: string.kind })),
-    [worldIR, moduleStringIds],
-  );
-  const editorAssets = useMemo<EditorAsset[]>(
-    () => [
-      ...(worldIR?.audioAssets ?? []).map((asset) => ({
-        id: asset.id,
-        name: asset.name,
-        src: asset.src,
-        kind: '音频' as const,
-      })),
-      ...(worldIR?.textureAssets ?? []).map((asset) => ({
-        id: asset.id,
-        name: asset.name,
-        src: asset.src,
-        kind: '纹理' as const,
-      })),
-    ],
-    [worldIR],
-  );
   /** 同类多根弦时，每类当前选中的是第几根（ArrowLeft/ArrowRight 切换）。 */
   const [selected, setSelected] = useState<Partial<Record<StringKind, number>>>({});
   const [version, setVersion] = useState(0);
@@ -490,7 +457,6 @@ export function App() {
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
-  const [editorOpen, setEditorOpen] = useState(false);
   const [ruleOpen, setRuleOpen] = useState(false);
   const POST_LEVEL_KEY = `neurou.post.level:${WORLD_FILE}`;
   const [postLevel, setPostLevelState] = useState(() => {
@@ -862,7 +828,6 @@ export function App() {
     if (
       memoryMode &&
       (screen === 'matrix' ||
-        editorOpen ||
         ruleOpen ||
         helpOpen ||
         chapterGraphOpen ||
@@ -872,7 +837,20 @@ export function App() {
       setMemoryMode(false);
       setMemoryFxOpen(false);
     }
-  }, [memoryMode, screen, editorOpen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen]);
+  }, [memoryMode, screen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen]);
+
+  useEffect(() => {
+    if (!memoryMode || screen !== 'strings' || memoryFxOpen || flowMode) return;
+    const onEscape = (event: KeyboardEvent): void => {
+      if (event.code !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setMemoryMode(false);
+      setMemoryFxOpen(false);
+    };
+    window.addEventListener('keydown', onEscape, true);
+    return () => window.removeEventListener('keydown', onEscape, true);
+  }, [memoryMode, screen, memoryFxOpen, flowMode]);
 
   const chooseStart = (item: StartItem): void => {
     if (startLeaving) return;
@@ -1436,16 +1414,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // F6：波形/资源编辑器（无常驻面板，只覆盖一层）。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.code !== 'F6' || event.ctrlKey || event.metaKey || event.altKey) return;
-      event.preventDefault();
-      setEditorOpen((open) => !open);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   // F7：规则 / 动作数值编辑器。
   useEffect(() => {
@@ -1458,18 +1426,17 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // 编辑器打开时 Esc 总能关闭（焦点可能在输入框/画布）。
+  // 规则编辑器打开时 Esc 关闭。
   useEffect(() => {
-    if (!editorOpen && !ruleOpen) return;
+    if (!ruleOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== 'Escape') return;
       event.preventDefault();
-      setEditorOpen(false);
       setRuleOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editorOpen, ruleOpen]);
+  }, [ruleOpen]);
 
   // F1 / ?：手势帮助层（无常驻文字）。
   useEffect(() => {
@@ -1596,7 +1563,6 @@ export function App() {
       data-screen={screen}
       data-focus-kind={focusKind}
       data-memory-kind={memoryKind}
-      data-editor-open={editorOpen ? 'true' : 'false'}
       data-rule-editor-open={ruleOpen ? 'true' : 'false'}
       data-spectrum-index={spectrumIndex}
       data-spectrum-count={worldIR?.spectra.length ?? 0}
@@ -1619,12 +1585,12 @@ export function App() {
     >
       <div
         className={`scene-layer${startOpen ? ' scene-layer--start' : ''}${flowMode ? ' scene-layer--flow-hidden' : ''}${
-          helpOpen || editorOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''
+          helpOpen || ruleOpen || chapterGraphOpen || sceneMenuOpen || slotMenuOpen ? ' scene-layer--inverted' : ''
         }`}
       >
         {flowMode ? null : children}
       </div>
-      {flowMode ? <FlowField worldFile={WORLD_FILE} memoryKind={memoryMode ? memoryKind : undefined} onClose={() => setFlowMode(false)} /> : null}
+      {flowMode ? <FlowField worldFile={WORLD_FILE} targetKind={memoryMode ? memoryKind : focusKind} onClose={() => setFlowMode(false)} /> : null}
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
@@ -1647,7 +1613,7 @@ export function App() {
             </div>
             <div className="help-section">
               <div className="help-section__title">3 · 编辑元素</div>
-              <div>F6 波形/资源 · F7 规则/动作 · Shift+F9 章节路线 · 弹窗内方向键直接选择。</div>
+              <div>F7 规则/动作 · Shift+F9 章节路线 · 弹窗内方向键直接选择。</div>
             </div>
             <div className="help-section">
               <div className="help-section__title">4 · 流场</div>
@@ -1774,88 +1740,7 @@ export function App() {
         />
         </Modal>
       ) : null}
-      {editorOpen ? (
-        <Modal onClose={() => setEditorOpen(false)} className="editor-modal" testId="editor-modal">
-          <WaveformEditor
-          strings={editorStrings}
-          assets={editorAssets}
-          getWave={readEditorWave}
-          onEdit={(id, kind, wave) => {
-            sustainedWaves.setWaveformString(id, kind, wave);
-            onEditWaveform(id, wave);
-          }}
-          onPreset={(id, kind, preset: WavePreset) => {
-            const wave = sustainedWaves.applyPreset(id, kind, preset);
-            onEditWaveform(id, [...wave]);
-          }}
-          onReset={(id, kind) => {
-            const wave = sustainedWaves.resetString(id, kind);
-            onEditWaveform(id, [...wave]);
-          }}
-          onAssetSrc={(id, kind, src) => {
-            const current = worldIRRef.current;
-            if (!current) return;
-            const result = setAssetSource(current, kind === '音频' ? 'audio' : 'texture', id, src);
-            if (!result.ok) {
-              setSaveError(result.error);
-              setSaveState('error');
-              return;
-            }
-            applyWorldIR(result.ir);
-            scheduleSave();
-          }}
-          onAssetRename={(id, kind, name) => {
-            const current = worldIRRef.current;
-            if (!current) return;
-            const result = renameAsset(current, kind === '音频' ? 'audio' : 'texture', id, name);
-            if (!result.ok) {
-              setSaveError(result.error);
-              setSaveState('error');
-              return;
-            }
-            applyWorldIR(result.ir);
-            scheduleSave();
-          }}
-          onAssetDelete={(id, kind) => {
-            const current = worldIRRef.current;
-            if (!current) return;
-            const result = removeAsset(current, kind === '音频' ? 'audio' : 'texture', id);
-            if (!result.ok) {
-              setSaveError(result.error);
-              setSaveState('error');
-              return;
-            }
-            applyWorldIR(result.ir);
-            scheduleSave();
-          }}
-          getAssetRefs={(id, kind) => {
-            const current = worldIRRef.current;
-            if (!current) return [];
-            return assetReferences(current, kind === '音频' ? 'audio' : 'texture', id).map((ref) => ref.name);
-          }}
-          getAssetChoices={(id, kind) =>
-            editorAssets.filter((asset) => asset.kind === kind && asset.id !== id)
-          }
-          onAssetReplace={(id, kind, nextId) => {
-            const current = worldIRRef.current;
-            if (!current) return;
-            const result = replaceAssetReferences(current, kind === '音频' ? 'audio' : 'texture', id, nextId);
-            if (!result.ok) {
-              setSaveError(result.error);
-              setSaveState('error');
-              return;
-            }
-            applyWorldIR(result.ir);
-            scheduleSave();
-          }}
-          postLevel={postLevel}
-          onPostLevel={(value) => setPostLevel(value)}
-          errorLine={saveErrorLine ?? undefined}
-          onClose={() => setEditorOpen(false)}
-        />
-        </Modal>
-      ) : null}
-      {chapterIntro && chapterTitle ? (
+            {chapterIntro && chapterTitle ? (
         <div className="chapter-intro" data-testid="chapter-intro">
           {chapterTitle}
         </div>
@@ -2521,7 +2406,7 @@ export function App() {
         onRestart={restartWorld}
         resetSignal={playReset}
         onExitToStart={
-          helpOpen || editorOpen || ruleOpen || chapterGraphOpen ? undefined : enterStart
+          helpOpen || ruleOpen || chapterGraphOpen ? undefined : enterStart
         }
         onFocusKindChange={setFocusKind}
         initialFocusKind={focusKind}
