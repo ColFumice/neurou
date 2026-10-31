@@ -2176,6 +2176,7 @@ await flowPage.waitForTimeout(700);
 const flowApp = flowPage.locator('[data-testid="ink-app"]');
 check('流场自动全屏', (await flowApp.getAttribute('data-flow-mode')) === 'true' && (await flowPage.locator('[data-testid="flow-canvas"]').count()) === 1);
 check('流场不叠加弦图层', (await flowPage.locator('.scene-layer--flow-hidden').count()) === 1);
+check('流场统一节点面板', (await flowPage.locator('[data-testid="flow-node-panel"]').count()) === 1 && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')) >= 6);
 const flowSignature = async () =>
   flowPage.evaluate(() => {
     const canvas = document.querySelector('[data-testid="flow-canvas"]');
@@ -2200,9 +2201,11 @@ await flowPage.waitForTimeout(300);
 const flowVersionAfter = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
 check('鼠标拖拽绘制流场', flowVersionAfter > flowVersionBefore, `${flowVersionBefore}→${flowVersionAfter}`);
 const flowVersionKeyBefore = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version'));
-await flowPage.keyboard.press('g');
+await flowPage.keyboard.press('Tab');
+await flowPage.keyboard.press('BracketRight');
+await flowPage.keyboard.press('Equal');
 await flowPage.waitForTimeout(250);
-check('键盘映射绘制流场', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionKeyBefore);
+check('节点参数键盘编辑', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-param')) === '1' && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionKeyBefore, String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-param')));
 await flowPage.keyboard.press('Escape');
 await flowPage.waitForTimeout(250);
 check('Esc 退出流场', (await flowApp.getAttribute('data-flow-mode')) === 'false' && (await flowPage.locator('[data-testid="flow-screen"]').count()) === 0);

@@ -1087,3 +1087,38 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
 }
 .memory-effects__row--selected { opacity: 1; background: rgba(255, 255, 255, 0.1); }
 .memory-effects__row em { font-style: normal; opacity: .7; }
+
+/* v1.12：流场统一节点面板 */
+.flow-screen__node-panel {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  width: 250px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(8, 9, 16, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #f5f5f4;
+}
+.flow-screen__node-title {
+  font-family: var(--serif);
+  font-size: 12px;
+  letter-spacing: .08em;
+  opacity: .7;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  margin-bottom: 7px;
+}
+.flow-screen__param {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  opacity: .5;
+}
+.flow-screen__param--selected { opacity: 1; background: rgba(255,138,60,.14); color: #ffd2aa; }
+.flow-screen__param em { font-style: normal; opacity: .75; }
