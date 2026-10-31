@@ -1375,3 +1375,64 @@ html[data-lang="en"] .start-folder__title {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* v1.37：多游戏选择层 */
+.game-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background: rgba(7, 8, 10, 0.92);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 244, 226, 0.92);
+}
+.game-picker__title {
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 300;
+  letter-spacing: 0.08em;
+}
+.game-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(620px, 84vw);
+}
+.game-picker__item {
+  appearance: none;
+  border: 1px solid rgba(255, 236, 205, 0.12);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 18px;
+  font-family: inherit;
+  cursor: none;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+.game-picker__item--active {
+  border-color: rgba(255, 160, 90, 0.55);
+  background: rgba(255, 148, 72, 0.06);
+}
+.game-picker__name { font-size: 17px; font-weight: 300; }
+.game-picker__meta {
+  font: 300 10px/1.6 ui-monospace, monospace;
+  color: rgba(255, 240, 220, 0.4);
+  align-self: center;
+}
+.game-picker__desc {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: rgba(255, 240, 220, 0.45);
+}
+.game-picker__hint {
+  font: 300 10px/1.6 ui-monospace, monospace;
+  color: rgba(255, 240, 220, 0.32);
+  letter-spacing: 0.08em;
+}
+html[data-lang='en'] .game-picker { font-family: 'Segoe Script', 'Bradley Hand', cursive; font-style: italic; }

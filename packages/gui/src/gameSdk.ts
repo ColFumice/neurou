@@ -14,6 +14,7 @@
 import type { IRGame } from '@neurou/core';
 import { FixedStepLoop } from './gameLoop.js';
 import { TetrisEngine, type TetrisAction } from './tetrisEngine.js';
+import { SNAKE_MODULE, type SnakeCommand } from './snakeEngine.js';
 
 export type GameReason = 'over' | 'exit';
 
@@ -164,6 +165,7 @@ export interface GameModuleInfo {
 /** v1.35：已注册的游戏模块；`游戏 模块 名字` 必须命中这里。 */
 export const GAME_MODULES: readonly GameModuleInfo[] = [
   { id: 'tetris', moduleName: '俄罗斯方块', title: TETRIS_MODULE.title },
+  { id: 'snake', moduleName: '贪吃蛇', title: SNAKE_MODULE.title },
 ];
 
 export function gameModuleForName(name: string): GameModuleInfo | undefined {

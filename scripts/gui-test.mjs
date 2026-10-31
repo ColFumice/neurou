@@ -351,6 +351,27 @@ const bridgeAfter = JSON.parse(String(await bridgePage.locator('[data-testid="st
 check('游戏结果写回世界弦', Number(bridgeAfter) !== Number(bridgeBefore), `${bridgeBefore}→${bridgeAfter}`);
 check('游戏结果提示带弦名', String(await bridgePage.locator('[data-testid="game-result"]').textContent()).includes('信任'));
 await bridgePage.close();
+const snakePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await snakePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await snakePage.waitForSelector('[data-testid="string-field"]');
+await snakePage.waitForTimeout(700);
+await snakePage.keyboard.press('Tab');
+await snakePage.waitForTimeout(250);
+await snakePage.keyboard.press('Shift+F6');
+await snakePage.waitForTimeout(500);
+check('Shift+F6 打开多游戏选择', (await snakePage.locator('[data-testid="game-picker"]').count()) === 1);
+await snakePage.locator('[data-game-choice="蛇行"]').click();
+await snakePage.waitForTimeout(650);
+check('选择层启动第二款游戏', (await snakePage.locator('[data-testid="snake-scene"]').count()) === 1);
+await snakePage.keyboard.press('Enter');
+await snakePage.waitForTimeout(400);
+await snakePage.keyboard.press('ArrowDown');
+await snakePage.waitForTimeout(300);
+await snakePage.keyboard.press('Escape');
+await snakePage.waitForTimeout(700);
+check('贪吃蛇结果写回色温', String(await snakePage.locator('[data-testid="game-result"]').textContent()).includes('色温'));
+await snakePage.close();
+restoreWorld();
 restoreWorld();
 await startPage.close();
 

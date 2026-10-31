@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   addCoupling,
   addString,
@@ -54,13 +54,16 @@ import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
-import { TetrisScene, type TetrisResult } from './TetrisScene.js';
-import { selectGameForFocus } from './gameSdk.js';
+import { TetrisScene } from './TetrisScene.js';
+import { SnakeScene } from './SnakeScene.js';
+import { GamePicker } from './GamePicker.js';
+import { selectGameForFocus, type GameResult } from './gameSdk.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
 import { Metronome } from './Metronome.js';
 import { MemoryEffects } from './MemoryEffects.js';
 import type { EmittedCue, WorldState } from '@neurou/runtime';
+import type { IRGame } from '@neurou/core';
 import { StringField } from './StringField.js';
 import type { SpectrumView } from './SpectrumField.js';
 import type { MatrixView } from './MatrixField.js';
@@ -627,9 +630,11 @@ export function App() {
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
+  const [gamePickerOpen, setGamePickerOpen] = useState(false);
   const [gameBinding, setGameBinding] = useState<{
     kind: StringKind;
     name: string;
+    module: string;
     winScore: number;
     winAction?: string;
   } | null>(null);
@@ -1542,20 +1547,10 @@ export function App() {
     return universe && worldIR ? collectLanes(universe, worldIR, selected) : [];
   }, [universe, worldIR, version, selected, transition, frame]);
 
-  // v1.33：F6 从当前弦进入绑定的实时小游戏，结束后把分数写回该弦。
-  useEffect(() => {
-    const onGameKey = (event: KeyboardEvent): void => {
-      if (event.code !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (screenRef.current !== 'strings') return;
-      if (startOpen || settingsOpen || helpOpen || ruleOpen || dslOpen || chapterGraphOpen) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
+  // v1.37：F6 直接进入当前弦绑定的游戏；Shift+F6 打开显式游戏选择。
+  const launchDeclaredGame = useCallback(
+    (game: IRGame | undefined) => {
       const focusLane = lanes.find((item) => item.kind === focusKind);
-      const game = selectGameForFocus(worldIR?.games, {
-        id: focusLane?.id ?? '',
-        name: focusLane?.name ?? focusKind,
-        kind: focusKind,
-      });
       const lane =
         lanes.find((item) => item.id === game?.resultStringId) ??
         lanes.find((item) => item.name === game?.resultString) ??
@@ -1563,14 +1558,38 @@ export function App() {
       setGameBinding({
         kind: lane?.kind ?? focusKind,
         name: lane?.name ?? focusKind,
+        module: game?.module ?? '俄罗斯方块',
         winScore: game?.winScore ?? 100,
         ...(game?.winAction ? { winAction: game.winAction } : {}),
       });
+      setGamePickerOpen(false);
       setScreen('tetris');
+    },
+    [focusKind, lanes],
+  );
+
+  useEffect(() => {
+    const onGameKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (screenRef.current !== 'strings') return;
+      if (startOpen || settingsOpen || helpOpen || ruleOpen || dslOpen || chapterGraphOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.shiftKey) {
+        if ((worldIR?.games?.length ?? 0) > 0) setGamePickerOpen((open) => !open);
+        return;
+      }
+      const focusLane = lanes.find((item) => item.kind === focusKind);
+      const game = selectGameForFocus(worldIR?.games, {
+        id: focusLane?.id ?? '',
+        name: focusLane?.name ?? focusKind,
+        kind: focusKind,
+      });
+      launchDeclaredGame(game);
     };
     window.addEventListener('keydown', onGameKey, true);
     return () => window.removeEventListener('keydown', onGameKey, true);
-  }, [chapterGraphOpen, dslOpen, focusKind, helpOpen, lanes, ruleOpen, settingsOpen, startOpen, worldIR]);
+  }, [chapterGraphOpen, dslOpen, focusKind, helpOpen, lanes, launchDeclaredGame, ruleOpen, settingsOpen, startOpen, worldIR]);
 
   const writeFile = async (text: string): Promise<boolean> => {
     if (isLocalWorldFile(WORLD_FILE)) {
@@ -2046,7 +2065,15 @@ export function App() {
           </div>
         ) : null}
       </div>
-      {flowMode ? (
+      {gamePickerOpen ? (
+        <GamePicker
+          games={worldIR?.games ?? []}
+          language={language}
+          initialResultString={lanes.find((item) => item.kind === focusKind)?.name}
+          onChoose={(game) => launchDeclaredGame(game)}
+          onClose={() => setGamePickerOpen(false)}
+        />
+      ) : null}      {flowMode ? (
         <FlowField
           worldFile={WORLD_FILE}
           targetKind={memoryMode ? memoryKind : focusKind}
@@ -2500,7 +2527,7 @@ export function App() {
     if (persist) scheduleSave();
   };
 
-  const handleGameResult = (result: TetrisResult): void => {
+  const handleGameResult = (result: GameResult): void => {
     const binding = gameBinding;
     if (!binding) return;
     const lane = lanes.find((item) => item.kind === binding.kind);
@@ -2900,17 +2927,30 @@ export function App() {
 
   return shell(
     screen === 'tetris' ? (
-      <TetrisScene
-        language={language}
-        bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
-        onResult={handleGameResult}
-        onExit={() => {
-          const fromWorld = gameBinding !== null;
-          setScreen('strings');
-          setStartOpen(!fromWorld);
-          setGameBinding(null);
-        }}
-      />
+      gameBinding?.module === '贪吃蛇' ? (
+        <SnakeScene
+          language={language}
+          bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
+          onResult={handleGameResult}
+          onExit={() => {
+            setScreen('strings');
+            setStartOpen(false);
+            setGameBinding(null);
+          }}
+        />
+      ) : (
+        <TetrisScene
+          language={language}
+          bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
+          onResult={handleGameResult}
+          onExit={() => {
+            const fromWorld = gameBinding !== null;
+            setScreen('strings');
+            setStartOpen(!fromWorld);
+            setGameBinding(null);
+          }}
+        />
+      )
     ) : screen === 'matrix' && matrices.length > 0 ? (
       <Suspense fallback={null}>
       <MatrixField
