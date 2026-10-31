@@ -1135,20 +1135,28 @@ export function App() {
     const text = (source ?? '').replace(/\r\n?/g, '\n');
     const blockOf = (span: { start: { offset: number }; end: { offset: number } } | undefined): string =>
       span ? text.slice(span.start.offset, span.end.offset).trimEnd() : '';
+    const generatedFlow = (kind: StringKind): string => {
+      try {
+        const raw = window.localStorage.getItem(`neurou.flow.nodes:${WORLD_FILE}:${kind}`);
+        const nodes = raw ? (JSON.parse(raw) as { nodes?: Array<Record<string, number>> }).nodes : [];
+        const lines = [`流场 ${kind}`];
+        for (const node of nodes ?? []) {
+          lines.push(`  节点 ${[node.x, node.y, node.radius, node.tension, node.depth, node.diffusion, node.cutoff, node.resonance, node.attack, node.decay, node.sustain, node.release, node.lfoRate, node.lfoDepth, node.bits, node.sampleRate, node.layer].join(' ')}`);
+        }
+        return lines.join('\n');
+      } catch {
+        return `流场 ${kind}`;
+      }
+    };
     let label = '世界声明';
     let block = '';
     let readOnly = false;
-    let kind: 'source' | 'flow' = 'source';
+    let append = false;
     if (flowMode) {
-      label = `流场 · ${focusKind} · .nrm`;
-      kind = 'flow';
-      try {
-        const raw = window.localStorage.getItem(`neurou.flow.nodes:${WORLD_FILE}:${focusKind}`);
-        const nodes = raw ? JSON.parse(raw) : null;
-        block = JSON.stringify({ version: 1, target: focusKind, nodes: nodes?.nodes ?? [] }, null, 2);
-      } catch {
-        block = JSON.stringify({ version: 1, target: focusKind, nodes: [] }, null, 2);
-      }
+      label = `流场 · ${focusKind}`;
+      const profile = worldIR?.flowProfiles?.find((item) => item.kind === focusKind);
+      block = profile ? blockOf(profile.span) : generatedFlow(focusKind);
+      append = !profile;
     } else if (screen === 'spectrum' && worldIR) {
       const spectrum = worldIR.spectra[Math.min(spectrumIndex, worldIR.spectra.length - 1)];
       if (spectrum) {
@@ -1170,40 +1178,17 @@ export function App() {
     }
     if (!block) readOnly = true;
     if (!block) block = `# ${label}\n# 当前界面没有可独立编辑的 DSL 块。`;
-    return { label, block, readOnly, text, kind };
+    return { label, block, readOnly, text, append };
   }, [source, worldIR, screen, spectrumIndex, matrixIndex, focusKind, flowMode]);
 
   const applyDsl = (next: string): void => {
-    if (dslContext.kind === 'flow') {
-      try {
-        const parsed = JSON.parse(next) as { nodes?: unknown };
-        if (!Array.isArray(parsed.nodes)) throw new Error('缺少 nodes 数组');
-        window.localStorage.setItem(`neurou.flow.nodes:${WORLD_FILE}:${focusKind}`, JSON.stringify({ nodes: parsed.nodes }));
-        const marker = `# @neurou:flow:${focusKind} `;
-        const lines = (source ?? '').split(/\r?\n/).filter((line) => !line.startsWith(marker));
-        lines.unshift(`${marker}${JSON.stringify(parsed.nodes)}`);
-        const nextSource = lines.join('\n');
-        void (async () => {
-          if (await writeFile(nextSource)) {
-            apply(nextSource);
-            savedText.current = nextSource;
-          }
-          setDslError('');
-          setDslOpen(false);
-        })();
-      } catch (error) {
-        setDslError(error instanceof Error ? error.message : 'FlowNode JSON 无效');
-      }
-      return;
-    }
-    if (dslContext.readOnly || !source) return;
+    if (!source) return;
+    if (dslContext.readOnly) return;
     const current = dslContext.text;
     const labelIndex = current.indexOf(dslContext.block);
-    if (labelIndex < 0) {
-      setDslError('无法定位当前元素声明，请刷新后重试');
-      return;
-    }
-    const nextSource = current.slice(0, labelIndex) + next + current.slice(labelIndex + dslContext.block.length);
+    const nextSource = dslContext.append || labelIndex < 0
+      ? `${current.replace(/\s+$/, '')}\n\n${next}\n`
+      : current.slice(0, labelIndex) + next + current.slice(labelIndex + dslContext.block.length);
     const check = compileText(nextSource, `${WORLD_FILE}.f7`);
     if (!check.ok) {
       setDslError(check.diagnostics.errors[0]?.message ?? 'DSL 编译失败');
@@ -1228,6 +1213,7 @@ export function App() {
       apply(nextSource);
     })();
   };
+
 
   const enterStart = (): void => {
     if (startOpen) return;
