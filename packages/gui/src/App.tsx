@@ -855,6 +855,10 @@ export function App() {
   }, [flowMode, startOpen, memoryMode, focusKind]);
 
   useEffect(() => {
+    if (memoryMode) setMemoryKind(focusKind);
+  }, [focusKind, memoryMode]);
+
+  useEffect(() => {
     if (
       memoryMode &&
       (screen === 'matrix' ||
@@ -1403,7 +1407,8 @@ export function App() {
       if ((ir?.spectra.length ?? 0) === 0) return;
       event.preventDefault();
       if (memoryMode && ir) {
-        const bound = ir.strings.find((item) => item.kind === focusKind && item.timbre);
+        const targetKind = memoryMode ? memoryKind : focusKind;
+        const bound = ir.strings.find((item) => item.kind === targetKind && item.timbre);
         const index = bound
           ? ir.spectra.findIndex((item) => item.id === bound.timbre || item.name === bound.timbre)
           : -1;
@@ -1415,7 +1420,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [memoryMode, focusKind]);
+  }, [memoryMode, memoryKind, focusKind]);
 
   // F3：从八弦或谱模式进入关系谱矩阵（世界里至少有关系谱）。矩阵内的 F3/Esc 由 MatrixField 处理。
   useEffect(() => {
@@ -1589,6 +1594,8 @@ export function App() {
       data-string-adds={stringAdds}
       data-string-removes={stringRemoves}
       data-screen={screen}
+      data-focus-kind={focusKind}
+      data-memory-kind={memoryKind}
       data-editor-open={editorOpen ? 'true' : 'false'}
       data-rule-editor-open={ruleOpen ? 'true' : 'false'}
       data-spectrum-index={spectrumIndex}
@@ -1989,7 +1996,7 @@ export function App() {
         </>
       ) : null}
       <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
-      <MemoryEffects open={memoryMode && memoryFxOpen} kind={focusKind} onClose={() => setMemoryFxOpen(false)} />
+      <MemoryEffects open={memoryMode && memoryFxOpen} kind={memoryMode ? memoryKind : focusKind} onClose={() => setMemoryFxOpen(false)} />
       <Metronome />
       <StringHighlight />
       <CursorLayer />
@@ -2240,6 +2247,12 @@ export function App() {
     setSaveError('');
     setBandEdits((n) => n + 1);
     setVersion((v) => v + 1);
+    if (memoryMode) {
+      const edited = result.ir.spectra.find((item) => item.id === spectrumId);
+      if (edited) {
+        getStringAudio().setKindTimbre(focusKind, edited.bands, edited.interpolation !== '阶跃', edited.loop);
+      }
+    }
     if (persist) scheduleSave();
   };
 
@@ -2255,6 +2268,12 @@ export function App() {
     setSaveError('');
     setBandEdits((n) => n + 1);
     setVersion((v) => v + 1);
+    if (memoryMode) {
+      const edited = result.ir.spectra.find((item) => item.id === spectrumId);
+      if (edited) {
+        getStringAudio().setKindTimbre(focusKind, edited.bands, edited.interpolation !== '阶跃', edited.loop);
+      }
+    }
     if (persist) scheduleSave();
   };
 
@@ -2505,6 +2524,7 @@ export function App() {
           helpOpen || editorOpen || ruleOpen || chapterGraphOpen ? undefined : enterStart
         }
         onFocusKindChange={setFocusKind}
+        initialFocusKind={focusKind}
       />
     ),
     false,

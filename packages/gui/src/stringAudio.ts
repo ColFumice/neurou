@@ -124,6 +124,22 @@ export class StringAudioEngine {
   /** v1.10：按弦类型分开的效果总线（F9 记忆模式）。 */
   private kindBuses = new Map<StringKind, KindBus>();
   private kindEffects = new Map<StringKind, KindEffects>();
+  /** v1.15：记忆模式内按弦类型单独编辑的音色曲线。 */
+  private kindTimbres = new Map<StringKind, TimbreCurve>();
+
+  getKindTimbre(kind: StringKind): TimbreCurve | undefined {
+    return this.kindTimbres.get(kind);
+  }
+
+  setKindTimbre(kind: StringKind, bands: readonly number[], smooth: boolean, loop: boolean): void {
+    this.kindTimbres.set(kind, { bands: [...bands], min: 0, max: 1, smooth, loop });
+    this.bufferCache.clear();
+  }
+
+  clearKindTimbre(kind: StringKind): void {
+    this.kindTimbres.delete(kind);
+    this.bufferCache.clear();
+  }
 
   getState(): StringAudioState {
     return this.status;
@@ -785,8 +801,9 @@ export class StringAudioEngine {
     const degree = Math.round(x * 15);
     const pitchBucket = Math.round(scale * 20);
     const amp = clamp(amplitudeNorm, 0, 1);
-    const timbreKey = timbre
-      ? `:t${timbre.bands.map((v) => Math.round(v * 1000)).join('.')}${timbre.smooth ? 's' : 'l'}${timbre.loop ? 'o' : ''}`
+    const effectiveTimbre = timbre ?? this.kindTimbres.get(kind);
+    const timbreKey = effectiveTimbre
+      ? `:t${effectiveTimbre.bands.map((v) => Math.round(v * 1000)).join('.')}${effectiveTimbre.smooth ? 's' : 'l'}${effectiveTimbre.loop ? 'o' : ''}`
       : '';
     const cacheKey = `${kind}:${degree}:${pitchBucket}${timbreKey}`;
 
@@ -798,7 +815,7 @@ export class StringAudioEngine {
         sampleRate: ctx.sampleRate,
         brightness: clamp(profile.brightness + (Math.abs(yNorm - 0.5) - 0.25) * 0.2, 0, 1),
         seed: degree + 1,
-        ...(timbre ? { timbre } : {}),
+        ...(effectiveTimbre ? { timbre: effectiveTimbre } : {}),
       });
       const created = ctx.createBuffer(1, samples.length, ctx.sampleRate);
       created.copyToChannel(samples, 0);

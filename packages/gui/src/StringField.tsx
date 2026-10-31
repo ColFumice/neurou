@@ -277,6 +277,8 @@ export interface StringFieldProps {
   onExitToStart?: () => void;
   /** v1.10：把当前焦点弦类型同步给记忆模式。 */
   onFocusKindChange?: (kind: StringKind) => void;
+  /** v1.15：从谱/流场返回时恢复上次焦点弦类型。 */
+  initialFocusKind?: StringKind;
 }
 
 /* ------------------------------------------------------------------ *
@@ -459,6 +461,7 @@ export function StringField({
   resetSignal,
   onExitToStart,
   onFocusKindChange,
+  initialFocusKind,
 }: StringFieldProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -498,6 +501,17 @@ export function StringField({
   const safeFocus = laneCount > 0 ? Math.min(focusIndex, laneCount - 1) : 0;
   const focusLane = view.lanes[safeFocus] ?? null;
   const focusKind = focusLane ? focusLane.kind : '叙事';
+  const restoredFocusRef = useRef(false);
+  const initialFocusKindRef = useRef(initialFocusKind);
+  initialFocusKindRef.current = initialFocusKind;
+
+  useEffect(() => {
+    if (restoredFocusRef.current) return;
+    restoredFocusRef.current = true;
+    if (!initialFocusKind) return;
+    const index = view.lanes.findIndex((lane) => lane.kind === initialFocusKind);
+    if (index >= 0) setFocusIndex(index);
+  }, [initialFocusKind, view.lanes]);
 
   useEffect(() => {
     onFocusKindChange?.(focusKind);
@@ -984,8 +998,10 @@ export function StringField({
         for (let i = 0; i < lanesNow.length; i += 1) lastCouple.push(Number.NEGATIVE_INFINITY);
         prevNorms = lanesNow.map((lane) => lane.norm);
         lastWorldTick = current.tick;
-        focusIdx = 0;
-        setFocusIndex(0);
+        const desired = initialFocusKindRef.current;
+        const desiredIndex = desired ? lanesNow.findIndex((lane) => lane.kind === desired) : -1;
+        focusIdx = desiredIndex >= 0 ? desiredIndex : 0;
+        setFocusIndex(focusIdx);
         crossingsNow = [];
         crossingTrail = [];
         ripples = [];
