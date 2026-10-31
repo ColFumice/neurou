@@ -235,6 +235,11 @@ export class Engine {
     return this.universe.forceEnding(name);
   }
 
+  /** v1.39：游戏结果直接发出世界信号。 */
+  forceSignal(name: string): boolean {
+    return this.universe.forceSignal(name);
+  }
+
   getMatrixPosition(name: string): number | undefined {
     return this.universe.getMatrixPosition(name);
   }

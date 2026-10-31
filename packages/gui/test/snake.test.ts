@@ -1,3 +1,4 @@
+import { GameSession } from '../src/gameSdk.js';
 import { describe, expect, it } from 'vitest';
 import {
   SNAKE_H,
@@ -53,6 +54,17 @@ describe('Snake GameModule', () => {
     second.pending = 'left';
     SNAKE_MODULE.step(second, undefined, 200);
     expect(second.over).toBe(true);
+  });
+
+  it('Snake 会话存档/恢复', () => {
+    const session = new GameSession(SNAKE_MODULE, 3);
+    session.start(3);
+    for (let i = 0; i < 20; i += 1) session.advance(16.7);
+    const save = session.save();
+    expect(save).not.toBeNull();
+    const next = new GameSession(SNAKE_MODULE, 1);
+    expect(next.restore(save)).toBe(true);
+    expect(next.state.body).toEqual(session.state.body);
   });
 
   it('相同 seed 的初始状态完全一致', () => {

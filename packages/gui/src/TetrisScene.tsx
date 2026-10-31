@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameSession, TETRIS_MODULE } from './gameSdk.js';
+import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
 import {
   BOARD_H,
@@ -90,13 +91,15 @@ export interface TetrisResult {
 
 interface TetrisSceneProps {
   language: Language;
+  resume?: unknown;
+  onSave?: (data: unknown | null) => void;
   /** 世界绑定时显示写入目标。 */
   bindingLabel?: string;
   onResult?: (result: TetrisResult) => void;
-  onExit: () => void;
+  onPickGame?: () => void;   onExit: () => void;
 }
 
-export function TetrisScene({ language, bindingLabel, onResult, onExit }: TetrisSceneProps): JSX.Element {
+export function TetrisScene({ language, resume, onSave, bindingLabel, onResult, onPickGame, onExit }: TetrisSceneProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef(new GameSession(TETRIS_MODULE, 1));
   const engineRef = useRef<TetrisEngine>(sessionRef.current.state.engine);
@@ -289,6 +292,17 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     ctx.restore();
   }, [best, text]);
 
+  useEffect(() => {
+    if (!resume) return;
+    if (sessionRef.current.restore(resume)) {
+      engineRef.current = sessionRef.current.state.engine;
+      setPhaseBoth('paused');
+      draw();
+    }
+    // resume 只在进入场景时读一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
     sessionRef.current.start(seed);
@@ -316,9 +330,10 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
       saveBest(score);
       setBest(score);
     }
+    onSave?.(null);
     if (result) onResult?.(result);
     setPhaseBoth('over');
-  }, [onResult, setPhaseBoth]);
+  }, [onResult, onSave, setPhaseBoth]);
 
   // 固定 60Hz 主循环。
   useEffect(() => {
@@ -348,12 +363,13 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     const onKeyDown = (event: KeyboardEvent): void => {
       const command = commandForKey(event.code, event.repeat);
       if (!command) return;
-      if (shouldPreventGameKey(event.code)) {
+      if (shouldPreventGameKey(event.code) || event.code === 'Escape' || event.code === 'Enter' || event.code === 'NumpadEnter') {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
       const phaseNow = phaseRef.current;
       if (command === 'exit') {
+        if (phaseNow !== 'ready') onSave?.(sessionRef.current.save());
         const result = phaseNow !== 'ready' ? sessionRef.current.finish('exit') : null;
         if (result) onResult?.(result);
         onExit();
@@ -377,7 +393,7 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [onExit, startGame, togglePause]);
+  }, [onExit, onSave, startGame, togglePause]);
 
   // 调试/验收 API。
   useEffect(() => {
@@ -394,7 +410,7 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     return () => {
       delete (window as unknown as { __neurouTetris?: typeof api }).__neurouTetris;
     };
-  }, [onExit, startGame, togglePause]);
+  }, [onExit, onSave, startGame, togglePause]);
 
   useEffect(() => {
     draw();
@@ -402,6 +418,18 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [draw]);
+
+  const leaveToWorld = (): void => {
+    onSave?.(sessionRef.current.save());
+    const result = sessionRef.current.finish('exit');
+    if (result) onResult?.(result);
+    onExit();
+  };
+
+  const leaveToPicker = (): void => {
+    onSave?.(sessionRef.current.save());
+    onPickGame?.();
+  };
 
   return (
     <div className="tetris-scene" data-testid="tetris-scene" data-tetris-phase={phase} data-tetris-score={engineRef.current.scoreValue}>
@@ -414,6 +442,7 @@ export function TetrisScene({ language, bindingLabel, onResult, onExit }: Tetris
           </div>
           <div className="tetris-scene__overlay-hint">
             {phase === 'ready' ? text.hint : phase === 'paused' ? text.paused : text.overHint}
+          {phase === 'paused' ? <GamePauseMenu language={language} onResume={togglePause} onSwitch={leaveToPicker} onWorld={leaveToWorld} /> : null}
           </div>
           {phase === 'ready' && bindingLabel ? <div className="tetris-scene__overlay-note">{bindingLabel}</div> : null}\n          {phase === 'ready' ? <div className="tetris-scene__overlay-note">{text.restart}</div> : null}
         </div>

@@ -391,6 +391,8 @@ export interface IRGame {
   winAction?: string;
   winEnding?: string;
   loseEnding?: string;
+  winSignal?: string;
+  loseSignal?: string;
   description?: string;
   span?: Span;
 }

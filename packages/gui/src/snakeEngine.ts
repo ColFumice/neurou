@@ -141,6 +141,30 @@ export const SNAKE_MODULE: GameModule<SnakeState, SnakeCommand> = {
   lines: (state) => state.eaten,
   level: (state) => snakeLevel(state),
   isOver: (state) => state.over,
+  serialize(state) {
+    return JSON.parse(JSON.stringify(state)) as unknown;
+  },
+  deserialize(data) {
+    if (!data || typeof data !== 'object') return null;
+    const candidate = data as Partial<SnakeState>;
+    if (!Array.isArray(candidate.body) || candidate.body.length === 0) return null;
+    if (!candidate.food || typeof candidate.food.x !== 'number' || typeof candidate.food.y !== 'number') return null;
+    const directions: SnakeCommand[] = ['up', 'down', 'left', 'right'];
+    if (!directions.includes(candidate.direction ?? 'up')) return null;
+    const body = candidate.body.filter((cell) => cell && Number.isFinite(cell.x) && Number.isFinite(cell.y));
+    if (body.length === 0) return null;
+    const state = createSnake(Number(candidate.rngState) || 1);
+    state.body = body;
+    state.direction = candidate.direction ?? 'right';
+    state.pending = candidate.pending ?? null;
+    state.food = { x: candidate.food.x, y: candidate.food.y };
+    state.score = Number(candidate.score) || 0;
+    state.eaten = Number(candidate.eaten) || 0;
+    state.over = Boolean(candidate.over);
+    state.rngState = Number(candidate.rngState) || state.rngState;
+    state.moveAccumulator = Number(candidate.moveAccumulator) || 0;
+    return state;
+  },
 };
 
 export function snakeLevel(state: SnakeState): number {

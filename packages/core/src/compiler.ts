@@ -468,6 +468,16 @@ class Compiler {
           hint: '先声明「结局 名字: 当 ...」，或者删掉「失败结局」。',
         });
       }
+      if (decl.winSignal && !this.signalDecls.some((item) => item.name === decl.winSignal)) {
+        this.error('NRO2101', `游戏「${decl.name}」的胜利信号「${decl.winSignal}」不存在。`, decl.span, {
+          hint: '先声明「信号 名字 ...」，或者删掉「胜利信号」。',
+        });
+      }
+      if (decl.loseSignal && !this.signalDecls.some((item) => item.name === decl.loseSignal)) {
+        this.error('NRO2101', `游戏「${decl.name}」的失败信号「${decl.loseSignal}」不存在。`, decl.span, {
+          hint: '先声明「信号 名字 ...」，或者删掉「失败信号」。',
+        });
+      }
     }
   }
 
@@ -633,6 +643,8 @@ class Compiler {
       ...(d.winAction ? { winAction: d.winAction } : {}),
       ...(d.winEnding ? { winEnding: d.winEnding } : {}),
       ...(d.loseEnding ? { loseEnding: d.loseEnding } : {}),
+      ...(d.winSignal ? { winSignal: d.winSignal } : {}),
+      ...(d.loseSignal ? { loseSignal: d.loseSignal } : {}),
       ...(d.description ? { description: d.description } : {}),
       span: d.span,
     });

@@ -195,6 +195,29 @@ const BUNDLED_WORLDS: Record<string, string> = Object.fromEntries(
 );
 const CHAPTER_GRAPH: ChapterGraphNode[] = buildChapterGraph(BUNDLED_WORLDS);
 
+const GAME_SAVE_PREFIX = 'neurou.game.snapshot:';
+
+function gameSaveKey(worldFile: string, binding: { kind: string; module: string }): string {
+  return `${GAME_SAVE_PREFIX}${worldFile}:${binding.kind}:${binding.module}`;
+}
+
+function readGameSave(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeGameSave(key: string, data: unknown | null): void {
+  try {
+    if (data === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
+}
 const BASE_START_ITEMS: StartItem[] = [
   { id: 'tuner', label: '进入调律台', note: '八弦 · 默认', file: '' },
   {
@@ -631,6 +654,9 @@ export function App() {
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
   const [gamePickerOpen, setGamePickerOpen] = useState(false);
+  const [gameResume, setGameResume] = useState<unknown>(null);
+  const [gameFromWorld, setGameFromWorld] = useState(false);
+  const gameFromWorldRef = useRef(false);
   const [gameBinding, setGameBinding] = useState<{
     kind: StringKind;
     name: string;
@@ -638,6 +664,8 @@ export function App() {
     winScore: number;
     winAction?: string;
     winEnding?: string;
+    winSignal?: string;
+    loseSignal?: string;
     loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
@@ -1557,13 +1585,20 @@ export function App() {
         lanes.find((item) => item.id === game?.resultStringId) ??
         lanes.find((item) => item.name === game?.resultString) ??
         focusLane;
-      setGameBinding({
+      const binding = {
         kind: lane?.kind ?? focusKind,
         name: lane?.name ?? focusKind,
         module: game?.module ?? '俄罗斯方块',
         winScore: game?.winScore ?? 100,
-        ...(game?.winAction ? { winAction: game.winAction } : {}),         ...(game?.winEnding ? { winEnding: game.winEnding } : {}),         ...(game?.loseEnding ? { loseEnding: game.loseEnding } : {}),
-      });
+        ...(game?.winAction ? { winAction: game.winAction } : {}),
+        ...(game?.winEnding ? { winEnding: game.winEnding } : {}),
+        ...(game?.loseEnding ? { loseEnding: game.loseEnding } : {}),
+        ...(game?.winSignal ? { winSignal: game.winSignal } : {}),
+        ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
+      };
+      setGameBinding(binding);
+      setGameResume(readGameSave(gameSaveKey(WORLD_FILE, binding)));
+      setGameFromWorld(true); gameFromWorldRef.current = true;
       setGamePickerOpen(false);
       setScreen('tetris');
     },
@@ -2529,6 +2564,11 @@ export function App() {
     if (persist) scheduleSave();
   };
 
+  const handleGameSave = (data: unknown | null): void => {
+    if (!gameBinding) return;
+    writeGameSave(gameSaveKey(WORLD_FILE, gameBinding), data);
+  };
+
   const handleGameResult = (result: GameResult): void => {
     const binding = gameBinding;
     if (!binding) return;
@@ -2553,6 +2593,11 @@ export function App() {
         setVersion((v) => v + 1);
       }
     }
+    if (universe) {
+      if (reachedWin && binding.winSignal) universe.forceSignal(binding.winSignal);
+      else if (!reachedWin && binding.loseSignal) universe.forceSignal(binding.loseSignal);
+    }
+
     const message =
       language === 'en'
         ? `Result → ${binding.name}: ${result.score} pts${won ? ` · ${binding.winAction}` : ''}${forcedEnding ? ` · ending ${forcedEnding}` : ''}`
@@ -2943,23 +2988,29 @@ export function App() {
       gameBinding?.module === '贪吃蛇' ? (
         <SnakeScene
           language={language}
+          resume={gameResume ?? undefined}
+          onSave={handleGameSave}
+          onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
           onExit={() => {
             setScreen('strings');
-            setStartOpen(false);
+            setStartOpen(!gameFromWorldRef.current);
             setGameBinding(null);
           }}
         />
       ) : (
         <TetrisScene
           language={language}
+          resume={gameResume ?? undefined}
+          onSave={handleGameSave}
+          onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
           onResult={handleGameResult}
           onExit={() => {
             const fromWorld = gameBinding !== null;
             setScreen('strings');
-            setStartOpen(!fromWorld);
+            setStartOpen(!gameFromWorldRef.current);
             setGameBinding(null);
           }}
         />

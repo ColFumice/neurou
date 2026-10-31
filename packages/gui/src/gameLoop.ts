@@ -90,6 +90,9 @@ export class FixedStepLoop<T> {
     this.tickCount = 0;
   }
 
+  setTick(value: number): void {
+    this.tickCount = Math.max(0, Math.floor(value));
+  }
   /**
    * 推进真实时间。
    * @param deltaMs 距上一帧的真实毫秒

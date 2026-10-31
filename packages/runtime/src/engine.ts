@@ -390,6 +390,21 @@ export class Universe {
     return true;
   }
 
+  /** v1.39：游戏结果直接发出一个世界信号（Host 桥接）。 */
+  forceSignal(name: string): boolean {
+    const signal = this.signals.find((item) => item.name === name || item.id === name);
+    if (!signal) return false;
+    const tick = this.state.tick;
+    for (const cue of signal.cues) {
+      this.stats.cueCount += 1;
+      if (this.cueBuffer.length < MAX_CUES) {
+        this.cueBuffer.push({ tick, signal: signal.name, cue });
+      }
+    }
+    this.log({ tick, kind: 'signal', id: signal.name });
+    return true;
+  }
+
   inject(id: string, value: RuntimeValue): number {
     const s = this.strings.get(id);
     if (!s) return 0;

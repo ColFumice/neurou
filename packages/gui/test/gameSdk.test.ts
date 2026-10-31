@@ -30,6 +30,20 @@ describe('Game SDK', () => {
     expect(session.finish('over')).toBeNull();
   });
 
+  it('会话存档/恢复保留状态，不匹配模块拒绝', () => {
+    const session = new GameSession(TETRIS_MODULE, 21);
+    session.start(21);
+    session.input('hardDrop');
+    session.advance(16.7);
+    const save = session.save();
+    expect(save).not.toBeNull();
+    const next = new GameSession(TETRIS_MODULE, 1);
+    expect(next.restore(save)).toBe(true);
+    expect(next.state.engine.snapshot).toEqual(session.state.engine.snapshot);
+    expect(next.restore({ ...(save as object), moduleId: 'other' })).toBe(false);
+    expect(session.finish('over')).not.toBeNull();
+  });
+
   it('暂停时不推进，快照包含暂停与队列', () => {
     const session = new GameSession(TETRIS_MODULE, 7);
     session.start(7);

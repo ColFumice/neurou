@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameSession, type GameResult } from './gameSdk.js';
+import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
 import { SNAKE_H, SNAKE_MODULE, SNAKE_W, snakeInterval, snakeLevel } from './snakeEngine.js';
 import './tetris.css';
@@ -83,12 +84,15 @@ function commandFor(code: string, repeat: boolean): 'up' | 'down' | 'left' | 'ri
 
 interface SnakeSceneProps {
   language: Language;
+  resume?: unknown;
+  onSave?: (data: unknown | null) => void;
   bindingLabel?: string;
   onResult?: (result: GameResult) => void;
+  onPickGame?: () => void;
   onExit: () => void;
 }
 
-export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSceneProps): JSX.Element {
+export function SnakeScene({ language, resume, onSave, bindingLabel, onResult, onPickGame, onExit }: SnakeSceneProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef(new GameSession(SNAKE_MODULE, 1));
   const phaseRef = useRef<Phase>('ready');
@@ -219,6 +223,15 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
     ctx.restore();
   }, [best, text]);
 
+  useEffect(() => {
+    if (!resume) return;
+    if (sessionRef.current.restore(resume)) {
+      setPhaseBoth('paused');
+      draw();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
     sessionRef.current.start(seed);
@@ -245,9 +258,10 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
       saveBest(score);
       setBest(score);
     }
+    onSave?.(null);
     if (result) onResult?.(result);
     setPhaseBoth('over');
-  }, [onResult, setPhaseBoth]);
+  }, [onResult, onSave, setPhaseBoth]);
 
   useEffect(() => {
     const frame = (time: number): void => {
@@ -272,12 +286,13 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
     const onKeyDown = (event: KeyboardEvent): void => {
       const command = commandFor(event.code, event.repeat);
       if (!command) return;
-      if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code.startsWith('Key')) {
+      if (event.code.startsWith('Arrow') || event.code === 'Space' || event.code.startsWith('Key') || event.code === 'Escape' || event.code === 'Enter' || event.code === 'NumpadEnter') {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
       const phaseNow = phaseRef.current;
       if (command === 'exit') {
+        if (phaseNow !== 'ready') onSave?.(sessionRef.current.save());
         const result = phaseNow !== 'ready' ? sessionRef.current.finish('exit') : null;
         if (result) onResult?.(result);
         onExit();
@@ -301,7 +316,7 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [onExit, startGame, togglePause]);
+  }, [onExit, onSave, startGame, togglePause]);
 
   useEffect(() => {
     const api = {
@@ -317,7 +332,7 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
     return () => {
       delete (window as unknown as { __neurouSnake?: typeof api }).__neurouSnake;
     };
-  }, [onExit, startGame, togglePause]);
+  }, [onExit, onSave, startGame, togglePause]);
 
   useEffect(() => {
     draw();
@@ -325,6 +340,18 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [draw]);
+
+  const leaveToWorld = (): void => {
+    onSave?.(sessionRef.current.save());
+    const result = sessionRef.current.finish('exit');
+    if (result) onResult?.(result);
+    onExit();
+  };
+
+  const leaveToPicker = (): void => {
+    onSave?.(sessionRef.current.save());
+    onPickGame?.();
+  };
 
   return (
     <div className="tetris-scene snake-scene" data-testid="snake-scene" data-snake-phase={phase}>
@@ -337,6 +364,7 @@ export function SnakeScene({ language, bindingLabel, onResult, onExit }: SnakeSc
           </div>
           <div className="tetris-scene__overlay-hint">
             {phase === 'ready' ? text.hint : phase === 'paused' ? text.paused : text.overHint}
+          {phase === 'paused' ? <GamePauseMenu language={language} onResume={togglePause} onSwitch={leaveToPicker} onWorld={leaveToWorld} /> : null}
           </div>
           {phase === 'ready' && bindingLabel ? <div className="tetris-scene__overlay-note">{bindingLabel}</div> : null}
           {phase === 'ready' ? <div className="tetris-scene__overlay-note">{text.start}</div> : null}

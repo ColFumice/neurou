@@ -1436,3 +1436,26 @@ html[data-lang="en"] .start-folder__title {
   letter-spacing: 0.08em;
 }
 html[data-lang='en'] .game-picker { font-family: 'Segoe Script', 'Bradley Hand', cursive; font-style: italic; }
+
+/* v1.39：游戏暂停菜单 */
+.game-pause-menu {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 18px;
+}
+.game-pause-menu button {
+  appearance: none;
+  border: 1px solid rgba(255, 236, 205, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 244, 226, 0.82);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 14px;
+  cursor: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.game-pause-menu button:hover {
+  border-color: rgba(255, 160, 90, 0.55);
+  background: rgba(255, 148, 72, 0.06);
+}

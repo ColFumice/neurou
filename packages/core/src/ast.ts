@@ -423,6 +423,8 @@ export interface GameDecl extends DeclBase {
   winAction?: string;
   winEnding?: string;
   loseEnding?: string;
+  winSignal?: string;
+  loseSignal?: string;
   description?: string;
 }
 

@@ -40,6 +40,15 @@ export interface GameModule<TState, TCommand> {
   lines(state: TState): number;
   level(state: TState): number;
   isOver(state: TState): boolean;
+  /** v1.39：会话存档；未提供则只存内存。 */
+  serialize?(state: TState): unknown;
+  deserialize?(data: unknown): TState | null;
+}
+
+export interface GameSave {
+  moduleId: string;
+  tick: number;
+  state: unknown;
 }
 
 export interface GameSessionSnapshot<TState> {
@@ -125,6 +134,30 @@ export class GameSession<TState, TCommand> {
       state: this.state,
     };
   }
+
+  /** 保存当前局；未开始/已结束不可续。 */
+  save(): GameSave | null {
+    if (!this.started || this.module.isOver(this.state)) return null;
+    const state = this.module.serialize ? this.module.serialize(this.state) : this.state;
+    return { moduleId: this.module.id, tick: this.loop.tick, state };
+  }
+
+  /** 恢复存档；模块不匹配或状态损坏返回 false。 */
+  restore(save: unknown): boolean {
+    if (!save || typeof save !== 'object') return false;
+    const payload = save as Partial<GameSave>;
+    if (payload.moduleId !== this.module.id || !this.module.deserialize) return false;
+    const state = this.module.deserialize(payload.state);
+    if (!state) return false;
+    this.state = state;
+    this.started = true;
+    this.resultSent = false;
+    this.loop.clearInputs();
+    this.loop.resetAccumulator();
+    this.loop.setTick(typeof payload.tick === 'number' ? payload.tick : 0);
+    this.loop.pause();
+    return true;
+  }
 }
 
 /** 俄罗斯方块模块状态：引擎 + 重力累积。 */
@@ -153,6 +186,21 @@ export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
   lines: (state) => state.engine.linesValue,
   level: (state) => state.engine.levelValue,
   isOver: (state) => state.engine.isOver,
+  serialize(state) {
+    return { engine: state.engine.snapshot, gravityAccumulator: state.gravityAccumulator };
+  },
+  deserialize(data) {
+    if (!data || typeof data !== 'object') return null;
+    const payload = data as { engine?: { board?: unknown }; gravityAccumulator?: number };
+    if (!payload.engine || !Array.isArray(payload.engine.board)) return null;
+    const engine = new TetrisEngine(1);
+    try {
+      engine.load(payload.engine as Parameters<TetrisEngine['load']>[0]);
+    } catch {
+      return null;
+    }
+    return { engine, gravityAccumulator: Number(payload.gravityAccumulator) || 0 };
+  },
 };
 
 export interface GameModuleInfo {
