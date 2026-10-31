@@ -22,6 +22,7 @@ export interface SnakeState {
   over: boolean;
   rngState: number;
   moveAccumulator: number;
+  difficulty: number;
 }
 
 export const SNAKE_W = 24;
@@ -64,7 +65,7 @@ function spawnFood(state: SnakeState): void {
   }
 }
 
-export function createSnake(seed = 1): SnakeState {
+export function createSnake(seed = 1, difficulty = 1): SnakeState {
   const rngState = seed >>> 0 || 1;
   const state: SnakeState = {
     body: [
@@ -80,6 +81,7 @@ export function createSnake(seed = 1): SnakeState {
     over: false,
     rngState,
     moveAccumulator: 0,
+    difficulty: Math.max(1, Math.min(5, difficulty)),
   };
   spawnFood(state);
   return state;
@@ -88,7 +90,7 @@ export function createSnake(seed = 1): SnakeState {
 export const SNAKE_MODULE: GameModule<SnakeState, SnakeCommand> = {
   id: 'snake',
   title: { zh: '贪吃蛇', en: 'Snake' },
-  create: (seed) => createSnake(seed),
+  create: (seed, params) => createSnake(seed, params?.difficulty ?? 1),
   step(state, command, fixedMs): void {
     if (state.over) return;
     if (command && !opposite(state.direction, command)) {
@@ -163,6 +165,7 @@ export const SNAKE_MODULE: GameModule<SnakeState, SnakeCommand> = {
     state.over = Boolean(candidate.over);
     state.rngState = Number(candidate.rngState) || state.rngState;
     state.moveAccumulator = Number(candidate.moveAccumulator) || 0;
+    state.difficulty = Math.max(1, Math.min(5, Number(candidate.difficulty) || 1));
     return state;
   },
 };
@@ -172,5 +175,5 @@ export function snakeLevel(state: SnakeState): number {
 }
 
 export function snakeInterval(state: SnakeState): number {
-  return Math.max(75, 180 - (snakeLevel(state) - 1) * 12);
+  return Math.max(75, 180 - (snakeLevel(state) - 1) * 12 - (Math.max(1, state.difficulty) - 1) * 15);
 }

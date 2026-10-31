@@ -34,6 +34,7 @@ export interface HostViewport {
 interface GameHostProps<S, C> {
   module: GameModule<S, C>;
   language: Language;
+  difficulty?: number;
   testId: string;
   debugKey: string;
   bestKey?: string;
@@ -75,6 +76,7 @@ function saveBest(key: string | undefined, value: number): void {
 export function GameHost<S, C>({
   module,
   language,
+  difficulty,
   testId,
   debugKey,
   bestKey,
@@ -120,11 +122,11 @@ export function GameHost<S, C>({
 
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
-    sessionRef.current.start(seed);
+    sessionRef.current.start(seed, { difficulty });
     lastRef.current = 0;
     setPhaseBoth('playing');
     paint();
-  }, [paint, setPhaseBoth]);
+  }, [difficulty, paint, setPhaseBoth]);
 
   const togglePause = useCallback(() => {
     if (phaseRef.current === 'playing') {

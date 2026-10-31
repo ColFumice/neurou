@@ -393,6 +393,7 @@ export interface IRGame {
   loseEnding?: string;
   winSignal?: string;
   loseSignal?: string;
+  difficulty?: number;
   description?: string;
   span?: Span;
 }

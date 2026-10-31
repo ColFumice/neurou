@@ -16,6 +16,7 @@ import { FixedStepLoop } from './gameLoop.js';
 import { TetrisEngine, type TetrisAction } from './tetrisEngine.js';
 import { SNAKE_MODULE, type SnakeCommand } from './snakeEngine.js';
 import { PONG_MODULE } from './pongEngine.js';
+import { BREAKOUT_MODULE } from './breakoutEngine.js';
 
 export type GameReason = 'over' | 'exit';
 
@@ -32,10 +33,14 @@ export interface GameResult {
  *   - step(state, command, fixedMs)：每个固定步；
  *   - score/lines/level/over：结果读取。
  */
+export interface GameParams {
+  difficulty?: number;
+}
+
 export interface GameModule<TState, TCommand> {
   id: string;
   title: { zh: string; en: string };
-  create(seed: number): TState;
+  create(seed: number, params?: GameParams): TState;
   step(state: TState, command: TCommand | undefined, fixedMs: number): void;
   score(state: TState): number;
   lines(state: TState): number;
@@ -81,8 +86,8 @@ export class GameSession<TState, TCommand> {
     return this.loop.isPaused;
   }
 
-  start(seed: number): void {
-    this.state = this.module.create(seed);
+  start(seed: number, params?: GameParams): void {
+    this.state = this.module.create(seed, params);
     this.loop.clearInputs();
     this.loop.resetTick();
     this.loop.resetAccumulator();
@@ -163,6 +168,7 @@ export class GameSession<TState, TCommand> {
 
 /** 俄罗斯方块模块状态：引擎 + 重力累积。 */
 export interface TetrisModuleState {
+  difficulty?: number;
   engine: TetrisEngine;
   gravityAccumulator: number;
 }
@@ -170,15 +176,16 @@ export interface TetrisModuleState {
 export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
   id: 'tetris',
   title: { zh: '俄罗斯方块', en: 'Tetris' },
-  create(seed: number): TetrisModuleState {
-    return { engine: new TetrisEngine(seed), gravityAccumulator: 0 };
+  create(seed: number, params?: GameParams): TetrisModuleState {
+    return { engine: new TetrisEngine(seed), gravityAccumulator: 0, difficulty: params?.difficulty ?? 1 };
   },
   step(state, command, fixedMs): void {
     const engine = state.engine;
     if (engine.isOver) return;
     if (command) engine.apply(command);
     state.gravityAccumulator += fixedMs;
-    if (state.gravityAccumulator >= engine.gravityMs) {
+    const interval = Math.max(70, engine.gravityMs - (Math.max(1, state.difficulty ?? 1) - 1) * 70);
+    if (state.gravityAccumulator >= interval) {
       state.gravityAccumulator = 0;
       engine.tick();
     }
@@ -188,7 +195,7 @@ export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
   level: (state) => state.engine.levelValue,
   isOver: (state) => state.engine.isOver,
   serialize(state) {
-    return { engine: state.engine.snapshot, gravityAccumulator: state.gravityAccumulator };
+    return { engine: state.engine.snapshot, gravityAccumulator: state.gravityAccumulator, difficulty: state.difficulty ?? 1 };
   },
   deserialize(data) {
     if (!data || typeof data !== 'object') return null;
@@ -200,7 +207,7 @@ export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
     } catch {
       return null;
     }
-    return { engine, gravityAccumulator: Number(payload.gravityAccumulator) || 0 };
+    return { engine, gravityAccumulator: Number(payload.gravityAccumulator) || 0, difficulty: Math.max(1, Math.min(5, Number((payload as { difficulty?: number }).difficulty) || 1)) };
   },
 };
 
@@ -216,6 +223,7 @@ export const GAME_MODULES: readonly GameModuleInfo[] = [
   { id: 'tetris', moduleName: '俄罗斯方块', title: TETRIS_MODULE.title },
   { id: 'snake', moduleName: '贪吃蛇', title: SNAKE_MODULE.title },
   { id: 'pong', moduleName: '乒乓', title: PONG_MODULE.title },
+  { id: 'breakout', moduleName: '打砖块', title: BREAKOUT_MODULE.title },
 ];
 
 export function gameModuleForName(name: string): GameModuleInfo | undefined {

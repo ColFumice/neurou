@@ -58,6 +58,7 @@ import { TetrisScene } from './TetrisScene.js';
 import { SnakeScene } from './SnakeScene.js';
 import { GamePicker } from './GamePicker.js';
 import { PongScene } from './PongScene.js';
+import { BreakoutScene } from './BreakoutScene.js';
 import { selectGameForFocus, type GameResult } from './gameSdk.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -691,6 +692,7 @@ export function App() {
     winEnding?: string;
     winSignal?: string;
     loseSignal?: string;
+    difficulty?: number;
     loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
@@ -1622,6 +1624,8 @@ export function App() {
         ...(game?.loseEnding ? { loseEnding: game.loseEnding } : {}),
         ...(game?.winSignal ? { winSignal: game.winSignal } : {}),
         ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
+        ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
+        ...(game?.difficulty ? { difficulty: game.difficulty } : {}),
       };
       setGameBinding(binding);
       setGameResume(readGameSave(gameSaveKey(WORLD_FILE, binding)));
@@ -3026,6 +3030,22 @@ export function App() {
           language={language}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
+          difficulty={gameBinding?.difficulty}
+          onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
+          bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
+          onResult={handleGameResult}
+          onExit={() => {
+            setScreen('strings');
+            setStartOpen(!gameFromWorldRef.current);
+            setGameBinding(null);
+          }}
+        />
+      ) : gameBinding?.module === '打砖块' ? (
+        <BreakoutScene
+          language={language}
+          resume={gameResume ?? undefined}
+          onSave={handleGameSave}
+          difficulty={gameBinding?.difficulty}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
@@ -3040,6 +3060,7 @@ export function App() {
           language={language}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
+          difficulty={gameBinding?.difficulty}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
@@ -3054,6 +3075,7 @@ export function App() {
           language={language}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
+          difficulty={gameBinding?.difficulty}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
           onResult={handleGameResult}

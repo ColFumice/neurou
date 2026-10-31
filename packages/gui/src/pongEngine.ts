@@ -17,6 +17,7 @@ export interface PongState {
   aiScore: number;
   over: boolean;
   rngState: number;
+  difficulty: number;
 }
 
 export const PONG_W = 120;
@@ -45,7 +46,7 @@ function serve(state: PongState, towardPlayer: boolean): void {
   state.vy = (random.value - 0.5) * 46;
 }
 
-export function createPong(seed = 1): PongState {
+export function createPong(seed = 1, difficulty = 1): PongState {
   const state: PongState = {
     playerY: PONG_H / 2,
     aiY: PONG_H / 2,
@@ -57,6 +58,7 @@ export function createPong(seed = 1): PongState {
     aiScore: 0,
     over: false,
     rngState: seed >>> 0 || 1,
+    difficulty: Math.max(1, Math.min(5, difficulty)),
   };
   serve(state, false);
   return state;
@@ -65,7 +67,7 @@ export function createPong(seed = 1): PongState {
 export const PONG_MODULE: GameModule<PongState, PongCommand> = {
   id: 'pong',
   title: { zh: '乒乓', en: 'Pong' },
-  create: (seed) => createPong(seed),
+  create: (seed, params) => createPong(seed, params?.difficulty ?? 1),
   step(state, command, fixedMs): void {
     if (state.over) return;
     const dt = Math.min(0.05, fixedMs / 1000);
@@ -76,7 +78,8 @@ export const PONG_MODULE: GameModule<PongState, PongCommand> = {
     // AI 跟随球，但速度有限。
     const target = state.ballY;
     const delta = target - state.aiY;
-    state.aiY += Math.max(-42 * dt, Math.min(42 * dt, delta));
+    const aiSpeed = 28 + state.difficulty * 8;
+    state.aiY += Math.max(-aiSpeed * dt, Math.min(aiSpeed * dt, delta));
     state.aiY = Math.max(PADDLE_HALF, Math.min(PONG_H - PADDLE_HALF, state.aiY));
 
     state.ballX += state.vx * dt;
@@ -132,8 +135,8 @@ export const PONG_MODULE: GameModule<PongState, PongCommand> = {
     state.vy = Number(candidate.vy) || state.vy;
     state.playerScore = Number(candidate.playerScore) || 0;
     state.aiScore = Number(candidate.aiScore) || 0;
-    state.over = Boolean(candidate.over);
     state.rngState = Number(candidate.rngState) || state.rngState;
+    state.difficulty = Math.max(1, Math.min(5, Number(candidate.difficulty) || 1));
     return state;
   },
 };

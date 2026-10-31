@@ -20,6 +20,7 @@ const SOURCE = `世界 游戏桥测试
   模块 俄罗斯方块
   结果弦 信任
   胜利分数 80
+  难度 3
   胜利动作 完成
   胜利结局 稳定
   失败结局 稳定
@@ -37,6 +38,7 @@ describe('游戏 DSL 声明', () => {
     expect(game?.resultString).toBe('信任');
     expect(game?.resultStringId).toBe('信任');
     expect(game?.winScore).toBe(80);
+    expect(game?.difficulty).toBe(3);
     expect(game?.winAction).toBe('完成');
     expect(game?.winEnding).toBe('稳定');
     expect(game?.loseEnding).toBe('稳定');
@@ -49,6 +51,7 @@ describe('游戏 DSL 声明', () => {
     const text = serialize(first.ir);
     expect(text).toContain('游戏 方块');
     expect(text).toContain('结果弦 信任');
+    expect(text).toContain('难度 3');
     expect(text).toContain('胜利动作 完成');
     expect(text).toContain('胜利结局 稳定');
     expect(text).toContain('失败结局 稳定');

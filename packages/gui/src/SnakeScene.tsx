@@ -2,6 +2,7 @@ import type { GameResult } from './gameSdk.js';
 import { SNAKE_MODULE } from './snakeEngine.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
+import { paintGameBackdrop } from './gameTheme.js';
 import {
   SNAKE_H,
   SNAKE_W,
@@ -13,6 +14,7 @@ import {
 
 interface SnakeSceneProps {
   language: Language;
+  difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -93,13 +95,7 @@ function drawSnake(
 ): void {
   const { width, height } = viewport;
   const text = TEXT[language];
-  ctx.fillStyle = '#0a0b0d';
-  ctx.fillRect(0, 0, width, height);
-  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.45, 10, width * 0.5, height * 0.45, Math.max(width, height) * 0.8);
-  vignette.addColorStop(0, 'rgba(34,40,32,.4)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, width, height);
+  paintGameBackdrop(ctx, width, height, 'rgba(34,40,32,.4)');
 
   const cell = Math.min((width * 0.5) / SNAKE_W, (height * 0.66) / SNAKE_H);
   const boardW = cell * SNAKE_W;
@@ -188,6 +184,7 @@ function drawSnake(
 
 export function SnakeScene({
   language,
+  difficulty,
   bindingLabel,
   resume,
   onSave,
@@ -211,6 +208,7 @@ export function SnakeScene({
     <GameHost
       module={SNAKE_MODULE}
       language={language}
+      difficulty={difficulty}
       testId="snake-scene"
       debugKey="__neurouSnake"
       bestKey="neurou.snake.best"

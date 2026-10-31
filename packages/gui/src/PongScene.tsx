@@ -1,10 +1,12 @@
 import type { GameResult } from './gameSdk.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
+import { drawGameChrome, paintGameBackdrop, paintGameBoard } from './gameTheme.js';
 import { PONG_H, PONG_MODULE, PONG_W, type PongCommand, type PongState } from './pongEngine.js';
 
 interface PongSceneProps {
   language: Language;
+  difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -70,8 +72,7 @@ function drawPong(
   language: Language,
 ): void {
   const { width, height } = viewport;
-  ctx.fillStyle = '#0a0b0d';
-  ctx.fillRect(0, 0, width, height);
+  paintGameBackdrop(ctx, width, height, 'rgba(34,40,32,.4)');
   const scale = Math.min((width * 0.62) / PONG_W, (height * 0.62) / PONG_H);
   const fieldW = PONG_W * scale;
   const fieldH = PONG_H * scale;
@@ -79,10 +80,7 @@ function drawPong(
   const top = (height - fieldH) / 2;
   const text = TEXT[language];
 
-  ctx.fillStyle = 'rgba(255,244,224,.018)';
-  ctx.strokeStyle = 'rgba(255,236,205,.16)';
-  ctx.fillRect(left, top, fieldW, fieldH);
-  ctx.strokeRect(left + 0.5, top + 0.5, fieldW - 1, fieldH - 1);
+  paintGameBoard(ctx, left, top, fieldW, fieldH);
   ctx.setLineDash([6, 8]);
   ctx.strokeStyle = 'rgba(255,236,205,.13)';
   ctx.beginPath();
@@ -107,16 +105,13 @@ function drawPong(
   ctx.fillText(String(state.playerScore), left + fieldW / 2 - 46, top - 16);
   ctx.fillText(String(state.aiScore), left + fieldW / 2 + 22, top - 16);
 
-  ctx.fillStyle = 'rgba(255,246,230,.92)';
-  ctx.font = `300 ${Math.max(22, Math.min(34, width * 0.026))}px "Microsoft YaHei", system-ui, sans-serif`;
-  ctx.fillText(text.title, 42, 34);
-  ctx.fillStyle = 'rgba(255,240,220,.32)';
-  ctx.font = '300 11px ui-monospace, monospace';
-  ctx.fillText(text.subtitle, 44, 76);
-  if (best > 0) ctx.fillText(`BEST ${best}`, 44, height - 52);
-  ctx.fillStyle = 'rgba(255,240,220,.28)';
-  ctx.font = '300 10px ui-monospace, monospace';
-  ctx.fillText(text.keys, 44, height - 30);
+  drawGameChrome(ctx, width, height, {
+    title: text.title,
+    subtitle: text.subtitle,
+    keys: text.keys,
+    best,
+    bestLabel: 'BEST',
+  });
   if (phase === 'ready') {
     ctx.fillStyle = 'rgba(255,240,220,.35)';
     ctx.font = '300 11px ui-monospace, monospace';
@@ -126,6 +121,7 @@ function drawPong(
 
 export function PongScene({
   language,
+  difficulty,
   bindingLabel,
   resume,
   onSave,
@@ -149,6 +145,7 @@ export function PongScene({
     <GameHost
       module={PONG_MODULE}
       language={language}
+      difficulty={difficulty}
       testId="pong-scene"
       debugKey="__neurouPong"
       bestKey="neurou.pong.best"

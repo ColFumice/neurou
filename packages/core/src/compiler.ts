@@ -645,6 +645,7 @@ class Compiler {
       ...(d.loseEnding ? { loseEnding: d.loseEnding } : {}),
       ...(d.winSignal ? { winSignal: d.winSignal } : {}),
       ...(d.loseSignal ? { loseSignal: d.loseSignal } : {}),
+      ...(d.difficulty ? { difficulty: Math.max(1, Math.min(5, d.difficulty)) } : {}),
       ...(d.description ? { description: d.description } : {}),
       span: d.span,
     });

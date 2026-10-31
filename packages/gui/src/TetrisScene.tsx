@@ -2,6 +2,7 @@ import type { GameResult } from './gameSdk.js';
 import { TETRIS_MODULE, type TetrisModuleState } from './gameSdk.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
+import { paintGameBackdrop } from './gameTheme.js';
 import {
   BOARD_H,
   BOARD_W,
@@ -14,6 +15,7 @@ import './tetris.css';
 
 interface TetrisSceneProps {
   language: Language;
+  difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -116,13 +118,7 @@ function drawTetris(
   const engine = state.engine;
   const snapshot = engine.snapshot;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#0a0b0d';
-  ctx.fillRect(0, 0, width, height);
-  const vignette = ctx.createRadialGradient(width * 0.5, height * 0.48, 10, width * 0.5, height * 0.48, Math.max(width, height) * 0.75);
-  vignette.addColorStop(0, 'rgba(38,32,26,.35)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, width, height);
+  paintGameBackdrop(ctx, width, height);
 
   const boardW = Math.min(width * 0.34, height * 0.62, 360);
   const cell = boardW / BOARD_W;
@@ -255,6 +251,7 @@ function drawTetris(
 
 export function TetrisScene({
   language,
+  difficulty,
   bindingLabel,
   resume,
   onSave,
@@ -278,6 +275,7 @@ export function TetrisScene({
     <GameHost
       module={TETRIS_MODULE}
       language={language}
+      difficulty={difficulty}
       testId="tetris-scene"
       debugKey="__neurouTetris"
       bestKey={BEST_KEY}

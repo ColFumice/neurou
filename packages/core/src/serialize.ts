@@ -511,6 +511,7 @@ function gameBlock(w: Writer, game: IRGame): void {
   if (game.loseEnding) w.line(1, `失败结局 ${game.loseEnding}`);
   if (game.winSignal) w.line(1, `胜利信号 ${game.winSignal}`);
   if (game.loseSignal) w.line(1, `失败信号 ${game.loseSignal}`);
+  if (game.difficulty) w.line(1, `难度 ${numberText(game.difficulty)}`);
   if (game.description) w.line(1, `描述 ${stringText(game.description)}`);
   w.blank();
 }

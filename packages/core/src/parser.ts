@@ -390,6 +390,7 @@ class Parser {
     let loseEnding: string | undefined;
     let winSignal: string | undefined;
     let loseSignal: string | undefined;
+    let difficulty = 1;
     if (this.enterBlock('游戏')) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -421,6 +422,9 @@ class Parser {
           case '胜利信号':
             winSignal = this.readQualifiedName('胜利信号');
             break;
+          case '难度':
+            difficulty = this.readNumber('难度');
+            break;
           case '失败信号':
             loseSignal = this.readQualifiedName('失败信号');
             break;
@@ -450,6 +454,7 @@ class Parser {
       loseEnding,
       winSignal,
       loseSignal,
+      difficulty,
       description,
       span: this.spanFrom(start),
     };

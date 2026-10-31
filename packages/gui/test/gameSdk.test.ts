@@ -56,7 +56,7 @@ describe('Game SDK', () => {
   });
 
   it('模块注册表按名字/ID 查询', () => {
-    expect(GAME_MODULES).toHaveLength(3);
+    expect(GAME_MODULES).toHaveLength(4);
     expect(gameModuleForName('俄罗斯方块')?.id).toBe('tetris');
     expect(gameModuleForName('tetris')?.moduleName).toBe('俄罗斯方块');
     expect(gameModuleForName('不存在')).toBeUndefined();
