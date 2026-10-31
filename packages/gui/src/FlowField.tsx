@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { STRING_INTERACTIONS, type StringKind } from '@neurou/core';
+import { LOGICAL_H, LOGICAL_W, layoutKeyboard } from './stringMath.js';
 import { getStringAudio } from './stringAudio.js';
 
 const COLS = 64;
@@ -131,6 +132,8 @@ function saveNodes(key: string, nodes: FlowNode[]): void {
 interface FlowFieldProps {
   worldFile: string;
   targetKind?: StringKind;
+  kinds?: readonly StringKind[];
+  onTargetKindChange?: (kind: StringKind) => void;
   onClose: () => void;
 }
 
@@ -186,8 +189,9 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): JSX.Element {
+export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
   const storageKey = targetKind ? `${worldFile}:${targetKind}` : worldFile;
+  const keyFor = (kind?: StringKind): string => (kind ? `${worldFile}:${kind}` : worldFile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const nodesRef = useRef<FlowNode[]>(loadNodes(storageKey));
   const ripplesRef = useRef<Array<{ x: number; y: number; start: number }>>([]);
@@ -197,12 +201,17 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
   const audioRef = useRef<FlowAudio | null>(null);
   const gateRef = useRef(new Map<string, { triggeredAt: number; releasedAt: number; held: boolean; releaseLevel: number }>());
   const sustainedVoicesRef = useRef(new Map<string, number>());
+  const stringKeyVoicesRef = useRef(new Map<string, number>());
+  const previousTargetRef = useRef(targetKind);
+  const keyLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, false);
+  const sustainLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, true);
   const heldKeysRef = useRef(new Map<string, string>());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState(0);
   const [param, setParam] = useState(0);
   const [version, setVersion] = useState(0);
   const [audioState, setAudioState] = useState('off');
+  const [audition, setAudition] = useState('');
 
   const commit = (): void => {
     saveNodes(storageKey, nodesRef.current);
@@ -217,6 +226,49 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
     }
     setVersion((value) => value + 1);
   };
+
+  const stopStringKeys = (): void => {
+    const audio = getStringAudio();
+    for (const voiceId of stringKeyVoicesRef.current.values()) audio.stopSustainedSpectrum(voiceId);
+    stringKeyVoicesRef.current.clear();
+  };
+
+  const playTargetKey = (code: string): boolean => {
+    if (!targetKind) return false;
+    const sustained = STRING_INTERACTIONS[targetKind] === '持续';
+    const cell = (sustained ? sustainLayout : keyLayout).find((item) => item.code === code);
+    if (!cell) return false;
+    setAudition(code);
+    const audio = getStringAudio();
+    const x = cell.cx / LOGICAL_W;
+    const y = 1 - cell.cy / LOGICAL_H;
+    if (sustained) {
+      const timbre = audio.getKindTimbre(targetKind);
+      const bands = timbre?.bands ?? [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3];
+      const voiceId = audio.startSustainedSpectrum(bands, x, y, timbre?.smooth ?? true, timbre?.loop ?? true, 0.72);
+      stringKeyVoicesRef.current.set(code, voiceId);
+    } else {
+      audio.pluck(targetKind, x, y, 0.82, 1);
+    }
+    return true;
+  };
+
+  useEffect(() => {
+    const previous = previousTargetRef.current;
+    if (previous === targetKind) return;
+    saveNodes(keyFor(previous), nodesRef.current);
+    stopStringKeys();
+    for (const voiceId of sustainedVoicesRef.current.values()) getStringAudio().stopSustainedSpectrum(voiceId);
+    sustainedVoicesRef.current.clear();
+    gateRef.current.clear();
+    nodesRef.current = loadNodes(keyFor(targetKind));
+    previousTargetRef.current = targetKind;
+    selectedRef.current = 0;
+    setSelected(0);
+    setVersion((value) => value + 1);
+    const first = nodesRef.current[0];
+    if (targetKind && first) getStringAudio().setKindEffects(targetKind, { reverb: first.depth, cutoff: first.cutoff });
+  }, [targetKind]);
 
   const envelopeOf = (node: FlowNode, now: number): number => {
     const ms = now;
@@ -519,6 +571,20 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
         setSelected(selectedRef.current);
         return;
       }
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.code === 'ArrowLeft' || event.code === 'ArrowRight') &&
+        kinds &&
+        kinds.length > 0 &&
+        onTargetKindChange
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const index = Math.max(0, kinds.indexOf(targetKind ?? kinds[0]!));
+        const direction = event.code === 'ArrowRight' ? 1 : -1;
+        onTargetKindChange(kinds[(index + direction + kinds.length) % kinds.length]!);
+        return;
+      }
       if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
         event.preventDefault();
         paramRef.current = (paramRef.current + (event.code === 'BracketRight' ? 1 : -1) + PARAMS.length) % PARAMS.length;
@@ -530,15 +596,43 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
         adjustParam(event.code === 'Equal' ? 1 : -1);
         return;
       }
-      if (event.code === 'KeyM') {
-        startAudio();
-        if (audioRef.current) audioRef.current.muted = !audioRef.current.muted;
-        setAudioState(audioRef.current?.muted ? 'muted' : 'on');
-        return;
-      }
-      if (event.code === 'KeyC') {
-        copySelected();
-        return;
+      if (event.ctrlKey || event.metaKey) {
+        if (event.code === 'KeyM') {
+          startAudio();
+          if (audioRef.current) audioRef.current.muted = !audioRef.current.muted;
+          setAudioState(audioRef.current?.muted ? 'muted' : 'on');
+          event.preventDefault();
+          return;
+        }
+        if (event.code === 'KeyC') {
+          copySelected();
+          event.preventDefault();
+          return;
+        }
+        if (event.code === 'KeyE') {
+          exportNodes();
+          event.preventDefault();
+          return;
+        }
+        if (event.code === 'KeyI') {
+          fileInputRef.current?.click();
+          event.preventDefault();
+          return;
+        }
+        if (event.code === 'KeyR') {
+          nodesRef.current = DEFAULT_NODES.map((node) => ({ ...node }));
+          selectedRef.current = 0;
+          setSelected(0);
+          gateRef.current.clear();
+          commit();
+          event.preventDefault();
+          return;
+        }
+        if (event.code === 'KeyS') {
+          saveNodes(storageKey, nodesRef.current);
+          event.preventDefault();
+          return;
+        }
       }
       if (event.code === 'Delete' || event.code === 'Backspace') {
         deleteSelected();
@@ -546,26 +640,6 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
       }
       if (event.code === 'PageUp' || event.code === 'PageDown') {
         changeLayer(event.code === 'PageUp' ? 1 : -1);
-        return;
-      }
-      if (event.code === 'KeyE') {
-        exportNodes();
-        return;
-      }
-      if (event.code === 'KeyI') {
-        fileInputRef.current?.click();
-        return;
-      }
-      if (event.code === 'KeyR') {
-        nodesRef.current = DEFAULT_NODES.map((node) => ({ ...node }));
-        selectedRef.current = 0;
-        setSelected(0);
-        gateRef.current.clear();
-        commit();
-        return;
-      }
-      if (event.code === 'KeyS') {
-        saveNodes(worldFile, nodesRef.current);
         return;
       }
       if (event.code === 'Enter') {
@@ -577,13 +651,9 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
         commit();
         return;
       }
-      const noteIndex = KEY_ORDER.indexOf(event.key.toLowerCase());
-      if (noteIndex >= 0 && noteIndex < nodesRef.current.length && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && targetKind && playTargetKey(event.code)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        const node = nodesRef.current[noteIndex]!;
-        heldKeysRef.current.set(event.code, node.id);
-        gateNode(node);
         return;
       }
       const step = event.shiftKey ? 2 : 0.7;
@@ -597,6 +667,11 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
     };
     window.addEventListener('keydown', onKey, true);
     const onKeyUp = (event: KeyboardEvent): void => {
+      const voiceId = stringKeyVoicesRef.current.get(event.code);
+      if (voiceId !== undefined) {
+        getStringAudio().stopSustainedSpectrum(voiceId);
+        stringKeyVoicesRef.current.delete(event.code);
+      }
       const nodeId = heldKeysRef.current.get(event.code);
       if (!nodeId) return;
       heldKeysRef.current.delete(event.code);
@@ -609,7 +684,7 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [worldFile, onClose]);
+  }, [worldFile, onClose, targetKind, kinds, onTargetKindChange]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -916,6 +991,7 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
       data-flow-gates={gateCount}
       data-flow-layer={selectedNode?.layer ?? 0}
       data-flow-target={targetKind ?? ''}
+      data-flow-audition={audition}
     >
       <input
         ref={fileInputRef}
@@ -946,7 +1022,9 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
           if (hit >= 0) {
             selectedRef.current = hit;
             setSelected(hit);
-            dragRef.current = { nodeId: nodesRef.current[hit]!.id, pointerId: event.pointerId };
+            const node = nodesRef.current[hit]!;
+            gateNode(node);
+            dragRef.current = { nodeId: node.id, pointerId: event.pointerId };
             return;
           }
           if (nodesRef.current.length < MAX_NODES) {
@@ -968,6 +1046,8 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
           node.y = Math.max(1, Math.min(ROWS - 2, point.y));
         }}
         onPointerUp={() => {
+          const released = nodesRef.current.find((node) => node.id === dragRef.current.nodeId);
+          if (released) releaseNode(released);
           if (dragRef.current.nodeId) commit();
           dragRef.current = { nodeId: null, pointerId: null };
         }}
@@ -982,12 +1062,27 @@ export function FlowField({ worldFile, targetKind, onClose }: FlowFieldProps): J
       />
       <div className="flow-screen__hud">
         <strong>{targetKind ? `流场 · ${targetKind} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
-        <span>拖节点移动 · 滚轮半径 · 数字/字母键触发节点 · Tab 切换 · [ ] 参数 · - = 调整 · C 复制 · Delete 删除 · PageUp/Down 层级 · E 导出 .nrm · I 导入 · M 静音 · F10/Esc 返回</span>
+        <span>键盘沿用弦界面映射实时试听 · Ctrl+←/→ 切换音色目标 · 拖节点 · Tab 切节点 · [ ] 参数 · - = 调整 · Ctrl+C 复制 · Delete 删除 · PageUp/Down 层级 · Ctrl+E 导出 · Ctrl+I 导入 · Ctrl+M 静音 · Ctrl+S 保存 · Ctrl+R 重置 · F10/Esc 返回</span>
       </div>
       <div className="flow-screen__node-panel" data-testid="flow-node-panel">
         <div className="flow-screen__node-title">
           节点 {selected + 1}/{nodesRef.current.length} · L{selectedNode?.layer ?? 0} · {selectedNode ? `${selectedNode.x.toFixed(1)},${selectedNode.y.toFixed(1)}` : '—'}
         </div>
+        {kinds && kinds.length > 0 ? (
+          <div className="flow-screen__targets" data-testid="flow-targets">
+            {kinds.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className={`flow-screen__target${kind === targetKind ? ' flow-screen__target--active' : ''}`}
+                data-flow-target-kind={kind}
+                onClick={() => onTargetKindChange?.(kind)}
+              >
+                {kind}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {PARAMS.map((spec, index) => (
           <div
             key={spec.key}

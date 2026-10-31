@@ -26,6 +26,7 @@ import {
   assetReferences,
   replaceAssetReferences,
   STRING_INTERACTIONS,
+  KIND_ORDER,
   setSpectrumBand,
   setSpectrumBands,
   setMatrixCell,
@@ -1590,7 +1591,18 @@ export function App() {
       >
         {flowMode ? null : children}
       </div>
-      {flowMode ? <FlowField worldFile={WORLD_FILE} targetKind={memoryMode ? memoryKind : focusKind} onClose={() => setFlowMode(false)} /> : null}
+      {flowMode ? (
+        <FlowField
+          worldFile={WORLD_FILE}
+          targetKind={memoryMode ? memoryKind : focusKind}
+          kinds={KIND_ORDER}
+          onTargetKindChange={(kind) => {
+            setFocusKind(kind);
+            if (memoryMode) setMemoryKind(kind);
+          }}
+          onClose={() => setFlowMode(false)}
+        />
+      ) : null}
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
