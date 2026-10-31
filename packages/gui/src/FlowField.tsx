@@ -80,7 +80,7 @@ const DEFAULT_NODES: FlowNode[] = [
   { id: 'n4', x: 18, y: 25, radius: 5.8, tension: 0.7, depth: 0.78, diffusion: 0.48, cutoff: 8600, resonance: 4.6, lfoRate: 0.09, lfoDepth: 1.5, attack: 0.42, decay: 0.7, sustain: 0.3, release: 1.4, bits: 7, sampleRate: 12000, layer: 1 },
   { id: 'n5', x: 36, y: 26, radius: 6.6, tension: 0.52, depth: 0.35, diffusion: 0.58, cutoff: 4200, resonance: 2.8, lfoRate: 0.14, lfoDepth: 2.0, attack: 0.24, decay: 0.45, sustain: 0.55, release: 0.9, bits: 11, sampleRate: 22050, layer: 1 },
   { id: 'n6', x: 54, y: 25, radius: 5.4, tension: 0.34, depth: 0.62, diffusion: 0.22, cutoff: 2400, resonance: 1.4, lfoRate: 0.18, lfoDepth: 1.3, attack: 0.08, decay: 0.18, sustain: 0.4, release: 0.5, bits: 16, sampleRate: 44100, layer: 1 },
-];
+].map((node) => ({ ...node, bits: 16, sampleRate: 44100, attack: 0.01, decay: 0.1, sustain: 1, release: 0.4 }));
 
 const KEY_ORDER = '1234567890qwertyuiopasdfghjklzxcvbnm';
 
@@ -98,8 +98,7 @@ function loadNodes(key: string): FlowNode[] {
   try {
     const raw = localStorage.getItem(`${STORAGE_PREFIX}${key}`);
     if (!raw) return DEFAULT_NODES.map((node) => ({ ...node }));
-    const parsed = JSON.parse(raw) as { nodes?: unknown };
-    if (!Array.isArray(parsed.nodes) || parsed.nodes.length === 0) return DEFAULT_NODES.map((node) => ({ ...node }));
+    const parsed = JSON.parse(raw) as { nodes?: unknown; version?: number };     if (!Array.isArray(parsed.nodes) || parsed.nodes.length === 0) return DEFAULT_NODES.map((node) => ({ ...node }));     const legacyAudio = parsed.version !== 2;
     return parsed.nodes.slice(0, MAX_NODES).map((node, index) => {
       const item = node as Partial<FlowNode>;
       return {
@@ -113,8 +112,7 @@ function loadNodes(key: string): FlowNode[] {
         diffusion: Math.max(0, Math.min(1, Number(item.diffusion) || 0.4)),
         decay: Math.max(0.02, Math.min(1.6, Number(item.decay) || 0.4)),
         sustain: Math.max(0, Math.min(1, Number(item.sustain) || 0.45)),
-        sampleRate: Math.max(4000, Math.min(44100, Number(item.sampleRate) || 44100)),
-        layer: Math.max(0, Math.min(2, Math.round(Number(item.layer) || 0))),
+        sampleRate: legacyAudio ? 44100 : Math.max(4000, Math.min(44100, Number(item.sampleRate) || 44100)),         ...(legacyAudio ? { bits: 16, attack: 0.01, decay: 0.1, sustain: 1, release: 0.4 } : {}),         layer: Math.max(0, Math.min(2, Math.round(Number(item.layer) || 0))),
       } as FlowNode;
     });
   } catch {
@@ -124,7 +122,7 @@ function loadNodes(key: string): FlowNode[] {
 
 function saveNodes(key: string, nodes: FlowNode[]): void {
   try {
-    localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify({ nodes }));
+    localStorage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify({ version: 2, nodes }));
   } catch {
     /* ignore */
   }

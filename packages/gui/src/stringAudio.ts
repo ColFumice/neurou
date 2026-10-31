@@ -268,13 +268,13 @@ export class StringAudioEngine {
       drive: 0,
       lfoRate: 0,
       lfoDepth: 0,
-      attack: 0.02,
-      decay: 0.15,
-      sustain: 0.9,
-      release: 0.25,
+      attack: 0.005,
+      decay: 0.01,
+      sustain: 1,
+      release: 0.1,
       diffusion: 0.2,
       level: 1,
-      sampleRate: 32000,
+      sampleRate: 44100,
     };
   }
 
