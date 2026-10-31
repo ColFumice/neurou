@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { STRING_INTERACTIONS, type StringKind } from '@neurou/core';
-import { LOGICAL_H, LOGICAL_W, layoutKeyboard } from './stringMath.js';
+import { LOGICAL_H, LOGICAL_W, layoutKeyboard, type TimbreCurve } from './stringMath.js';
+import { sustainedWaves } from './sustainedWave.js';
 import { getStringAudio } from './stringAudio.js';
 
 const COLS = 64;
@@ -134,6 +135,8 @@ interface FlowFieldProps {
   targetKind?: StringKind;
   kinds?: readonly StringKind[];
   kindLabels?: Partial<Record<StringKind, string>>;
+  targetStringId?: string;
+  targetTimbre?: TimbreCurve;
   onTargetKindChange?: (kind: StringKind) => void;
   onClose: () => void;
 }
@@ -190,7 +193,7 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
+export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStringId, targetTimbre, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
   const storageKey = targetKind ? `${worldFile}:${targetKind}` : worldFile;
   const keyFor = (kind?: StringKind): string => (kind ? `${worldFile}:${kind}` : worldFile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -218,9 +221,17 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKi
   const fixedWaveFor = (kind: StringKind): { bands: number[]; smooth: boolean; loop: boolean } => {
     const existing = fixedWavesRef.current.get(kind);
     if (existing) return existing;
+    const sustained = STRING_INTERACTIONS[kind] === '持续';
+    const sustainedWave = sustained && targetStringId ? sustainedWaves.getFor(targetStringId, kind) : null;
     const timbre = getStringAudio().getKindTimbre(kind);
     const fixed = {
-      bands: timbre?.bands ? [...timbre.bands] : [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3],
+      bands: sustainedWave
+        ? [...sustainedWave]
+        : targetTimbre?.bands
+          ? [...targetTimbre.bands]
+          : timbre?.bands
+            ? [...timbre.bands]
+            : [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3],
       smooth: timbre?.smooth ?? true,
       loop: timbre?.loop ?? true,
     };
@@ -269,7 +280,7 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKi
       const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, 0.72, 0, targetKind);
       stringKeyVoicesRef.current.set(code, voiceId);
     } else {
-      audio.pluck(targetKind, x, y, 0.82, 1);
+      audio.pluck(targetKind, x, y, 0.82, 1, targetTimbre);
     }
     return true;
   };
@@ -341,7 +352,7 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKi
         );
         sustainedVoicesRef.current.set(node.id, voiceId);
       } else {
-        audio.pluck(targetKind, node.x / COLS, 1 - node.y / ROWS, 0.82, 1);
+        audio.pluck(targetKind, node.x / COLS, 1 - node.y / ROWS, 0.82, 1, targetTimbre);
       }
       return;
     }
