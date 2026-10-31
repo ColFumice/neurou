@@ -25,17 +25,41 @@ export interface KindEffects {
   lfoRate: number;
   /** 0..4000Hz，LFO 深度。 */
   lfoDepth: number;
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  diffusion: number;
+  level: number;
+  sampleRate: number;
 }
 
 interface KindBus {
   input: GainNode;
   filter: BiquadFilterNode;
   shaper: WaveShaperNode;
+  down: ScriptProcessorNode;
+  env: GainNode;
+  level: GainNode;
   lfo: OscillatorNode;
   lfoGain: GainNode;
   dry: GainNode;
   wet: GainNode;
   convolver: ConvolverNode;
+  diffusion: number;
+}
+
+function kindImpulse(ctx: AudioContext, diffusion: number): AudioBuffer {
+  const seconds = 0.35 + diffusion * 2.4;
+  const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let channel = 0; channel < 2; channel += 1) {
+    const data = buffer.getChannelData(channel);
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.4 + diffusion * 2.2);
+    }
+  }
+  return buffer;
 }
 
 function driveCurve(drive: number): Float32Array {
@@ -237,7 +261,21 @@ export class StringAudioEngine {
   }
 
   getKindEffects(kind: StringKind): KindEffects {
-    return this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000, resonance: 1, drive: 0, lfoRate: 0, lfoDepth: 0 };
+    return this.kindEffects.get(kind) ?? {
+      reverb: 0.16,
+      cutoff: 9000,
+      resonance: 1,
+      drive: 0,
+      lfoRate: 0,
+      lfoDepth: 0,
+      attack: 0.02,
+      decay: 0.15,
+      sustain: 0.9,
+      release: 0.25,
+      diffusion: 0.2,
+      level: 1,
+      sampleRate: 32000,
+    };
   }
 
   /** F9：调整当前弦类型的效果器总线。 */
@@ -250,6 +288,13 @@ export class StringAudioEngine {
       drive: Math.max(0, Math.min(1, patch.drive ?? current.drive)),
       lfoRate: Math.max(0, Math.min(1.2, patch.lfoRate ?? current.lfoRate)),
       lfoDepth: Math.max(0, Math.min(4000, patch.lfoDepth ?? current.lfoDepth)),
+      attack: Math.max(0.005, Math.min(2, patch.attack ?? current.attack)),
+      decay: Math.max(0.005, Math.min(2, patch.decay ?? current.decay)),
+      sustain: Math.max(0.02, Math.min(1, patch.sustain ?? current.sustain)),
+      release: Math.max(0.02, Math.min(2, patch.release ?? current.release)),
+      diffusion: Math.max(0, Math.min(1, patch.diffusion ?? current.diffusion)),
+      level: Math.max(0.25, Math.min(1.8, patch.level ?? current.level)),
+      sampleRate: Math.max(4000, Math.min(44100, patch.sampleRate ?? current.sampleRate)),
     };
     this.kindEffects.set(kind, next);
     const bus = this.kindBuses.get(kind);
@@ -262,12 +307,37 @@ export class StringAudioEngine {
       bus.shaper.curve = driveCurve(next.drive);
       bus.lfo.frequency.setTargetAtTime(next.lfoRate, now, 0.05);
       bus.lfoGain.gain.setTargetAtTime(next.lfoDepth, now, 0.05);
+      bus.level.gain.setTargetAtTime(next.level, now, 0.03);
+      if (Math.abs(bus.diffusion - next.diffusion) > 0.01 && this.ctx) {
+        bus.diffusion = next.diffusion;
+        bus.convolver.buffer = kindImpulse(this.ctx, next.diffusion);
+      }
     }
     return next;
   }
 
   private outputFor(kind: StringKind): AudioNode {
     return this.kindBuses.get(kind)?.input ?? this.master ?? this.ctx!.destination;
+  }
+
+  private triggerKindEnvelope(kind: StringKind): void {
+    const bus = this.kindBuses.get(kind);
+    const ctx = this.ctx;
+    if (!bus || !ctx) return;
+    const fx = this.getKindEffects(kind);
+    const now = ctx.currentTime;
+    const gain = bus.env.gain;
+    const hold = fx.attack + fx.decay + 1.4;
+    try {
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(0.0001, now);
+      gain.linearRampToValueAtTime(1, now + fx.attack);
+      gain.linearRampToValueAtTime(fx.sustain, now + fx.attack + fx.decay);
+      gain.setValueAtTime(fx.sustain, now + hold);
+      gain.linearRampToValueAtTime(0.0001, now + hold + fx.release);
+    } catch {
+      /* ignore */
+    }
   }
 
   private buildKindBuses(ctx: AudioContext, master: GainNode): void {
@@ -287,6 +357,27 @@ export class StringAudioEngine {
       filter.Q.value = 1;
       const shaper = ctx.createWaveShaper();
       shaper.curve = driveCurve(0);
+      const down = ctx.createScriptProcessor(256, 1, 1);
+      let downCounter = 0;
+      let downHeld = 0;
+      down.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+        const outputData = event.outputBuffer.getChannelData(0);
+        const effects = this.getKindEffects(kind);
+        const step = Math.max(1, Math.round(ctx.sampleRate / Math.max(1000, effects.sampleRate)));
+        for (let i = 0; i < inputData.length; i += 1) {
+          if (downCounter <= 0) {
+            downHeld = inputData[i] ?? 0;
+            downCounter = step;
+          }
+          downCounter -= 1;
+          outputData[i] = downHeld;
+        }
+      };
+      const env = ctx.createGain();
+      env.gain.value = 1;
+      const level = ctx.createGain();
+      level.gain.value = 1;
       const lfo = ctx.createOscillator();
       const lfoGain = ctx.createGain();
       lfo.type = 'sine';
@@ -298,16 +389,19 @@ export class StringAudioEngine {
       const dry = ctx.createGain();
       const wet = ctx.createGain();
       const convolver = ctx.createConvolver();
-      convolver.buffer = impulse;
+      convolver.buffer = kindImpulse(ctx, 0.2);
       input.connect(filter);
       filter.connect(shaper);
-      shaper.connect(dry);
-      shaper.connect(convolver);
+      shaper.connect(down);
+      down.connect(env);
+      env.connect(level);
+      level.connect(dry);
+      level.connect(convolver);
       convolver.connect(wet);
       dry.connect(master);
       wet.connect(master);
-      this.kindBuses.set(kind, { input, filter, shaper, lfo, lfoGain, dry, wet, convolver });
-      this.setKindEffects(kind, this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000, resonance: 1, drive: 0, lfoRate: 0, lfoDepth: 0 });
+      this.kindBuses.set(kind, { input, filter, shaper, down, env, level, lfo, lfoGain, dry, wet, convolver, diffusion: 0.2 });
+      this.setKindEffects(kind, this.kindEffects.get(kind) ?? this.getKindEffects(kind));
     }
   }
 
@@ -870,6 +964,7 @@ export class StringAudioEngine {
       buffer = created;
     }
 
+    this.triggerKindEnvelope(kind);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gain = ctx.createGain();
@@ -1031,6 +1126,7 @@ export class StringAudioEngine {
     const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
     const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
     const fourier = spectrumFourier(bands, { min: 0, max: 1, smooth, loop });
+    this.triggerKindEnvelope(kind);
     const wave = ctx.createPeriodicWave(fourier.real, fourier.imag);
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(wave);

@@ -248,9 +248,16 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
       reverb: node.depth,
       cutoff: node.cutoff,
       resonance: node.resonance,
-      drive: Math.max(0, Math.min(1, bitDrive * 0.78 + rateDrive * 0.22)),
+      drive: Math.max(0, Math.min(1, bitDrive * 0.7 + rateDrive * 0.2 + node.tension * 0.1)),
       lfoRate: node.lfoRate,
       lfoDepth: node.lfoDepth * 140,
+      attack: node.attack,
+      decay: node.decay,
+      sustain: node.sustain,
+      release: node.release,
+      diffusion: node.diffusion,
+      level: Math.max(0.6, Math.min(1.4, 0.7 + node.radius * 0.04)),
+      sampleRate: node.sampleRate,
     });
   };
 
