@@ -2003,6 +2003,7 @@ export function App() {
           kindLabels={Object.fromEntries((worldIR?.strings ?? []).map((item) => [item.kind, item.name])) as Partial<Record<StringKind, string>>}
           targetStringId={lanes.find((lane) => lane.kind === (memoryMode ? memoryKind : focusKind))?.id}
           targetTimbre={lanes.find((lane) => lane.kind === (memoryMode ? memoryKind : focusKind))?.timbre}
+          targetNorm={lanes.find((lane) => lane.kind === (memoryMode ? memoryKind : focusKind))?.norm}
           onTargetKindChange={(kind) => {
             setFocusKind(kind);
             if (memoryMode) setMemoryKind(kind);

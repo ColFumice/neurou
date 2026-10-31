@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { STRING_INTERACTIONS, type StringKind } from '@neurou/core';
-import { LOGICAL_H, LOGICAL_W, layoutKeyboard, type TimbreCurve } from './stringMath.js';
+import { KIND_VISUAL, LOGICAL_H, LOGICAL_W, layoutKeyboard, valueToY, type TimbreCurve } from './stringMath.js';
 import { sustainedWaves } from './sustainedWave.js';
 import { getStringAudio } from './stringAudio.js';
 
@@ -137,6 +137,7 @@ interface FlowFieldProps {
   kindLabels?: Partial<Record<StringKind, string>>;
   targetStringId?: string;
   targetTimbre?: TimbreCurve;
+  targetNorm?: number;
   onTargetKindChange?: (kind: StringKind) => void;
   onClose: () => void;
 }
@@ -193,7 +194,7 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStringId, targetTimbre, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
+export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStringId, targetTimbre, targetNorm, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
   const storageKey = targetKind ? `${worldFile}:${targetKind}` : worldFile;
   const keyFor = (kind?: StringKind): string => (kind ? `${worldFile}:${kind}` : worldFile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -269,18 +270,25 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
   const playTargetKey = (code: string): boolean => {
     if (!targetKind) return false;
     const sustained = STRING_INTERACTIONS[targetKind] === '持续';
-    const cell = (sustained ? sustainLayout : keyLayout).find((item) => item.code === code);
+    const layout = sustained ? sustainLayout : keyLayout;
+    const cell = layout.find((item) => item.code === code);
     if (!cell) return false;
     setAudition(code);
     const audio = getStringAudio();
     const x = cell.cx / LOGICAL_W;
-    const y = 1 - cell.cy / LOGICAL_H;
+    const y = cell.cy / LOGICAL_H;
+    const norm = Math.max(0, Math.min(1, targetNorm ?? 0.5));
+    const baseline = valueToY(norm * 100);
+    const maxPull = KIND_VISUAL[targetKind].maxPull;
     if (sustained) {
+      const maxKeyDistance = Math.max(1, ...layout.map((item) => Math.abs(item.cy - baseline)));
+      const amp = Math.max(0, Math.min(1, Math.abs(cell.cy - baseline) / maxKeyDistance));
       const fixed = fixedWaveFor(targetKind);
-      const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, 0.72, 0, targetKind);
+      const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, amp, 0, targetKind);
       stringKeyVoicesRef.current.set(code, voiceId);
     } else {
-      audio.pluck(targetKind, x, y, 0.82, 1, targetTimbre);
+      const amp = Math.max(0, Math.min(1, Math.abs(cell.cy - baseline) / Math.max(1, maxPull)));
+      audio.pluck(targetKind, x, y, amp, 1, targetTimbre);
     }
     return true;
   };
@@ -300,13 +308,6 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
     selectedRef.current = 0;
     setSelected(0);
     setVersion((value) => value + 1);
-    const first = nodesRef.current[0];
-    if (targetKind && first) applyNodeEffects(first);
-  }, [targetKind]);
-
-  useEffect(() => {
-    const node = nodesRef.current[selectedRef.current];
-    if (node) applyNodeEffects(node);
   }, [targetKind]);
 
   const envelopeOf = (node: FlowNode, now: number): number => {
