@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import type { StringKind } from '@neurou/core';
+import { getStringAudio } from './stringAudio.js';
 
 const COLS = 64;
 const ROWS = 36;
-const LEVELS = 9;
+const LEVELS = 7;
 const MAX_NODES = 16;
 const STORAGE_PREFIX = 'neurou.flow.nodes:';
 
@@ -128,6 +130,7 @@ function saveNodes(key: string, nodes: FlowNode[]): void {
 
 interface FlowFieldProps {
   worldFile: string;
+  memoryKind?: StringKind;
   onClose: () => void;
 }
 
@@ -183,9 +186,11 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
+export function FlowField({ worldFile, memoryKind, onClose }: FlowFieldProps): JSX.Element {
+  const storageKey = memoryKind ? `${worldFile}:${memoryKind}` : worldFile;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const nodesRef = useRef<FlowNode[]>(loadNodes(worldFile));
+  const nodesRef = useRef<FlowNode[]>(loadNodes(storageKey));
+  const ripplesRef = useRef<Array<{ x: number; y: number; start: number }>>([]);
   const selectedRef = useRef(0);
   const paramRef = useRef(0);
   const dragRef = useRef<{ nodeId: string | null; pointerId: number | null }>({ nodeId: null, pointerId: null });
@@ -199,7 +204,16 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   const [audioState, setAudioState] = useState('off');
 
   const commit = (): void => {
-    saveNodes(worldFile, nodesRef.current);
+    saveNodes(storageKey, nodesRef.current);
+    if (memoryKind) {
+      const node = nodesRef.current[selectedRef.current];
+      if (node) {
+        getStringAudio().setKindEffects(memoryKind, {
+          reverb: node.depth,
+          cutoff: node.cutoff,
+        });
+      }
+    }
     setVersion((value) => value + 1);
   };
 
@@ -224,6 +238,17 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   const gateNode = (node: FlowNode): void => {
     gateRef.current.set(node.id, { triggeredAt: performance.now(), releasedAt: 0, held: true, releaseLevel: 1 });
     setVersion((value) => value + 1);
+    ripplesRef.current.push({
+      x: ((node.x + 0.5) / COLS) * window.innerWidth,
+      y: ((node.y + 0.5) / ROWS) * window.innerHeight,
+      start: performance.now(),
+    });
+    if (memoryKind) {
+      const audio = getStringAudio();
+      audio.setKindEffects(memoryKind, { reverb: node.depth, cutoff: node.cutoff });
+      audio.pluck(memoryKind, node.x / COLS, 1 - node.y / ROWS, 0.82, 1);
+      return;
+    }
     startAudio();
     syncAudio();
   };
@@ -335,6 +360,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   };
 
   const startAudio = (): void => {
+    if (memoryKind) return;
     if (audioRef.current) return;
     try {
       const ctx = new AudioContext();
@@ -350,6 +376,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   };
 
   const syncAudio = (): void => {
+    if (memoryKind) return;
     const audio = audioRef.current;
     if (!audio) return;
     for (const node of nodesRef.current) {
@@ -416,6 +443,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   };
 
   const updateAudio = (now: number): void => {
+    if (memoryKind) return;
     const audio = audioRef.current;
     if (!audio) return;
     for (const node of nodesRef.current) {
@@ -570,7 +598,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
     if (!ctx) return;
     let raf = 0;
     const resize = (): void => {
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const dpr = Math.min(1.25, Math.max(1, window.devicePixelRatio || 1));
       canvas.width = Math.round(window.innerWidth * dpr);
       canvas.height = Math.round(window.innerHeight * dpr);
       canvas.style.width = `${window.innerWidth}px`;
@@ -578,6 +606,8 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
     };
     resize();
     window.addEventListener('resize', resize);
+    let lastRender = 0;
+    let frameCount = 0;
 
     const fieldAt = (gx: number, gy: number, now: number): number => {
       const t = now * 0.001;
@@ -589,8 +619,10 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         const srStep = Math.max(1, Math.round(44100 / Math.max(4000, node.sampleRate)));
         const qgx = Math.round(gx / srStep) * srStep;
         const qgy = Math.round(gy / srStep) * srStep;
-        const dx = (qgx - cx) / node.radius;
-        const dy = (qgy - cy) / node.radius;
+        const sampleX = gx * 0.72 + qgx * 0.28;
+        const sampleY = gy * 0.72 + qgy * 0.28;
+        const dx = (sampleX - cx) / node.radius;
+        const dy = (sampleY - cy) / node.radius;
         const dist = dx * dx + dy * dy;
         if (dist > 6) continue;
         const env = Math.max(0.01, envelopeOf(node, now));
@@ -600,7 +632,8 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         contribution *= ring;
         if (node.bits < 11) {
           const steps = Math.pow(2, Math.max(1, Math.min(11, node.bits)));
-          contribution = Math.round(contribution * steps) / steps;
+          const quantized = Math.round(contribution * steps) / steps;
+          contribution = contribution * 0.72 + quantized * 0.28;
         }
         value += contribution;
       }
@@ -609,10 +642,13 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
 
     const draw = (now: number): void => {
       raf = window.requestAnimationFrame(draw);
-      updateAudio(now);
+      if (now - lastRender < 30) return;
+      lastRender = now;
+      frameCount += 1;
+      if (frameCount % 3 === 0) updateAudio(now);
       const width = canvas.width;
       const height = canvas.height;
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const dpr = Math.min(1.25, Math.max(1, window.devicePixelRatio || 1));
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const bg = ctx.createLinearGradient(0, 0, 0, height);
       bg.addColorStop(0, '#04050b');
@@ -699,8 +735,10 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
           for (let guard = 0; guard < segments.length; guard += 1) {
             const endpoint = atStart ? points[0]! : points[points.length - 1]!;
             const key = keyOf(endpoint);
-            const found = (byPoint.get(key) ?? []).find((index) => !used[index]);
-            if (found === undefined) return;
+            const candidates = (byPoint.get(key) ?? []).filter((index) => !used[index]);
+            if (candidates.length !== 1) return;
+            if ((byPoint.get(key) ?? []).length > 2) return;
+            const found = candidates[0]!;
             const previous = points[atStart ? 0 : points.length - 1]!;
             const candidate = segments[found]!;
             const next = other(candidate, key);
@@ -713,6 +751,22 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         };
 
         let pathIndex = 0;
+        const smoothPoints = (input: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> => {
+          let current = input;
+          for (let pass = 0; pass < 2; pass += 1) {
+            if (current.length < 3) break;
+            const next: Array<{ x: number; y: number }> = [current[0]!];
+            for (let i = 0; i < current.length - 1; i += 1) {
+              const p = current[i]!;
+              const q = current[i + 1]!;
+              next.push({ x: p.x * 0.75 + q.x * 0.25, y: p.y * 0.75 + q.y * 0.25 });
+              next.push({ x: p.x * 0.25 + q.x * 0.75, y: p.y * 0.25 + q.y * 0.75 });
+            }
+            next.push(current[current.length - 1]!);
+            current = next;
+          }
+          return current;
+        };
         for (let index = 0; index < segments.length; index += 1) {
           if (used[index]) continue;
           used[index] = 1;
@@ -726,21 +780,32 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
             length += Math.hypot(points[k]!.x - points[k - 1]!.x, points[k]!.y - points[k - 1]!.y);
           }
           if (length < 18) continue;
+          const smooth = smoothPoints(points);
           const width = 1.8 + 1.8 * (0.5 + 0.5 * Math.sin(t * 1.9 + level * 0.9 + pathIndex * 0.33));
-          ctx.strokeStyle = `hsla(${hue}, 92%, ${62 + (level % 3) * 5}%, ${0.7 - level * 0.02})`;
-          ctx.lineWidth = width;
-          ctx.shadowBlur = 12;
-          ctx.shadowColor = `hsla(${hue}, 95%, 68%, 0.52)`;
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = `hsla(${hue}, 92%, 62%, 0.12)`;
+          ctx.lineWidth = width + 5;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
           ctx.beginPath();
-          ctx.moveTo(points[0]!.x, points[0]!.y);
-          for (let k = 1; k < points.length - 1; k += 1) {
-            const current = points[k]!;
-            const next = points[k + 1]!;
+          ctx.moveTo(smooth[0]!.x, smooth[0]!.y);
+          for (let k = 1; k < smooth.length - 1; k += 1) {
+            const current = smooth[k]!;
+            const next = smooth[k + 1]!;
             ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
           }
-          ctx.lineTo(points[points.length - 1]!.x, points[points.length - 1]!.y);
+          ctx.lineTo(smooth[smooth.length - 1]!.x, smooth[smooth.length - 1]!.y);
+          ctx.stroke();
+          ctx.strokeStyle = `hsla(${hue}, 92%, ${64 + (level % 3) * 5}%, ${0.72 - level * 0.025})`;
+          ctx.lineWidth = width;
+          ctx.beginPath();
+          ctx.moveTo(smooth[0]!.x, smooth[0]!.y);
+          for (let k = 1; k < smooth.length - 1; k += 1) {
+            const current = smooth[k]!;
+            const next = smooth[k + 1]!;
+            ctx.quadraticCurveTo(current.x, current.y, (current.x + next.x) / 2, (current.y + next.y) / 2);
+          }
+          ctx.lineTo(smooth[smooth.length - 1]!.x, smooth[smooth.length - 1]!.y);
           ctx.stroke();
           pathIndex += 1;
         }
@@ -765,6 +830,23 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         ctx.lineTo(nx + 6, ny);
         ctx.moveTo(nx, ny - 6);
         ctx.lineTo(nx, ny + 6);
+        ctx.stroke();
+      }
+
+      const nowMs = performance.now();
+      ripplesRef.current = ripplesRef.current.filter((ripple) => nowMs - ripple.start < 900);
+      for (const ripple of ripplesRef.current) {
+        const progress = Math.max(0, Math.min(1, (nowMs - ripple.start) / 900));
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const radius = 10 + eased * 90;
+        ctx.strokeStyle = `rgba(255, 150, 70, ${(1 - progress) * 0.5})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(ripple.x, ripple.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255, 230, 200, ${(1 - progress) * 0.22})`;
+        ctx.beginPath();
+        ctx.arc(ripple.x, ripple.y, radius * 0.62, 0, Math.PI * 2);
         ctx.stroke();
       }
     };
@@ -813,6 +895,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       data-flow-audio={audioState}
       data-flow-gates={gateCount}
       data-flow-layer={selectedNode?.layer ?? 0}
+      data-flow-target={memoryKind ?? ''}
     >
       <input
         ref={fileInputRef}
@@ -834,6 +917,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         onPointerDown={(event) => {
           startAudio();
           syncAudio();
+          ripplesRef.current.push({ x: event.clientX, y: event.clientY, start: performance.now() });
           event.currentTarget.setPointerCapture(event.pointerId);
           const point = pointerToCell(event);
           const hit = nodesRef.current.findIndex(
@@ -862,9 +946,9 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
           if (!node) return;
           node.x = Math.max(1, Math.min(COLS - 2, point.x));
           node.y = Math.max(1, Math.min(ROWS - 2, point.y));
-          commit();
         }}
         onPointerUp={() => {
+          if (dragRef.current.nodeId) commit();
           dragRef.current = { nodeId: null, pointerId: null };
         }}
         onWheel={(event) => {
@@ -877,7 +961,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         onContextMenu={(event) => event.preventDefault()}
       />
       <div className="flow-screen__hud">
-        <strong>流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi</strong>
+        <strong>{memoryKind ? `流场 · ${memoryKind} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
         <span>拖节点移动 · 滚轮半径 · 数字/字母键触发节点 · Tab 切换 · [ ] 参数 · - = 调整 · C 复制 · Delete 删除 · PageUp/Down 层级 · E 导出 .nrm · I 导入 · M 静音 · F10/Esc 返回</span>
       </div>
       <div className="flow-screen__node-panel" data-testid="flow-node-panel">

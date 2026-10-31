@@ -1143,3 +1143,23 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
   padding: 6px 8px;
   cursor: none;
 }
+
+/* v1.14：流场缓动与性能视觉 */
+.flow-screen__node-panel {
+  animation: flow-panel-in 360ms cubic-bezier(.2,.9,.2,1) both;
+}
+@keyframes flow-panel-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.flow-screen__param {
+  transition: background 180ms ease, opacity 180ms ease, color 180ms ease;
+}
+.flow-screen__actions button {
+  transition: background 180ms ease, border-color 180ms ease, transform 160ms ease;
+}
+.flow-screen__actions button:hover {
+  background: rgba(255,138,60,.14);
+  border-color: rgba(255,138,60,.45);
+  transform: translateY(-1px);
+}

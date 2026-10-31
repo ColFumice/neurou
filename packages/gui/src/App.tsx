@@ -477,6 +477,7 @@ export function App() {
   const [startLeaving, setStartLeaving] = useState(false);
   const [startEntering, setStartEntering] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
+  const [memoryKind, setMemoryKind] = useState<StringKind>('叙事');
   const [focusKind, setFocusKind] = useState<StringKind>('叙事');
   const [memoryFxOpen, setMemoryFxOpen] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -846,11 +847,12 @@ export function App() {
       if (flowMode || startOpen) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (!memoryMode) setMemoryKind(focusKind);
       setMemoryMode((value) => !value);
     };
     window.addEventListener('keydown', onMemoryKey, true);
     return () => window.removeEventListener('keydown', onMemoryKey, true);
-  }, [flowMode, startOpen]);
+  }, [flowMode, startOpen, memoryMode, focusKind]);
 
   useEffect(() => {
     if (
@@ -861,13 +863,12 @@ export function App() {
         helpOpen ||
         chapterGraphOpen ||
         sceneMenuOpen ||
-        slotMenuOpen ||
-        flowMode)
+        slotMenuOpen)
     ) {
       setMemoryMode(false);
       setMemoryFxOpen(false);
     }
-  }, [memoryMode, screen, editorOpen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen, flowMode]);
+  }, [memoryMode, screen, editorOpen, ruleOpen, helpOpen, chapterGraphOpen, sceneMenuOpen, slotMenuOpen]);
 
   const chooseStart = (item: StartItem): void => {
     if (startLeaving) return;
@@ -1616,7 +1617,7 @@ export function App() {
       >
         {flowMode ? null : children}
       </div>
-      {flowMode ? <FlowField worldFile={WORLD_FILE} onClose={() => setFlowMode(false)} /> : null}
+      {flowMode ? <FlowField worldFile={WORLD_FILE} memoryKind={memoryMode ? memoryKind : undefined} onClose={() => setFlowMode(false)} /> : null}
       {startOpen ? (
         <StartScreen
           items={START_ITEMS}
