@@ -95,6 +95,7 @@ interface SustainedVoice {
   osc: OscillatorNode;
   gain: GainNode;
   pan: StereoPannerNode | null;
+  kind: StringKind;
   baseGain: number;
   xNorm: number;
   yNorm: number;
@@ -1020,11 +1021,12 @@ export class StringAudioEngine {
     loop: boolean,
     amplitudeNorm = 0.6,
     priority = 0,
+    kind: StringKind = '叙事',
   ): number {
     const ctx = this.ctx;
     const master = this.master;
     if (!ctx || !master || bands.length < 2) return 0;
-    const profile = KIND_AUDIO['叙事'];
+    const profile = KIND_AUDIO[kind];
     const x = clamp(xNorm, 0, 1);
     const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
     const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
@@ -1038,14 +1040,15 @@ export class StringAudioEngine {
     gain.gain.setValueAtTime(0.0001, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.055);
     const pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    const output = this.outputFor(kind);
     if (pan) {
       pan.pan.value = (x * 2 - 1) * 0.4;
       osc.connect(gain);
       gain.connect(pan);
-      pan.connect(master);
+      pan.connect(output);
     } else {
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(output);
     }
     osc.start();
     const id = ++this.voiceSeq;
@@ -1064,6 +1067,7 @@ export class StringAudioEngine {
       osc,
       gain,
       pan,
+      kind,
       baseGain: target,
       xNorm: x,
       yNorm: clamp(yNorm, 0, 1),
@@ -1080,7 +1084,7 @@ export class StringAudioEngine {
     if (!voice || !ctx) return;
     const x = clamp(xNorm, 0, 1);
     const y = clamp(yNorm, 0, 1);
-    const profile = KIND_AUDIO['叙事'];
+    const profile = KIND_AUDIO[voice.kind];
     const base = pitchForX(x * WAVE_WIDTH).freq * profile.octave;
     const freq = clamp(base, 30, ctx.sampleRate / 2 - 1);
     const now = ctx.currentTime;
@@ -1119,7 +1123,7 @@ export class StringAudioEngine {
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.linearRampToValueAtTime(target, now + 0.05);
       if (voice.pan) gain.connect(voice.pan);
-      else gain.connect(master);
+      else gain.connect(this.outputFor(voice.kind));
       osc.connect(gain);
       osc.start();
       // 旧波淡出后停止，避免 setPeriodicWave 的相位跳变变成爆音。

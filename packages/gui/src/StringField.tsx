@@ -2171,6 +2171,8 @@ export function StringField({
           true,
           true,
           amplitude,
+          0,
+          kind,
         );
         updateHoldState(performance.now());
       }
@@ -2535,6 +2537,8 @@ export function StringField({
             true,
             true,
             amp,
+            0,
+            kind,
           );
           sustainedKeyVoices.set(event.code, id);
         }

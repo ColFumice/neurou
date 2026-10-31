@@ -2097,6 +2097,9 @@ check('流场统一节点面板', (await flowPage.locator('[data-testid="flow-no
 await flowPage.locator('[data-flow-target-kind="视觉"]').click();
 await flowPage.waitForTimeout(350);
 check('F10 内切换音色目标', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-target')) === '视觉');
+await flowPage.keyboard.press('a');
+await flowPage.waitForTimeout(220);
+check('持续型目标可实时试听', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-audition')) === 'KeyA');
 await flowPage.locator('[data-flow-target-kind="叙事"]').click();
 await flowPage.waitForTimeout(350);
 check('非 F12 流场也有音色目标', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-target')) === '叙事', String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-target')));

@@ -265,7 +265,7 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
     const y = 1 - cell.cy / LOGICAL_H;
     if (sustained) {
       const fixed = fixedWaveFor(targetKind);
-      const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, 0.72);
+      const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, 0.72, 0, targetKind);
       stringKeyVoicesRef.current.set(code, voiceId);
     } else {
       audio.pluck(targetKind, x, y, 0.82, 1);
@@ -330,6 +330,8 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
           fixed.smooth,
           fixed.loop,
           0.72,
+          0,
+          targetKind,
         );
         sustainedVoicesRef.current.set(node.id, voiceId);
       } else {
