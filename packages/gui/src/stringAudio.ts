@@ -325,6 +325,11 @@ export class StringAudioEngine {
     const ctx = this.ctx;
     if (!bus || !ctx) return;
     const fx = this.getKindEffects(kind);
+    if (fx.attack <= 0.01 && fx.decay <= 0.02 && fx.sustain >= 0.99 && fx.release <= 0.12) {
+      bus.env.gain.cancelScheduledValues(ctx.currentTime);
+      bus.env.gain.setValueAtTime(1, ctx.currentTime);
+      return;
+    }
     const now = ctx.currentTime;
     const gain = bus.env.gain;
     const hold = fx.attack + fx.decay + 1.4;

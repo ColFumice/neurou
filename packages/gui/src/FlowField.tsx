@@ -206,6 +206,7 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
   const sustainedVoicesRef = useRef(new Map<string, number>());
   const stringKeyVoicesRef = useRef(new Map<string, number>());
   const previousTargetRef = useRef(targetKind);
+  const lastAuditionRef = useRef(new Map<string, number>());
   const fixedWavesRef = useRef(new Map<StringKind, { bands: number[]; smooth: boolean; loop: boolean }>());
   const keyLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, false);
   const sustainLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, true);
@@ -278,6 +279,11 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
     const layout = sustained ? sustainLayout : keyLayout;
     const cell = layout.find((item) => item.code === code);
     if (!cell) return false;
+    if (!cell) return false;
+    const now = performance.now();
+    const last = lastAuditionRef.current.get(code) ?? 0;
+    if (now - last < 90) return false;
+    lastAuditionRef.current.set(code, now);
     setAudition(code);
     const audio = getStringAudio();
     const x = cell.cx / LOGICAL_W;
@@ -604,6 +610,7 @@ export function FlowField({ worldFile, targetKind, kinds, kindLabels, targetStri
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
+      if (event.repeat) return;
       if (event.code === 'F10' || event.code === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
