@@ -397,6 +397,20 @@ export interface MatrixDecl extends DeclBase {
   phaseSource?: { matrix: string; row: string; col: string };
 }
 
+/** v1.21：运行期音频覆盖层。只描述播放效果，不改变弦网络语义。 */
+export interface AudioConfigDecl extends DeclBase {
+  k: 'audioConfig';
+  kind: StringKind;
+  values: Record<string, number>;
+}
+
+/** v1.21：流场节点覆盖层。 */
+export interface FlowProfileDecl extends DeclBase {
+  k: 'flowProfile';
+  kind: StringKind;
+  nodes: number[][];
+}
+
 export type Decl =
   | WorldDecl
   | EntityDecl
@@ -419,7 +433,9 @@ export type Decl =
   | SceneDecl
   | PortDecl
   | NamespaceDecl
-  | FunctionDecl;
+  | FunctionDecl
+  | AudioConfigDecl
+  | FlowProfileDecl;
 
 export interface Program {
   decls: Decl[];
@@ -438,6 +454,8 @@ export const DECL_KEYWORDS = [
   '空间弦',
   '认知弦',
   '关系弦',
+  '音频配置',
+  '流场',
   '耦合',
   '回路',
   '力迫',

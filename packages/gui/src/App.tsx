@@ -284,24 +284,66 @@ function isLocalWorldFile(file: string): boolean {
 const OVERLAY_AUDIO_PREFIX = '# @neurou:audio:';
 const OVERLAY_FLOW_PREFIX = '# @neurou:flow:';
 
-/** 把运行期音频配置与流场节点写进 .nro 注释侧车；这些行参与保存但仍可被编译器忽略。 */
+/** 把运行期音频配置与流场节点写进正式的 .nro 覆盖层段。 */
 function withRuntimeOverlay(text: string, worldFile: string): string {
-  const lines = text.split(/\r?\n/).filter((line) => !line.startsWith(OVERLAY_AUDIO_PREFIX) && !line.startsWith(OVERLAY_FLOW_PREFIX));
-  const overlays: string[] = ['# 音频配置（RuntimeOverlay）', '# 流场（RuntimeOverlay）'];
+  const cleaned = text
+    .replace(/\r?\n/g, '\n')
+    .replace(/^# 音频配置（RuntimeOverlay）\n?/gm, '')
+    .replace(/^# 流场（RuntimeOverlay）\n?/gm, '')
+    .replace(/^# @neurou:(?:audio|flow):[^\n]*\n?/gm, '')
+    .replace(/^(?:音频配置|流场)\s+[^\n]+\n(?:[ \t]+[^\n]*\n)*/gm, '');
+  const sections: string[] = [];
   const audio = getStringAudio();
   for (const kind of KIND_ORDER) {
     const effects = audio.getKindEffects(kind);
-    overlays.push(`${OVERLAY_AUDIO_PREFIX}${kind} ${JSON.stringify(effects)}`);
+    sections.push(
+      [
+        `音频配置 ${kind}`,
+        `  混响 ${effects.reverb}`,
+        `  低通 ${effects.cutoff}`,
+        `  共振 ${effects.resonance}`,
+        `  驱动 ${effects.drive}`,
+        `  LFO速率 ${effects.lfoRate}`,
+        `  LFO深度 ${effects.lfoDepth}`,
+      ].join('\n'),
+    );
     try {
       const raw = window.localStorage.getItem(`neurou.flow.nodes:${worldFile}:${kind}`);
       if (!raw) continue;
-      const parsed = JSON.parse(raw) as { nodes?: unknown };
-      if (Array.isArray(parsed.nodes)) overlays.push(`${OVERLAY_FLOW_PREFIX}${kind} ${JSON.stringify(parsed.nodes)}`);
+      const parsed = JSON.parse(raw) as { nodes?: Array<Record<string, number>> };
+      if (Array.isArray(parsed.nodes) && parsed.nodes.length > 0) {
+        const lines = [`流场 ${kind}`];
+        for (const node of parsed.nodes) {
+          lines.push(
+            `  节点 ${[
+              node.x,
+              node.y,
+              node.radius,
+              node.tension,
+              node.depth,
+              node.diffusion,
+              node.cutoff,
+              node.resonance,
+              node.attack,
+              node.decay,
+              node.sustain,
+              node.release,
+              node.lfoRate,
+              node.lfoDepth,
+              node.bits,
+              node.sampleRate,
+              node.layer,
+            ].join(' ')}`,
+          );
+        }
+        sections.push(lines.join('\n'));
+      }
     } catch {
       /* 忽略损坏的本地侧车 */
     }
   }
-  return `${overlays.join('\n')}\n${lines.join('\n')}`;
+  const overlay = sections.join('\n\n');
+  return overlay ? `${cleaned.replace(/\s+$/, '')}\n\n${overlay}\n` : `${cleaned.replace(/\s+$/, '')}\n`;
 }
 
 /**
@@ -1001,6 +1043,19 @@ export function App() {
     if (WORLD_FILE === `local:${id}`) window.location.assign('?fresh=1');
   };
 
+  const exportLocalWorld = (item: StartItem): void => {
+    if (!item.localId) return;
+    const world = readLocalWorlds().find((entry) => entry.id === item.localId);
+    if (!world) return;
+    const blob = new Blob([world.source], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${world.name || 'world'}.nro`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const importWorldFile = async (file: File): Promise<void> => {
     const text = await file.text();
     const check = compileText(text, file.name);
@@ -1012,6 +1067,26 @@ export function App() {
     const name = text.match(/^\s*世界\s+(.+)$/m)?.[1]?.trim() || file.name.replace(/\.nro$/, '');
     createLocalWorld(name, text);
   };
+
+  useEffect(() => {
+    if (!worldIR) return;
+    for (const config of worldIR.audioConfigs ?? []) {
+      getStringAudio().setKindEffects(config.kind, {
+        reverb: config.reverb,
+        cutoff: config.cutoff,
+        resonance: config.resonance,
+        drive: config.drive,
+        lfoRate: config.lfoRate,
+        lfoDepth: config.lfoDepth,
+      });
+    }
+    for (const profile of worldIR.flowProfiles ?? []) {
+      window.localStorage.setItem(
+        `neurou.flow.nodes:${WORLD_FILE}:${profile.kind}`,
+        JSON.stringify({ nodes: profile.nodes }),
+      );
+    }
+  }, [worldIR]);
 
   useEffect(() => {
     if (!source) return;
@@ -1919,6 +1994,7 @@ export function App() {
             onAddWorld={() => setWorldWizardOpen(true)}
             onRenameWorld={renameLocalWorld}
             onDeleteWorld={deleteLocalWorld}
+            onExportWorld={exportLocalWorld}
             onImportWorld={() => importWorldRef.current?.click()}
             leaving={startLeaving}
             entering={startEntering}

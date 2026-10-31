@@ -1,6 +1,7 @@
 import type {
   ActionDecl,
   AudioAssetDecl,
+  AudioConfigDecl,
   AxiomDecl,
   BgmDecl,
   ChordDecl,
@@ -11,6 +12,7 @@ import type {
   EndingDecl,
   EntityDecl,
   Expr,
+  FlowProfileDecl,
   ForcingDecl,
   FormDecl,
   FunctionDecl,
@@ -33,6 +35,7 @@ import { DiagnosticBag, type Diagnostic } from './diagnostics.js';
 import { STRING_INTERACTIONS } from './ast.js';
 import type {
   IRAudioAsset,
+  IRAudioConfig,
   IRAxiom,
   IRBgm,
   IRCoupling,
@@ -40,6 +43,7 @@ import type {
   IREffect,
   IREntity,
   IREnding,
+  IRFlowProfile,
   IRLoop,
   IRMatrix,
   IRPhase,
@@ -140,6 +144,8 @@ class Compiler {
   private readonly phases: IRPhase[] = [];
   private readonly spectra: IRSpectrum[] = [];
   private readonly spectrumNames = new Set<string>();
+  private readonly audioConfigs: IRAudioConfig[] = [];
+  private readonly flowProfiles: IRFlowProfile[] = [];
   private readonly audioAssets: IRAudioAsset[] = [];
   private readonly audioAssetNames = new Set<string>();
   private readonly textureAssets: IRTextureAsset[] = [];
@@ -342,6 +348,12 @@ class Compiler {
         case 'spectrum':
           this.declareSpectrum(d);
           break;
+        case 'audioConfig':
+          this.declareAudioConfig(d);
+          break;
+        case 'flowProfile':
+          this.declareFlowProfile(d);
+          break;
         case 'matrix':
           this.declareMatrix(d);
           break;
@@ -528,8 +540,45 @@ class Compiler {
     this.textureAssets.push({ id: d.name, name: d.name, src });
   }
 
-  private declareSpectrum(d: SpectrumDecl): void {
-    if (this.spectrumNames.has(d.name)) {
+  private declareAudioConfig(d: AudioConfigDecl): void {
+    const clamp = (value: number, min: number, max: number, fallback: number): number =>
+      Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+    this.audioConfigs.push({
+      kind: d.kind,
+      reverb: clamp(d.values.reverb ?? 0.16, 0, 1, 0.16),
+      cutoff: clamp(d.values.cutoff ?? 9000, 200, 12000, 9000),
+      resonance: clamp(d.values.resonance ?? 1, 0.1, 12, 1),
+      drive: clamp(d.values.drive ?? 0, 0, 1, 0),
+      lfoRate: clamp(d.values.lfoRate ?? 0, 0, 1.2, 0),
+      lfoDepth: clamp(d.values.lfoDepth ?? 0, 0, 4000, 0),
+      span: d.span,
+    });
+  }
+
+  private declareFlowProfile(d: FlowProfileDecl): void {
+    const nodes = d.nodes.map((values) => ({
+      x: values[0] ?? 10,
+      y: values[1] ?? 10,
+      radius: values[2] ?? 5,
+      tension: values[3] ?? 0.5,
+      depth: values[4] ?? 0.5,
+      diffusion: values[5] ?? 0.4,
+      cutoff: values[6] ?? 4000,
+      resonance: values[7] ?? 2,
+      attack: values[8] ?? 0.2,
+      decay: values[9] ?? 0.4,
+      sustain: values[10] ?? 0.45,
+      release: values[11] ?? 0.8,
+      lfoRate: values[12] ?? 0.15,
+      lfoDepth: values[13] ?? 1.5,
+      bits: values[14] ?? 12,
+      sampleRate: values[15] ?? 32000,
+      layer: values[16] ?? 0,
+    }));
+    this.flowProfiles.push({ kind: d.kind, nodes, span: d.span });
+  }
+
+  private declareSpectrum(d: SpectrumDecl): void {    if (this.spectrumNames.has(d.name)) {
       this.error('NRO2004', `谱「${d.name}」重复声明。`, d.span, { hint: '改个名字，或者删掉其中一个。' });
       return;
     }
@@ -2460,6 +2509,8 @@ class Compiler {
       strings: [...this.strings.values()],
       spectra: this.spectra,
       matrices: this.matrices,
+      ...(this.audioConfigs.length > 0 ? { audioConfigs: this.audioConfigs } : {}),
+      ...(this.flowProfiles.length > 0 ? { flowProfiles: this.flowProfiles } : {}),
       ...(this.audioAssets.length > 0 ? { audioAssets: this.audioAssets } : {}),
       ...(this.textureAssets.length > 0 ? { textureAssets: this.textureAssets } : {}),
       ...(this.bgm ? { bgm: this.bgm } : {}),

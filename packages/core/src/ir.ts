@@ -341,6 +341,45 @@ export interface IRFunction {
   body?: LExpr;
 }
 
+/** v1.21：运行期音频覆盖层（F10/F9 可写回）。 */
+export interface IRAudioConfig {
+  kind: StringKind;
+  reverb: number;
+  cutoff: number;
+  resonance: number;
+  drive: number;
+  lfoRate: number;
+  lfoDepth: number;
+  span?: Span;
+}
+
+/** v1.21：流场节点覆盖层。节点字段顺序与 FlowField FlowNode 对齐。 */
+export interface IRFlowNode {
+  x: number;
+  y: number;
+  radius: number;
+  tension: number;
+  depth: number;
+  diffusion: number;
+  cutoff: number;
+  resonance: number;
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  lfoRate: number;
+  lfoDepth: number;
+  bits: number;
+  sampleRate: number;
+  layer: number;
+}
+
+export interface IRFlowProfile {
+  kind: StringKind;
+  nodes: IRFlowNode[];
+  span?: Span;
+}
+
 export interface WorldIR {
   format: 'neurou/ir-0.1';
   name: string;
@@ -349,6 +388,10 @@ export interface WorldIR {
   strings: IRString[];
   spectra: IRSpectrum[];
   matrices: IRMatrix[];
+  /** v1.21：运行期音频覆盖层。 */
+  audioConfigs?: IRAudioConfig[];
+  /** v1.21：流场节点覆盖层。 */
+  flowProfiles?: IRFlowProfile[];
   /** v3.7：信号音频 cue 可用的资产。 */
   audioAssets?: IRAudioAsset[];
   /** v5.30：视觉端口可绑定的纹理资产。 */

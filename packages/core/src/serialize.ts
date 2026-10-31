@@ -1,5 +1,6 @@
 import type { StringKind } from './ast.js';
 import type {
+  IRAudioConfig,
   IRAxiom,
   IRCoupling,
   IRCue,
@@ -10,6 +11,7 @@ import type {
   IRMatrix,
   IRPhase,
   IRFunction,
+  IRFlowProfile,
   IRPort,
   IRRule,
   IRScene,
@@ -67,8 +69,7 @@ class Writer {
 
 // ---------- 基元 ----------
 
-function numberText(n: number): string {
-  if (!Number.isFinite(n)) throw new Error(`serialize: 不能序列化非有限数字 ${n}`);
+function numberText(n: number): string {  if (!Number.isFinite(n)) throw new Error(`serialize: 不能序列化非有限数字 ${n}`);
   if (Object.is(n, -0)) return '0';
   if (Number.isInteger(n)) return String(n);
   return String(Number(n.toFixed(6)));
@@ -457,6 +458,48 @@ function worldHeader(w: Writer, ir: WorldIR): void {
  *   - 弦的 `可见`（IR 没有该字段）；
  *   - 耦合的 `描述`、源文件顺序。
  */
+function audioConfigBlock(w: Writer, config: IRAudioConfig): void {
+  w.line(0, `音频配置 ${config.kind}`);
+  w.line(1, `混响 ${numberText(config.reverb)}`);
+  w.line(1, `低通 ${numberText(config.cutoff)}`);
+  w.line(1, `共振 ${numberText(config.resonance)}`);
+  w.line(1, `驱动 ${numberText(config.drive)}`);
+  w.line(1, `LFO速率 ${numberText(config.lfoRate)}`);
+  w.line(1, `LFO深度 ${numberText(config.lfoDepth)}`);
+  w.blank();
+}
+
+function flowProfileBlock(w: Writer, profile: IRFlowProfile): void {
+  w.line(0, `流场 ${profile.kind}`);
+  for (const node of profile.nodes) {
+    w.line(
+      1,
+      `节点 ${[
+        node.x,
+        node.y,
+        node.radius,
+        node.tension,
+        node.depth,
+        node.diffusion,
+        node.cutoff,
+        node.resonance,
+        node.attack,
+        node.decay,
+        node.sustain,
+        node.release,
+        node.lfoRate,
+        node.lfoDepth,
+        node.bits,
+        node.sampleRate,
+        node.layer,
+      ]
+        .map(numberText)
+        .join(' ')}`,
+    );
+  }
+  w.blank();
+}
+
 export function serialize(ir: WorldIR): string {
   const w = new Writer();
   worldHeader(w, ir);
@@ -509,6 +552,8 @@ export function serialize(ir: WorldIR): string {
 
   for (const spectrum of ir.spectra) spectrumBlock(w, spectrum);
   for (const matrix of ir.matrices) matrixBlock(w, matrix);
+  for (const config of ir.audioConfigs ?? []) audioConfigBlock(w, config);
+  for (const profile of ir.flowProfiles ?? []) flowProfileBlock(w, profile);
   for (const system of ir.systems ?? []) systemBlock(w, system);
   for (const scene of ir.scenes ?? []) sceneBlock(w, scene);
   for (const port of ir.ports ?? []) portBlock(w, port);

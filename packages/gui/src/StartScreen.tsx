@@ -15,6 +15,7 @@ export interface StartScreenProps {
   onAddWorld?: () => void;
   onRenameWorld?: (item: StartItem) => void;
   onDeleteWorld?: (item: StartItem) => void;
+  onExportWorld?: (item: StartItem) => void;
   onImportWorld?: () => void;
   leaving?: boolean;
   entering?: boolean;
@@ -30,6 +31,7 @@ export function StartScreen({
   onAddWorld,
   onRenameWorld,
   onDeleteWorld,
+  onExportWorld,
   onImportWorld,
   leaving = false,
   entering = false,
@@ -205,6 +207,9 @@ export function StartScreen({
               </button>
               {child.localId ? (
                 <span className="start-folder__actions">
+                  <button type="button" title="导出 .nro" onClick={() => onExportWorld?.(child)}>
+                    ↓
+                  </button>
                   <button type="button" title="重命名" onClick={() => onRenameWorld?.(child)}>
                     ✎
                   </button>

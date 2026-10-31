@@ -1,3 +1,33 @@
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# @neurou:audio:叙事 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:视觉 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:动画 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:物理 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:控制 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:空间 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:认知 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# @neurou:audio:关系 {"reverb":0.16,"cutoff":9000,"resonance":1,"drive":0,"lfoRate":0,"lfoDepth":0}
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
+# 音频配置（RuntimeOverlay）
+# 流场（RuntimeOverlay）
 # 十分钟灯塔
 # 一个可通关的小游戏：在风暴前的十个回合内点亮灯塔，让船归航。
 # 目标：灯火 >= 80 且 信任 >= 60；恐惧过高或时间耗尽则失败。
@@ -14,7 +44,7 @@
 
 叙事弦 信任
   类型 数值 0..100
-  基线 42
+  基线 14.261
   悬崖 20
   安全 85
   响应 缓出
@@ -28,7 +58,8 @@
 
 视觉弦 灯火
   类型 数值 0..100
-  基线 8
+  基线 0
+  波形 0.5 0.563 0.567 0.489 0.352 0.275 0.281 0.358 0.434 0.448 0.495 0.536 0.552 0.524 0.458 0.424 0.45 0.511 0.554 0.559 0.382 0.359 0.334 0.278 0.196 0.143 0.131 0.108 0.08 0.08 0.08 0.08 0.084 0.116 0.169 0.183 0.187 0.18 0.173 0.172 0.181 0.201 0.231 0.271 0.32 0.376 0.437 0.5
   悬崖 5
   安全 80
   响应 缓入
@@ -36,13 +67,13 @@
 
 认知弦 线索
   类型 数值 0..100
-  基线 18
+  基线 44.205
   悬崖 8
   安全 75
 
 关系弦 恐惧
   类型 数值 0..1
-  基线 0.28
+  基线 0.772
   悬崖 0.82
   安全 0.15
   对象 海

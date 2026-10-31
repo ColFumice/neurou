@@ -1,6 +1,7 @@
 import type {
   ActionDecl,
   AudioAssetDecl,
+  AudioConfigDecl,
   AxiomDecl,
   BgmDecl,
   ChordDecl,
@@ -12,6 +13,7 @@ import type {
   EndingDecl,
   EntityDecl,
   Expr,
+  FlowProfileDecl,
   ForcingDecl,
   FormDecl,
   FunctionDecl,
@@ -36,7 +38,7 @@ import type {
   TextureAssetDecl,
   WorldDecl,
 } from './ast.js';
-import { SYSTEM_PHASES } from './ast.js';
+import { SYSTEM_PHASES, STRING_KINDS } from './ast.js';
 import { DECL_KEYWORDS, STRING_KEYWORDS, isStringKeyword } from './ast.js';
 import { type DiagnosticBag } from './diagnostics.js';
 import { tokenize, type Token } from './lexer.js';
@@ -268,6 +270,8 @@ class Parser {
     if (kw === '谱') return this.parseSpectrum();
     if (kw === '关系谱') return this.parseMatrix();
     if (kw === '音频资产') return this.parseAudioAsset();
+    if (kw === '音频配置') return this.parseAudioConfig();
+    if (kw === '流场') return this.parseFlowProfile();
     if (kw === '纹理资产') return this.parseTextureAsset();
     if (kw === '配乐') return this.parseBgm();
     if (kw === '系统') return this.parseSystem();
@@ -298,6 +302,77 @@ class Parser {
   }
 
   // ---------- 世界 ----------
+
+  /** v1.21：音频覆盖层声明。 */
+  private parseAudioConfig(): AudioConfigDecl {
+    const start = this.advance();
+    const kindName = this.readName('弦类型');
+    const kind = (STRING_KINDS as readonly string[]).includes(kindName) ? (kindName as StringKind) : null;
+    if (!kind) this.fail(`音频配置的弦类型「${kindName}」不存在。`, this.peek().span, '可用：叙事、视觉、动画、物理、控制、空间、认知、关系。');
+    this.finishLine();
+    const values: Record<string, number> = {};
+    const keys: Record<string, string> = {
+      混响: 'reverb',
+      低通: 'cutoff',
+      共振: 'resonance',
+      驱动: 'drive',
+      LFO速率: 'lfoRate',
+      LFO深度: 'lfoDepth',
+    };
+    if (this.enterBlock('音频配置')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('音频配置字段');
+        const mapped = keys[key];
+        if (!mapped) {
+          this.fail(`音频配置里不认识「${key}」。`, this.peek().span, '可用：混响、低通、共振、驱动、LFO速率、LFO深度。');
+          this.skipToLineEnd();
+          continue;
+        }
+        values[mapped] = this.readNumber(key);
+        this.finishLine();
+      }
+      this.exitBlock();
+    }
+    return { k: 'audioConfig', kind: kind ?? '叙事', values, span: this.spanFrom(start) };
+  }
+
+  /** v1.21：流场覆盖层。每个节点一行 17 个数值。 */
+  private parseFlowProfile(): FlowProfileDecl {
+    const start = this.advance();
+    const kindName = this.readName('弦类型');
+    const kind = (STRING_KINDS as readonly string[]).includes(kindName) ? (kindName as StringKind) : null;
+    if (!kind) this.fail(`流场的弦类型「${kindName}」不存在。`, this.peek().span, '可用：叙事、视觉、动画、物理、控制、空间、认知、关系。');
+    this.finishLine();
+    const nodes: number[][] = [];
+    if (this.enterBlock('流场')) {
+      while (!this.at('dedent') && !this.at('eof')) {
+        if (this.at('newline')) {
+          this.advance();
+          continue;
+        }
+        const key = this.readName('流场字段');
+        if (key !== '节点') {
+          this.fail(`流场里不认识「${key}」。`, this.peek().span, '可用：节点 x y radius tension depth diffusion cutoff resonance attack decay sustain release lfoRate lfoDepth bits sampleRate layer。');
+          this.skipToLineEnd();
+          continue;
+        }
+        const values: number[] = [];
+        while (!this.atLineEnd()) values.push(this.readNumber('节点数值'));
+        if (values.length !== 17) {
+          this.fail(`节点需要 17 个数值，但读到了 ${values.length} 个。`, this.peek().span, '顺序：x y 半径 张力 深度 扩散 截止 共振 攻击 衰减 延持 释放 LFO速率 LFO深度 位深 采样率 层级。');
+        } else {
+          nodes.push(values);
+        }
+        this.finishLine();
+      }
+      this.exitBlock();
+    }
+    return { k: 'flowProfile', kind: kind ?? '叙事', nodes, span: this.spanFrom(start) };
+  }
 
   /** v3.7：音频资产声明。路径校验在编译器（只允许 audio/ 下的一层音频文件）。 */
   private parseAudioAsset(): AudioAssetDecl {
