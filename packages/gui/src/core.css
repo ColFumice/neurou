@@ -1295,3 +1295,42 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
 .world-wizard__foot { display: flex; justify-content: space-between; margin-top: 24px; }
 .world-wizard__foot button { appearance: none; border: 1px solid rgba(255,255,255,.15); border-radius: 999px; background: transparent; color: #eee; padding: 8px 18px; font-size: 11px; cursor: none; }
 .world-wizard__next { border-color: rgba(255,138,60,.45) !important; background: rgba(255,138,60,.16) !important; color: #ffd2aa !important; }
+
+/* v1.24：鼠标静止 1s 十字收拢 */
+.cursor-layer__line { transition: opacity 260ms cubic-bezier(.2,.9,.2,1); }
+.cursor-layer__reticle { transition: transform 260ms cubic-bezier(.2,.9,.2,1); }
+.cursor-layer__arm { transition: transform 260ms cubic-bezier(.2,.9,.2,1), opacity 260ms ease; }
+.cursor-layer__dot { transition: transform 260ms cubic-bezier(.2,.9,.2,1), opacity 260ms ease; }
+.cursor-layer--idle .cursor-layer__line { opacity: 0; }
+.cursor-layer--idle .cursor-layer__reticle { transform: translate(-50%, -50%) scale(.55); }
+.cursor-layer--idle .cursor-layer__arm--u { transform: translateY(6px); opacity: .55; }
+.cursor-layer--idle .cursor-layer__arm--d { transform: translateY(-6px); opacity: .55; }
+.cursor-layer--idle .cursor-layer__arm--l { transform: translateX(6px); opacity: .55; }
+.cursor-layer--idle .cursor-layer__arm--r { transform: translateX(-6px); opacity: .55; }
+.cursor-layer--idle .cursor-layer__dot { transform: scale(.7); opacity: .7; }
+
+/* v1.24：双语字体与全局一致性 */
+button, input, textarea, select { font-family: inherit; }
+html[data-lang="zh"] body { font-weight: 300; }
+html[data-lang="en"] {
+  --serif: "Segoe Script", "Bradley Hand", "Lucida Handwriting", "Brush Script MT", "Apple Chancery", cursive;
+  --sans: "Segoe Script", "Bradley Hand", "Lucida Handwriting", "Brush Script MT", "Apple Chancery", cursive;
+}
+html[data-lang="en"] body,
+html[data-lang="en"] button,
+html[data-lang="en"] input,
+html[data-lang="en"] textarea,
+html[data-lang="en"] select {
+  font-family: var(--sans);
+  font-style: italic;
+  font-weight: 300;
+}
+html[data-lang="en"] .start-title,
+html[data-lang="en"] .start-subtitle,
+html[data-lang="en"] .start-item span,
+html[data-lang="en"] .start-folder__title {
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: .015em;
+}
+.start-screen--settings .start-footer > div:last-child { cursor: none; }

@@ -51,6 +51,8 @@ import { StartScreen, type StartItem } from './StartScreen.js';
 import { FlowField } from './FlowField.js';
 import { ContextDslEditor } from './ContextDslEditor.js';
 import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
+import { SettingsScreen } from './SettingsScreen.js';
+import { START_TEXT, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -199,27 +201,37 @@ const BASE_START_ITEMS: StartItem[] = [
       { id: 'ten-minute', label: '十分钟灯塔', note: '可通关示例', file: 'examples/ten-minute.nro' },
     ],
   },
+  { id: 'settings', label: '设置', note: '语言 / 字体', file: '' },
   { id: 'graph', label: '章节路线', note: 'Shift+F9', file: '' },
   { id: 'help', label: '操作说明', note: '完整流程', file: '' },
 ];
 
-function startItemsFor(localWorlds: LocalWorld[]): StartItem[] {
+function startItemsFor(localWorlds: LocalWorld[], language: Language): StartItem[] {
+  const text = START_TEXT[language];
   return BASE_START_ITEMS.map((item) => {
-    if (item.id !== 'worlds') return item;
-    return {
-      ...item,
-      note: `${1 + localWorlds.length} 个`,
-      children: [
-        ...(item.children ?? []),
-        ...localWorlds.map((world) => ({
-          id: `local-${world.id}`,
-          label: world.name,
-          note: '本机',
-          file: `local:${world.id}`,
-          localId: world.id,
-        })),
-      ],
-    };
+    if (item.id === 'worlds') {
+      return {
+        ...item,
+        label: text.worlds,
+        note: text.worldsNote,
+        children: [
+          { ...(item.children?.[0] ?? { id: 'testbed', label: '', note: '' }), label: text.testbed, note: text.testbedNote },
+          { ...(item.children?.[1] ?? { id: 'ten-minute', label: '', note: '' }), label: text.game, note: text.gameNote },
+          ...localWorlds.map((world) => ({
+            id: `local-${world.id}`,
+            label: world.name,
+            note: text.local,
+            file: `local:${world.id}`,
+            localId: world.id,
+          })),
+        ],
+      };
+    }
+    if (item.id === 'tuner') return { ...item, label: text.tuner, note: text.tunerNote };
+    if (item.id === 'settings') return { ...item, label: text.settings, note: text.settingsNote };
+    if (item.id === 'graph') return { ...item, label: text.graph, note: text.graphNote };
+    if (item.id === 'help') return { ...item, label: text.help, note: text.helpNote };
+    return item;
   });
 }
 
@@ -583,8 +595,13 @@ export function App() {
   const [startOpen, setStartOpen] = useState(!HAS_WORLD_QUERY);
   const [startLeaving, setStartLeaving] = useState(false);
   const [startEntering, setStartEntering] = useState(false);
+  const [language, setLanguage] = useState<Language>(() => loadLanguage());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => {
+    saveLanguage(language);
+  }, [language]);
   const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
-  const startItems = useMemo(() => startItemsFor(localWorlds), [localWorlds]);
+  const startItems = useMemo(() => startItemsFor(localWorlds, language), [localWorlds, language]);
   const [worldWizardOpen, setWorldWizardOpen] = useState(false);
   const importWorldRef = useRef<HTMLInputElement | null>(null);
   const [memoryMode, setMemoryMode] = useState(false);
@@ -1127,7 +1144,10 @@ export function App() {
       setStartLeaving(false);
       if (item.id === 'graph') setChapterGraphOpen(true);
       else if (item.id === 'help') setHelpOpen(true);
-      else if (item.file) window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
+      else if (item.id === 'settings') {
+        setStartOpen(false);
+        setSettingsOpen(true);
+      } else if (item.file) window.location.assign(`?world=${encodeURIComponent(item.file)}&fresh=1`);
     }, 470);
   };
 
@@ -1973,19 +1993,31 @@ export function App() {
           onClose={() => setFlowMode(false)}
         />
       ) : null}
-      {startOpen ? (
+      {startOpen || settingsOpen ? (
         <>
-          <StartScreen
-            items={startItems}
-            onAddWorld={() => setWorldWizardOpen(true)}
-            onRenameWorld={renameLocalWorld}
-            onDeleteWorld={deleteLocalWorld}
-            onExportWorld={exportLocalWorld}
-            onImportWorld={() => importWorldRef.current?.click()}
-            leaving={startLeaving}
-            entering={startEntering}
-            onChoose={chooseStart}
-          />
+          {settingsOpen ? (
+            <SettingsScreen
+              language={language}
+              onLanguage={setLanguage}
+              onClose={() => {
+                setSettingsOpen(false);
+                setStartOpen(true);
+              }}
+            />
+          ) : (
+            <StartScreen
+              items={startItems}
+              language={language}
+              onAddWorld={() => setWorldWizardOpen(true)}
+              onRenameWorld={renameLocalWorld}
+              onDeleteWorld={deleteLocalWorld}
+              onExportWorld={exportLocalWorld}
+              onImportWorld={() => importWorldRef.current?.click()}
+              leaving={startLeaving}
+              entering={startEntering}
+              onChoose={chooseStart}
+            />
+          )}
           <input
             ref={importWorldRef}
             type="file"

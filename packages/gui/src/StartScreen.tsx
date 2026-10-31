@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { START_TEXT, type Language } from './i18n.js';
 
 export interface StartItem {
   id: string;
@@ -17,6 +18,7 @@ export interface StartScreenProps {
   onDeleteWorld?: (item: StartItem) => void;
   onExportWorld?: (item: StartItem) => void;
   onImportWorld?: () => void;
+  language?: Language;
   leaving?: boolean;
   entering?: boolean;
 }
@@ -33,9 +35,11 @@ export function StartScreen({
   onDeleteWorld,
   onExportWorld,
   onImportWorld,
+  language = 'zh',
   leaving = false,
   entering = false,
 }: StartScreenProps): JSX.Element {
+  const text = START_TEXT[language];
   const [selected, setSelected] = useState(0);
   const [folderIndex, setFolderIndex] = useState<number | null>(null);
   const [folderSelected, setFolderSelected] = useState(0);
@@ -170,12 +174,12 @@ export function StartScreen({
           ))}
         </div>
         <div className="start-footer">
-          <div>{inFolder ? '↑/↓ 选择 · ← 返回 · Enter 进入' : '↑/↓ 选择 · → 展开世界 · Esc 进入默认世界'}</div>
-          <div>右侧可直接弹奏弦与持续音</div>
+          <div>{inFolder ? text.footerFolder : text.footerTop}</div>
+          <div>{language === 'en' ? 'right side plays strings' : '右侧可直接弹奏弦与持续音'}</div>
         </div>
       </div>
       <div className="start-stage">
-        <div className="start-stage__hint">弦 / 音乐</div>
+        <div className="start-stage__hint">{text.rightHint}</div>
       </div>
       {folder && children.length > 0 ? (
         <div
