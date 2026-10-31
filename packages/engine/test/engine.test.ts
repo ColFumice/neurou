@@ -115,6 +115,25 @@ describe('Engine facade（v5.2）', () => {
     expect(description.ended).toBe(false);
   });
 
+  it('Host 可直接推进到指定结局', () => {
+    const result = compileText(
+      `世界 结局桥
+
+叙事弦 能量
+  类型 数值 0..100
+  基线 0
+
+结局 稳定: 当 能量 >= 50
+`,
+      'ending-bridge.nro',
+    );
+    if (!result.ok) throw new Error('compile failed');
+    const engine = createEngine(result.ir, { seed: 1 });
+    expect(engine.forceEnding('稳定')).toBe(true);
+    expect(engine.describe().ended).toBe(true);
+    expect(engine.describe().endedName).toBe('稳定');
+    expect(engine.forceEnding('不存在')).toBe(false);
+  });
   it('Host ABI 快照可 JSON roundtrip', () => {
     const result = compileText(WORLD, 'engine-host-abi.nro');
     if (!result.ok) throw new Error('compile failed');

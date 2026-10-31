@@ -421,6 +421,8 @@ export interface GameDecl extends DeclBase {
   /** 达到该分数触发胜利动作。 */
   winScore: number;
   winAction?: string;
+  winEnding?: string;
+  loseEnding?: string;
   description?: string;
 }
 

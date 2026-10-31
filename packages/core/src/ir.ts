@@ -389,6 +389,8 @@ export interface IRGame {
   resultStringId?: string;
   winScore: number;
   winAction?: string;
+  winEnding?: string;
+  loseEnding?: string;
   description?: string;
   span?: Span;
 }

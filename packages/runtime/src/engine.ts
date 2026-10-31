@@ -377,6 +377,19 @@ export class Universe {
    * 于是下一拍邻弦会真的收到这阵涟漪——调律台的手指因此能驱动世界的数据流。
    * 返回实际发生的变化量（已被量程夹住）。
    */
+  /**
+   * v1.38：游戏结果直接推进到某个结局。
+   * 只用于 Host 桥接；普通世界规则仍通过 guard 自动判定结局。
+   */
+  forceEnding(name: string): boolean {
+    const ending = this.endings.find((item) => item.name === name || item.id === name);
+    if (!ending) return false;
+    if (this.state.ended) return this.state.ended.name === ending.name;
+    this.state.ended = { id: ending.id, name: ending.name, tick: this.state.tick };
+    this.log({ tick: this.state.tick, kind: 'ending', id: ending.name });
+    return true;
+  }
+
   inject(id: string, value: RuntimeValue): number {
     const s = this.strings.get(id);
     if (!s) return 0;

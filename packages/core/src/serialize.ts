@@ -507,6 +507,8 @@ function gameBlock(w: Writer, game: IRGame): void {
   w.line(1, `结果弦 ${game.resultString}`);
   w.line(1, `胜利分数 ${numberText(game.winScore)}`);
   if (game.winAction) w.line(1, `胜利动作 ${game.winAction}`);
+  if (game.winEnding) w.line(1, `胜利结局 ${game.winEnding}`);
+  if (game.loseEnding) w.line(1, `失败结局 ${game.loseEnding}`);
   if (game.description) w.line(1, `描述 ${stringText(game.description)}`);
   w.blank();
 }

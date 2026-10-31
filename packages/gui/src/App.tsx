@@ -637,6 +637,8 @@ export function App() {
     module: string;
     winScore: number;
     winAction?: string;
+    winEnding?: string;
+    loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
   const gameToastTimer = useRef<number | null>(null);
@@ -1560,7 +1562,7 @@ export function App() {
         name: lane?.name ?? focusKind,
         module: game?.module ?? '俄罗斯方块',
         winScore: game?.winScore ?? 100,
-        ...(game?.winAction ? { winAction: game.winAction } : {}),
+        ...(game?.winAction ? { winAction: game.winAction } : {}),         ...(game?.winEnding ? { winEnding: game.winEnding } : {}),         ...(game?.loseEnding ? { loseEnding: game.loseEnding } : {}),
       });
       setGamePickerOpen(false);
       setScreen('tetris');
@@ -2536,14 +2538,25 @@ export function App() {
     const value = lane.min + ratio * (lane.max - lane.min);
     onInject(binding.kind, value, true);
     let won = false;
-    if (binding.winAction && result.score >= binding.winScore && universe?.dispatch(binding.winAction)) {
+    let forcedEnding: string | null = null;
+    const reachedWin = result.score >= binding.winScore;
+    if (reachedWin && binding.winAction && universe?.dispatch(binding.winAction)) {
       won = true;
       setVersion((v) => v + 1);
     }
+    if (universe) {
+      if (reachedWin && binding.winEnding && universe.forceEnding(binding.winEnding)) {
+        forcedEnding = binding.winEnding;
+        setVersion((v) => v + 1);
+      } else if (!reachedWin && binding.loseEnding && universe.forceEnding(binding.loseEnding)) {
+        forcedEnding = binding.loseEnding;
+        setVersion((v) => v + 1);
+      }
+    }
     const message =
       language === 'en'
-        ? `Result → ${binding.name}: ${result.score} pts${won ? ` · ${binding.winAction}` : ''}`
-        : `游戏结果已写入「${binding.name}」：${result.score} 分${won ? ` · 触发「${binding.winAction}」` : ''}`;
+        ? `Result → ${binding.name}: ${result.score} pts${won ? ` · ${binding.winAction}` : ''}${forcedEnding ? ` · ending ${forcedEnding}` : ''}`
+        : `游戏结果已写入「${binding.name}」：${result.score} 分${won ? ` · 触发「${binding.winAction}」` : ''}${forcedEnding ? ` · 结局「${forcedEnding}」` : ''}`;
     setGameToast(message);
     if (gameToastTimer.current !== null) window.clearTimeout(gameToastTimer.current);
     gameToastTimer.current = window.setTimeout(() => setGameToast(''), 3200);

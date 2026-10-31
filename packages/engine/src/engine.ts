@@ -230,6 +230,11 @@ export class Engine {
     return this.universe.inject(id, value);
   }
 
+  /** v1.38：游戏结果直接推进结局（Host 桥接）。 */
+  forceEnding(name: string): boolean {
+    return this.universe.forceEnding(name);
+  }
+
   getMatrixPosition(name: string): number | undefined {
     return this.universe.getMatrixPosition(name);
   }

@@ -458,6 +458,16 @@ class Compiler {
           hint: '先声明「动作 名字」，或者删掉「胜利动作」。',
         });
       }
+      if (decl.winEnding && !this.endingDecls.some((item) => item.name === decl.winEnding)) {
+        this.error('NRO2101', `游戏「${decl.name}」的胜利结局「${decl.winEnding}」不存在。`, decl.span, {
+          hint: '先声明「结局 名字: 当 ...」，或者删掉「胜利结局」。',
+        });
+      }
+      if (decl.loseEnding && !this.endingDecls.some((item) => item.name === decl.loseEnding)) {
+        this.error('NRO2101', `游戏「${decl.name}」的失败结局「${decl.loseEnding}」不存在。`, decl.span, {
+          hint: '先声明「结局 名字: 当 ...」，或者删掉「失败结局」。',
+        });
+      }
     }
   }
 
@@ -621,6 +631,8 @@ class Compiler {
       resultString: d.resultString,
       winScore: Number.isFinite(d.winScore) && d.winScore > 0 ? d.winScore : 100,
       ...(d.winAction ? { winAction: d.winAction } : {}),
+      ...(d.winEnding ? { winEnding: d.winEnding } : {}),
+      ...(d.loseEnding ? { loseEnding: d.loseEnding } : {}),
       ...(d.description ? { description: d.description } : {}),
       span: d.span,
     });

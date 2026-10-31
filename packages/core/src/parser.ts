@@ -386,6 +386,8 @@ class Parser {
     let winScore = 100;
     let winAction: string | undefined;
     let description: string | undefined;
+    let winEnding: string | undefined;
+    let loseEnding: string | undefined;
     if (this.enterBlock('游戏')) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -411,11 +413,17 @@ class Parser {
           case '胜利动作':
             winAction = this.readQualifiedName('胜利动作');
             break;
+          case '胜利结局':
+            winEnding = this.readQualifiedName('胜利结局');
+            break;
+          case '失败结局':
+            loseEnding = this.readQualifiedName('失败结局');
+            break;
           case '描述':
             description = this.readText('游戏描述');
             break;
           default:
-            this.fail(`游戏里不认识「${key}」。`, this.peek().span, '可用：模块、结果弦、胜利分数、胜利动作、描述。');
+            this.fail(`游戏里不认识「${key}」。`, this.peek().span, '可用：模块、结果弦、胜利分数、胜利动作、胜利结局、失败结局、描述。');
             this.skipToLineEnd();
             continue;
         }
@@ -423,7 +431,18 @@ class Parser {
       }
       this.exitBlock();
     }
-    return { k: 'game', name, module, resultString, winScore, winAction, description, span: this.spanFrom(start) };
+    return {
+      k: 'game',
+      name,
+      module,
+      resultString,
+      winScore,
+      winAction,
+      winEnding,
+      loseEnding,
+      description,
+      span: this.spanFrom(start),
+    };
   }
 
   /** v3.7：音频资产声明。路径校验在编译器（只允许 audio/ 下的一层音频文件）。 */
