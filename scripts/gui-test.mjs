@@ -2206,6 +2206,33 @@ await flowPage.keyboard.press('BracketRight');
 await flowPage.keyboard.press('Equal');
 await flowPage.waitForTimeout(250);
 check('节点参数键盘编辑', (await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-param')) === '1' && Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-version')) > flowVersionKeyBefore, String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-param')));
+check('流场节点完整 ADSR', (await flowPage.locator('[data-flow-param-name="attack"]').count()) === 1 && (await flowPage.locator('[data-flow-param-name="decay"]').count()) === 1 && (await flowPage.locator('[data-flow-param-name="sustain"]').count()) === 1 && (await flowPage.locator('[data-flow-param-name="release"]').count()) === 1);
+await flowPage.keyboard.down('1');
+await flowPage.waitForTimeout(220);
+check('流场键盘触发节点', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-gates')) >= 1, String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-gates')));
+await flowPage.keyboard.up('1');
+await flowPage.waitForTimeout(180);
+const nodesBeforeCopy = Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes'));
+await flowPage.keyboard.press('c');
+await flowPage.waitForTimeout(220);
+check('节点复制', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')) === nodesBeforeCopy + 1);
+await flowPage.keyboard.press('Delete');
+await flowPage.waitForTimeout(220);
+check('节点删除', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')) === nodesBeforeCopy);
+await flowPage.keyboard.press('PageUp');
+await flowPage.waitForTimeout(220);
+check('节点分层', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-layer')) >= 1);
+const downloadPromise = flowPage.waitForEvent('download');
+await flowPage.locator('.flow-screen__actions button').first().click();
+const download = await downloadPromise;
+check('流场导出 .nrm', download.suggestedFilename().endsWith('.nrm'), download.suggestedFilename());
+await flowPage.locator('[data-testid="flow-import"]').setInputFiles({
+  name: 'acceptance.nrm',
+  mimeType: 'application/json',
+  buffer: Buffer.from(JSON.stringify({ version: 1, nodes: [{ id: 'imported', x: 8, y: 8, radius: 4, layer: 0 }] })),
+});
+await flowPage.waitForTimeout(400);
+check('流场导入 .nrm', Number(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')) === 1, String(await flowPage.locator('[data-testid="flow-screen"]').getAttribute('data-flow-nodes')));
 await flowPage.keyboard.press('Escape');
 await flowPage.waitForTimeout(250);
 check('Esc 退出流场', (await flowApp.getAttribute('data-flow-mode')) === 'false' && (await flowPage.locator('[data-testid="flow-screen"]').count()) === 0);

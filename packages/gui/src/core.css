@@ -1122,3 +1122,24 @@ html, body, #root, .ink-app, button, input, textarea, canvas, a {
 }
 .flow-screen__param--selected { opacity: 1; background: rgba(255,138,60,.14); color: #ffd2aa; }
 .flow-screen__param em { font-style: normal; opacity: .75; }
+
+/* v1.13：流场 ADSR / 侧车 / 节点操作 */
+.flow-screen__node-panel { max-height: calc(100vh - 48px); overflow: auto; }
+.flow-screen__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.1);
+}
+.flow-screen__actions button {
+  flex: 1;
+  appearance: none;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 7px;
+  background: rgba(255,255,255,.05);
+  color: #f0f0ec;
+  font-size: 10px;
+  padding: 6px 8px;
+  cursor: none;
+}

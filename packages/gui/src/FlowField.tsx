@@ -6,7 +6,21 @@ const LEVELS = 9;
 const MAX_NODES = 16;
 const STORAGE_PREFIX = 'neurou.flow.nodes:';
 
-type ParamKey = 'radius' | 'cutoff' | 'resonance' | 'lfoRate' | 'lfoDepth' | 'attack' | 'release' | 'bits';
+type ParamKey =
+  | 'radius'
+  | 'depth'
+  | 'diffusion'
+  | 'cutoff'
+  | 'resonance'
+  | 'attack'
+  | 'decay'
+  | 'sustain'
+  | 'release'
+  | 'lfoRate'
+  | 'lfoDepth'
+  | 'bits'
+  | 'sampleRate'
+  | 'layer';
 
 interface FlowNode {
   id: string;
@@ -14,13 +28,19 @@ interface FlowNode {
   y: number;
   radius: number;
   tension: number;
+  depth: number;
+  diffusion: number;
   cutoff: number;
   resonance: number;
   lfoRate: number;
   lfoDepth: number;
   attack: number;
+  decay: number;
+  sustain: number;
   release: number;
   bits: number;
+  sampleRate: number;
+  layer: number;
 }
 
 interface ParamSpec {
@@ -34,23 +54,31 @@ interface ParamSpec {
 
 const PARAMS: ParamSpec[] = [
   { key: 'radius', label: '声场半径', min: 2, max: 16, step: 0.5, format: (n) => n.radius.toFixed(1) },
+  { key: 'depth', label: '声场深度', min: 0, max: 1, step: 0.05, format: (n) => n.depth.toFixed(2) },
+  { key: 'diffusion', label: '混响扩散', min: 0, max: 1, step: 0.05, format: (n) => n.diffusion.toFixed(2) },
   { key: 'cutoff', label: '滤波截止', min: 200, max: 12000, step: 300, format: (n) => `${Math.round(n.cutoff)}Hz` },
   { key: 'resonance', label: '滤波共振', min: 0.1, max: 12, step: 0.4, format: (n) => n.resonance.toFixed(1) },
   { key: 'attack', label: '包络攻击', min: 0.02, max: 1.2, step: 0.06, format: (n) => `${Math.round(n.attack * 1000)}ms` },
+  { key: 'decay', label: '包络衰减', min: 0.02, max: 1.6, step: 0.06, format: (n) => `${Math.round(n.decay * 1000)}ms` },
+  { key: 'sustain', label: '包络延持', min: 0, max: 1, step: 0.05, format: (n) => n.sustain.toFixed(2) },
   { key: 'release', label: '包络释放', min: 0.04, max: 2.4, step: 0.08, format: (n) => `${Math.round(n.release * 1000)}ms` },
   { key: 'lfoRate', label: 'LFO 速率', min: 0.02, max: 1.2, step: 0.04, format: (n) => n.lfoRate.toFixed(2) },
   { key: 'lfoDepth', label: 'LFO 深度', min: 0, max: 8, step: 0.3, format: (n) => n.lfoDepth.toFixed(1) },
   { key: 'bits', label: 'LoFi 位深', min: 4, max: 16, step: 1, format: (n) => `${Math.round(n.bits)}bit` },
+  { key: 'sampleRate', label: 'LoFi 采样率', min: 4000, max: 44100, step: 2000, format: (n) => `${Math.round(n.sampleRate / 1000)}kHz` },
+  { key: 'layer', label: '层级', min: 0, max: 2, step: 1, format: (n) => `L${Math.round(n.layer)}` },
 ];
 
 const DEFAULT_NODES: FlowNode[] = [
-  { id: 'n1', x: 14, y: 10, radius: 6.4, tension: 0.45, cutoff: 3200, resonance: 2.4, lfoRate: 0.16, lfoDepth: 1.8, attack: 0.18, release: 0.8, bits: 12 },
-  { id: 'n2', x: 32, y: 9, radius: 5.2, tension: 0.62, cutoff: 6200, resonance: 3.1, lfoRate: 0.11, lfoDepth: 1.2, attack: 0.32, release: 1.1, bits: 9 },
-  { id: 'n3', x: 50, y: 12, radius: 7.1, tension: 0.38, cutoff: 1800, resonance: 1.8, lfoRate: 0.2, lfoDepth: 2.4, attack: 0.12, release: 0.6, bits: 14 },
-  { id: 'n4', x: 18, y: 25, radius: 5.8, tension: 0.7, cutoff: 8600, resonance: 4.6, lfoRate: 0.09, lfoDepth: 1.5, attack: 0.42, release: 1.4, bits: 7 },
-  { id: 'n5', x: 36, y: 26, radius: 6.6, tension: 0.52, cutoff: 4200, resonance: 2.8, lfoRate: 0.14, lfoDepth: 2.0, attack: 0.24, release: 0.9, bits: 11 },
-  { id: 'n6', x: 54, y: 25, radius: 5.4, tension: 0.34, cutoff: 2400, resonance: 1.4, lfoRate: 0.18, lfoDepth: 1.3, attack: 0.08, release: 0.5, bits: 16 },
+  { id: 'n1', x: 14, y: 10, radius: 6.4, tension: 0.45, depth: 0.55, diffusion: 0.62, cutoff: 3200, resonance: 2.4, lfoRate: 0.16, lfoDepth: 1.8, attack: 0.18, decay: 0.4, sustain: 0.45, release: 0.8, bits: 12, sampleRate: 32000, layer: 0 },
+  { id: 'n2', x: 32, y: 9, radius: 5.2, tension: 0.62, depth: 0.25, diffusion: 0.32, cutoff: 6200, resonance: 3.1, lfoRate: 0.11, lfoDepth: 1.2, attack: 0.32, decay: 0.55, sustain: 0.6, release: 1.1, bits: 9, sampleRate: 16000, layer: 0 },
+  { id: 'n3', x: 50, y: 12, radius: 7.1, tension: 0.38, depth: 0.42, diffusion: 0.75, cutoff: 1800, resonance: 1.8, lfoRate: 0.2, lfoDepth: 2.4, attack: 0.12, decay: 0.3, sustain: 0.35, release: 0.6, bits: 14, sampleRate: 44100, layer: 0 },
+  { id: 'n4', x: 18, y: 25, radius: 5.8, tension: 0.7, depth: 0.78, diffusion: 0.48, cutoff: 8600, resonance: 4.6, lfoRate: 0.09, lfoDepth: 1.5, attack: 0.42, decay: 0.7, sustain: 0.3, release: 1.4, bits: 7, sampleRate: 12000, layer: 1 },
+  { id: 'n5', x: 36, y: 26, radius: 6.6, tension: 0.52, depth: 0.35, diffusion: 0.58, cutoff: 4200, resonance: 2.8, lfoRate: 0.14, lfoDepth: 2.0, attack: 0.24, decay: 0.45, sustain: 0.55, release: 0.9, bits: 11, sampleRate: 22050, layer: 1 },
+  { id: 'n6', x: 54, y: 25, radius: 5.4, tension: 0.34, depth: 0.62, diffusion: 0.22, cutoff: 2400, resonance: 1.4, lfoRate: 0.18, lfoDepth: 1.3, attack: 0.08, decay: 0.18, sustain: 0.4, release: 0.5, bits: 16, sampleRate: 44100, layer: 1 },
 ];
+
+const KEY_ORDER = '1234567890qwertyuiopasdfghjklzxcvbnm';
 
 function makeNode(x: number, y: number, index: number): FlowNode {
   const base = DEFAULT_NODES[index % DEFAULT_NODES.length]!;
@@ -77,6 +105,12 @@ function loadNodes(key: string): FlowNode[] {
         x: Number(item.x) || 10,
         y: Number(item.y) || 10,
         radius: Math.max(2, Math.min(16, Number(item.radius) || 5)),
+        depth: Math.max(0, Math.min(1, Number(item.depth) || 0.5)),
+        diffusion: Math.max(0, Math.min(1, Number(item.diffusion) || 0.4)),
+        decay: Math.max(0.02, Math.min(1.6, Number(item.decay) || 0.4)),
+        sustain: Math.max(0, Math.min(1, Number(item.sustain) || 0.45)),
+        sampleRate: Math.max(4000, Math.min(44100, Number(item.sampleRate) || 44100)),
+        layer: Math.max(0, Math.min(2, Math.round(Number(item.layer) || 0))),
       } as FlowNode;
     });
   } catch {
@@ -100,8 +134,49 @@ interface FlowFieldProps {
 interface FlowAudio {
   ctx: AudioContext;
   master: GainNode;
-  voices: Map<string, { osc: OscillatorNode; filter: BiquadFilterNode; gain: GainNode; pan: StereoPannerNode }>;
+  voices: Map<
+    string,
+    {
+      osc: OscillatorNode;
+      filter: BiquadFilterNode;
+      down: ScriptProcessorNode;
+      shaper: WaveShaperNode;
+      gain: GainNode;
+      pan: StereoPannerNode;
+      dry: GainNode;
+      send: GainNode;
+      convolver: ConvolverNode;
+      held: number;
+      counter: number;
+      lastBits: number;
+      lastDiffusion: number;
+    }
+  >;
   muted: boolean;
+}
+
+function makeImpulse(ctx: AudioContext, diffusion: number): AudioBuffer {
+  const seconds = 0.25 + diffusion * 1.9;
+  const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let channel = 0; channel < 2; channel += 1) {
+    const data = buffer.getChannelData(channel);
+    for (let i = 0; i < length; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.4 + diffusion * 2);
+    }
+  }
+  return buffer;
+}
+
+function quantizeCurve(bits: number): Float32Array {
+  const size = 1024;
+  const curve = new Float32Array(size);
+  const steps = Math.pow(2, Math.max(2, Math.min(16, Math.round(bits))));
+  for (let i = 0; i < size; i += 1) {
+    const x = (i / (size - 1)) * 2 - 1;
+    curve[i] = Math.round(x * steps) / steps;
+  }
+  return curve;
 }
 
 /**
@@ -115,6 +190,9 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   const paramRef = useRef(0);
   const dragRef = useRef<{ nodeId: string | null; pointerId: number | null }>({ nodeId: null, pointerId: null });
   const audioRef = useRef<FlowAudio | null>(null);
+  const gateRef = useRef(new Map<string, { triggeredAt: number; releasedAt: number; held: boolean; releaseLevel: number }>());
+  const heldKeysRef = useRef(new Map<string, string>());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState(0);
   const [param, setParam] = useState(0);
   const [version, setVersion] = useState(0);
@@ -123,6 +201,137 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   const commit = (): void => {
     saveNodes(worldFile, nodesRef.current);
     setVersion((value) => value + 1);
+  };
+
+  const envelopeOf = (node: FlowNode, now: number): number => {
+    const ms = now;
+    const state = gateRef.current.get(node.id);
+    if (!state) return node.sustain;
+    if (state.held) {
+      const elapsed = Math.max(0, ms - state.triggeredAt) / 1000;
+      if (elapsed < node.attack) return elapsed / Math.max(0.001, node.attack);
+      if (elapsed < node.attack + node.decay) {
+        const progress = (elapsed - node.attack) / Math.max(0.001, node.decay);
+        return 1 - (1 - node.sustain) * progress;
+      }
+      return node.sustain;
+    }
+    const elapsed = Math.max(0, ms - state.releasedAt) / 1000;
+    const level = state.releaseLevel * Math.max(0, 1 - elapsed / Math.max(0.001, node.release));
+    return level;
+  };
+
+  const gateNode = (node: FlowNode): void => {
+    gateRef.current.set(node.id, { triggeredAt: performance.now(), releasedAt: 0, held: true, releaseLevel: 1 });
+    setVersion((value) => value + 1);
+    startAudio();
+    syncAudio();
+  };
+
+  const releaseNode = (node: FlowNode): void => {
+    const state = gateRef.current.get(node.id);
+    const level = envelopeOf(node, performance.now());
+    gateRef.current.set(node.id, { triggeredAt: state?.triggeredAt ?? 0, releasedAt: performance.now(), held: false, releaseLevel: level });
+    setVersion((value) => value + 1);
+  };
+
+  const copySelected = (): void => {
+    const source = nodesRef.current[selectedRef.current];
+    if (!source || nodesRef.current.length >= MAX_NODES) return;
+    const copy: FlowNode = {
+      ...source,
+      id: `n${Date.now().toString(36)}${nodesRef.current.length}`,
+      x: Math.min(COLS - 2, source.x + 1.5),
+      y: Math.min(ROWS - 2, source.y + 1.5),
+    };
+    nodesRef.current = [...nodesRef.current.slice(0, selectedRef.current + 1), copy, ...nodesRef.current.slice(selectedRef.current + 1)];
+    selectedRef.current += 1;
+    setSelected(selectedRef.current);
+    gateNode(copy);
+    commit();
+    syncAudio();
+  };
+
+  const deleteSelected = (): void => {
+    if (nodesRef.current.length <= 1) return;
+    const node = nodesRef.current[selectedRef.current];
+    if (!node) return;
+    removeVoice(node.id);
+    gateRef.current.delete(node.id);
+    nodesRef.current = nodesRef.current.filter((item) => item.id !== node.id);
+    selectedRef.current = Math.min(selectedRef.current, nodesRef.current.length - 1);
+    setSelected(selectedRef.current);
+    commit();
+  };
+
+  const changeLayer = (direction: 1 | -1): void => {
+    const node = nodesRef.current[selectedRef.current];
+    if (!node) return;
+    node.layer = Math.max(0, Math.min(2, Math.round(node.layer) + direction));
+    commit();
+  };
+
+  const exportNodes = (): void => {
+    const payload = { version: 1, world: worldFile, nodes: nodesRef.current };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${worldFile.split('/').pop()?.replace(/\.nro$/, '') ?? 'flow-field'}.nrm`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importNodes = async (file: File): Promise<void> => {
+    try {
+      const parsed = JSON.parse(await file.text()) as { nodes?: unknown };
+      const raw = Array.isArray(parsed.nodes) ? parsed.nodes : Array.isArray(parsed) ? parsed : null;
+      if (!raw) return;
+      nodesRef.current = raw.slice(0, MAX_NODES).map((item, index) => {
+        const node = item as Partial<FlowNode>;
+        return {
+          ...makeNode(Number(node.x) || 10, Number(node.y) || 10, index),
+          ...node,
+          id: typeof node.id === 'string' ? node.id : `n${index}`,
+          radius: Math.max(2, Math.min(16, Number(node.radius) || 5)),
+          depth: Math.max(0, Math.min(1, Number(node.depth) || 0.5)),
+          diffusion: Math.max(0, Math.min(1, Number(node.diffusion) || 0.4)),
+          decay: Math.max(0.02, Math.min(1.6, Number(node.decay) || 0.4)),
+          sustain: Math.max(0, Math.min(1, Number(node.sustain) || 0.45)),
+          sampleRate: Math.max(4000, Math.min(44100, Number(node.sampleRate) || 44100)),
+          layer: Math.max(0, Math.min(2, Math.round(Number(node.layer) || 0))),
+        } as FlowNode;
+      });
+      if (nodesRef.current.length === 0) return;
+      selectedRef.current = 0;
+      setSelected(0);
+      gateRef.current.clear();
+      commit();
+      syncAudio();
+    } catch {
+      /* 非法 .nrm 保持现状 */
+    }
+  };
+
+  const removeVoice = (id: string): void => {
+    const audio = audioRef.current;
+    const voice = audio?.voices.get(id);
+    if (!audio || !voice) return;
+    try {
+      voice.osc.stop();
+      voice.osc.disconnect();
+      voice.filter.disconnect();
+      voice.down.disconnect();
+      voice.shaper.disconnect();
+      voice.gain.disconnect();
+      voice.pan.disconnect();
+      voice.dry.disconnect();
+      voice.send.disconnect();
+      voice.convolver.disconnect();
+    } catch {
+      /* ignore */
+    }
+    audio.voices.delete(id);
   };
 
   const startAudio = (): void => {
@@ -147,16 +356,61 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       if (!audio.voices.has(node.id)) {
         const osc = audio.ctx.createOscillator();
         const filter = audio.ctx.createBiquadFilter();
+        const down = audio.ctx.createScriptProcessor(256, 1, 1);
+        const shaper = audio.ctx.createWaveShaper();
         const gain = audio.ctx.createGain();
         const pan = audio.ctx.createStereoPanner();
+        const dry = audio.ctx.createGain();
+        const send = audio.ctx.createGain();
+        const convolver = audio.ctx.createConvolver();
+        const voice = {
+          osc,
+          filter,
+          down,
+          shaper,
+          gain,
+          pan,
+          dry,
+          send,
+          convolver,
+          held: 0,
+          counter: 0,
+          lastBits: node.bits,
+          lastDiffusion: node.diffusion,
+        };
         osc.type = 'sine';
-        osc.frequency.value = 90 + (node.y / ROWS) * 380;
-        gain.gain.value = 0.012;
+        osc.frequency.value = 90 + (node.y / ROWS) * 420;
+        gain.gain.value = 0.0001;
         filter.type = 'lowpass';
-        pan.pan.value = (node.x / COLS) * 2 - 1;
-        osc.connect(filter).connect(gain).connect(pan).connect(audio.master);
+        shaper.curve = quantizeCurve(node.bits);
+        convolver.buffer = makeImpulse(audio.ctx, node.diffusion);
+        osc.connect(filter);
+        filter.connect(down);
+        down.connect(shaper);
+        shaper.connect(gain);
+        gain.connect(pan);
+        pan.connect(dry);
+        dry.connect(audio.master);
+        pan.connect(send);
+        send.connect(convolver);
+        convolver.connect(audio.master);
         osc.start();
-        audio.voices.set(node.id, { osc, filter, gain, pan });
+        down.onaudioprocess = (event) => {
+          const current = nodesRef.current.find((item) => item.id === node.id);
+          if (!current) return;
+          const input = event.inputBuffer.getChannelData(0);
+          const output = event.outputBuffer.getChannelData(0);
+          const step = Math.max(1, Math.round(audio.ctx.sampleRate / Math.max(1000, current.sampleRate)));
+          for (let i = 0; i < input.length; i += 1) {
+            if (voice.counter <= 0) {
+              voice.held = input[i] ?? 0;
+              voice.counter = step;
+            }
+            voice.counter -= 1;
+            output[i] = voice.held;
+          }
+        };
+        audio.voices.set(node.id, voice);
       }
     }
   };
@@ -168,10 +422,21 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       const voice = audio.voices.get(node.id);
       if (!voice) continue;
       const phase = now * 0.001 * node.lfoRate + node.x * 0.13;
-      voice.filter.frequency.value = node.cutoff;
+      const env = envelopeOf(node, now);
+      voice.filter.frequency.value = Math.max(80, Math.min(18000, node.cutoff + Math.sin(phase) * node.cutoff * 0.18));
       voice.filter.Q.value = node.resonance;
-      voice.pan.pan.value = Math.max(-1, Math.min(1, (node.x / COLS) * 2 - 1 + Math.sin(phase) * 0.12));
-      voice.gain.gain.value = audio.muted ? 0 : 0.008 + node.radius * 0.0015 + Math.sin(phase * 1.7) * 0.003;
+      voice.pan.pan.value = Math.max(-1, Math.min(1, (node.x / COLS) * 2 - 1 + Math.sin(phase) * 0.1));
+      voice.gain.gain.value = audio.muted ? 0 : (0.006 + node.radius * 0.0013) * Math.max(0, env);
+      voice.dry.gain.value = 1 - node.depth * 0.35;
+      voice.send.gain.value = node.depth * 0.55;
+      if (Math.abs(voice.lastBits - node.bits) >= 0.5) {
+        voice.lastBits = node.bits;
+        voice.shaper.curve = quantizeCurve(node.bits);
+      }
+      if (Math.abs(voice.lastDiffusion - node.diffusion) >= 0.02) {
+        voice.lastDiffusion = node.diffusion;
+        voice.convolver.buffer = makeImpulse(audio.ctx, node.diffusion);
+      }
     }
   };
 
@@ -223,10 +488,31 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         setAudioState(audioRef.current?.muted ? 'muted' : 'on');
         return;
       }
+      if (event.code === 'KeyC') {
+        copySelected();
+        return;
+      }
+      if (event.code === 'Delete' || event.code === 'Backspace') {
+        deleteSelected();
+        return;
+      }
+      if (event.code === 'PageUp' || event.code === 'PageDown') {
+        changeLayer(event.code === 'PageUp' ? 1 : -1);
+        return;
+      }
+      if (event.code === 'KeyE') {
+        exportNodes();
+        return;
+      }
+      if (event.code === 'KeyI') {
+        fileInputRef.current?.click();
+        return;
+      }
       if (event.code === 'KeyR') {
         nodesRef.current = DEFAULT_NODES.map((node) => ({ ...node }));
         selectedRef.current = 0;
         setSelected(0);
+        gateRef.current.clear();
         commit();
         return;
       }
@@ -243,6 +529,15 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         commit();
         return;
       }
+      const noteIndex = KEY_ORDER.indexOf(event.key.toLowerCase());
+      if (noteIndex >= 0 && noteIndex < nodesRef.current.length && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const node = nodesRef.current[noteIndex]!;
+        heldKeysRef.current.set(event.code, node.id);
+        gateNode(node);
+        return;
+      }
       const step = event.shiftKey ? 2 : 0.7;
       if (event.code === 'ArrowLeft') moveSelected(-step, 0);
       else if (event.code === 'ArrowRight') moveSelected(step, 0);
@@ -253,7 +548,19 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       event.stopImmediatePropagation();
     };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    const onKeyUp = (event: KeyboardEvent): void => {
+      const nodeId = heldKeysRef.current.get(event.code);
+      if (!nodeId) return;
+      heldKeysRef.current.delete(event.code);
+      if ([...heldKeysRef.current.values()].includes(nodeId)) return;
+      const node = nodesRef.current.find((item) => item.id === nodeId);
+      if (node) releaseNode(node);
+    };
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   }, [worldFile, onClose]);
 
   useEffect(() => {
@@ -279,13 +586,16 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         const phase = t * node.lfoRate * Math.PI * 2 + node.x * 0.08;
         const cx = node.x + Math.sin(phase) * node.lfoDepth;
         const cy = node.y + Math.cos(phase * 0.77 + node.radius) * node.lfoDepth;
-        const dx = (gx - cx) / node.radius;
-        const dy = (gy - cy) / node.radius;
+        const srStep = Math.max(1, Math.round(44100 / Math.max(4000, node.sampleRate)));
+        const qgx = Math.round(gx / srStep) * srStep;
+        const qgy = Math.round(gy / srStep) * srStep;
+        const dx = (qgx - cx) / node.radius;
+        const dy = (qgy - cy) / node.radius;
         const dist = dx * dx + dy * dy;
         if (dist > 6) continue;
-        const attack = Math.max(0.05, node.attack);
-        const env = Math.pow(0.5 + 0.5 * Math.sin(t * (0.4 + attack * 2) + node.y), Math.max(0.2, Math.min(2, node.release)));
-        let contribution = Math.exp(-dist * (0.7 + node.tension * 1.1)) * (0.52 + env * 0.38);
+        const env = Math.max(0.01, envelopeOf(node, now));
+        let contribution = Math.exp(-dist * (0.7 + node.tension * 1.1)) * (0.52 + env * 0.42);
+        contribution *= 0.68 + node.layer * 0.16;
         const ring = 0.85 + 0.15 * Math.sin(Math.sqrt(dist) * (node.cutoff / 1500) + node.resonance);
         contribution *= ring;
         if (node.bits < 11) {
@@ -391,8 +701,11 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
             const key = keyOf(endpoint);
             const found = (byPoint.get(key) ?? []).find((index) => !used[index]);
             if (found === undefined) return;
+            const previous = points[atStart ? 0 : points.length - 1]!;
+            const candidate = segments[found]!;
+            const next = other(candidate, key);
+            if (Math.hypot(next.x - previous.x, next.y - previous.y) > Math.max(cellW, cellH) * 2.2) return;
             used[found] = 1;
-            const next = other(segments[found]!, key);
             if (atStart) points.unshift(next);
             else points.push(next);
             if (keyOf(next) === keyOf(atStart ? points[points.length - 1]! : points[0]!)) return;
@@ -487,6 +800,7 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
   };
 
   const selectedNode = nodesRef.current[selected] ?? nodesRef.current[0];
+  const gateCount = [...gateRef.current.values()].filter((state) => state.held).length;
 
   return (
     <div
@@ -497,7 +811,21 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
       data-flow-selected={selected}
       data-flow-param={param}
       data-flow-audio={audioState}
+      data-flow-gates={gateCount}
+      data-flow-layer={selectedNode?.layer ?? 0}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".nrm,.json"
+        style={{ display: 'none' }}
+        data-testid="flow-import"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importNodes(file);
+          event.target.value = '';
+        }}
+      />
       <canvas
         ref={canvasRef}
         className="flow-screen__canvas"
@@ -549,12 +877,12 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
         onContextMenu={(event) => event.preventDefault()}
       />
       <div className="flow-screen__hud">
-        <strong>流场统一节点 · 声场 / 滤波 / 包络 / LFO / LoFi</strong>
-        <span>拖节点移动 · 滚轮半径 · Tab 切换 · [ ] 选参数 · - = 调整 · 方向键移动 · Enter 新节点 · M 静音 · F10/Esc 返回</span>
+        <strong>流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi</strong>
+        <span>拖节点移动 · 滚轮半径 · 数字/字母键触发节点 · Tab 切换 · [ ] 参数 · - = 调整 · C 复制 · Delete 删除 · PageUp/Down 层级 · E 导出 .nrm · I 导入 · M 静音 · F10/Esc 返回</span>
       </div>
       <div className="flow-screen__node-panel" data-testid="flow-node-panel">
         <div className="flow-screen__node-title">
-          节点 {selected + 1}/{nodesRef.current.length} · {selectedNode ? `${selectedNode.x.toFixed(1)},${selectedNode.y.toFixed(1)}` : '—'}
+          节点 {selected + 1}/{nodesRef.current.length} · L{selectedNode?.layer ?? 0} · {selectedNode ? `${selectedNode.x.toFixed(1)},${selectedNode.y.toFixed(1)}` : '—'}
         </div>
         {PARAMS.map((spec, index) => (
           <div
@@ -566,6 +894,10 @@ export function FlowField({ worldFile, onClose }: FlowFieldProps): JSX.Element {
             <em>{selectedNode ? spec.format(selectedNode) : '—'}</em>
           </div>
         ))}
+        <div className="flow-screen__actions">
+          <button type="button" onClick={exportNodes}>导出 .nrm</button>
+          <button type="button" onClick={() => fileInputRef.current?.click()}>导入 .nrm</button>
+        </div>
       </div>
     </div>
   );
