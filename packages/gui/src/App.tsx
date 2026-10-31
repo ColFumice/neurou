@@ -54,7 +54,7 @@ import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
-import { TetrisScene } from './TetrisScene.js';
+import { TetrisScene, type TetrisResult } from './TetrisScene.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
 import { Metronome } from './Metronome.js';
@@ -626,6 +626,9 @@ export function App() {
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
   const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
+  const [gameBinding, setGameBinding] = useState<{ kind: StringKind; name: string } | null>(null);
+  const [gameToast, setGameToast] = useState('');
+  const gameToastTimer = useRef<number | null>(null);
   const [ruleOpen, setRuleOpen] = useState(false);
   const [dslOpen, setDslOpen] = useState(false);
   const [dslError, setDslError] = useState('');
@@ -1158,7 +1161,10 @@ export function App() {
       setStartLeaving(false);
       if (item.id === 'graph') setChapterGraphOpen(true);
       else if (item.id === 'help') setHelpOpen(true);
-      else if (item.id === 'blocks') setScreen('tetris');
+      else if (item.id === 'blocks') {
+        setGameBinding(null);
+        setScreen('tetris');
+      }
       else if (item.id === 'settings') {
         setStartOpen(false);
         setSettingsOpen(true);
@@ -1529,6 +1535,22 @@ export function App() {
     }
     return universe && worldIR ? collectLanes(universe, worldIR, selected) : [];
   }, [universe, worldIR, version, selected, transition, frame]);
+
+  // v1.33：F6 从当前弦进入绑定的实时小游戏，结束后把分数写回该弦。
+  useEffect(() => {
+    const onGameKey = (event: KeyboardEvent): void => {
+      if (event.code !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (screenRef.current !== 'strings') return;
+      if (startOpen || settingsOpen || helpOpen || ruleOpen || dslOpen || chapterGraphOpen) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const lane = lanes.find((item) => item.kind === focusKind);
+      setGameBinding({ kind: focusKind, name: lane?.name ?? focusKind });
+      setScreen('tetris');
+    };
+    window.addEventListener('keydown', onGameKey, true);
+    return () => window.removeEventListener('keydown', onGameKey, true);
+  }, [chapterGraphOpen, dslOpen, focusKind, helpOpen, lanes, ruleOpen, settingsOpen, startOpen]);
 
   const writeFile = async (text: string): Promise<boolean> => {
     if (isLocalWorldFile(WORLD_FILE)) {
@@ -1998,6 +2020,11 @@ export function App() {
         }`}
       >
         {flowMode ? null : children}
+        {gameToast ? (
+          <div className="game-toast" data-testid="game-result">
+            {gameToast}
+          </div>
+        ) : null}
       </div>
       {flowMode ? (
         <FlowField
@@ -2071,7 +2098,7 @@ export function App() {
             </div>
             <div className="help-section">
               <div className="help-section__title">3 · 编辑元素</div>
-              <div>F7 当前元素 DSL · Shift+F7 规则/动作 · Shift+F9 章节路线。</div>
+              <div>F7 当前元素 DSL · Shift+F7 规则/动作 · Shift+F9 章节路线 · F6 从当前弦进入俄罗斯方块，结果回写该弦。</div>
             </div>
             <div className="help-section">
               <div className="help-section__title">4 · 流场</div>
@@ -2451,6 +2478,23 @@ export function App() {
     universe.inject(lane.id, value);
     setVersion((v) => v + 1);
     if (persist) scheduleSave();
+  };
+
+  const handleGameResult = (result: TetrisResult): void => {
+    const binding = gameBinding;
+    if (!binding) return;
+    const lane = lanes.find((item) => item.kind === binding.kind);
+    if (!lane) return;
+    const ratio = Math.max(0, Math.min(1, result.score / 200));
+    const value = lane.min + ratio * (lane.max - lane.min);
+    onInject(binding.kind, value, true);
+    const message =
+      language === 'en'
+        ? `Result → ${binding.name}: ${result.score} pts`
+        : `游戏结果已写入「${binding.name}」：${result.score} 分`;
+    setGameToast(message);
+    if (gameToastTimer.current !== null) window.clearTimeout(gameToastTimer.current);
+    gameToastTimer.current = window.setTimeout(() => setGameToast(''), 3200);
   };
 
   /** v3.0：可玩层——把动作排队到下一拍；GUI 只发意图，规则由运行时执行。 */
@@ -2833,9 +2877,13 @@ export function App() {
     screen === 'tetris' ? (
       <TetrisScene
         language={language}
+        bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
+        onResult={handleGameResult}
         onExit={() => {
+          const fromWorld = gameBinding !== null;
           setScreen('strings');
-          setStartOpen(true);
+          setStartOpen(!fromWorld);
+          setGameBinding(null);
         }}
       />
     ) : screen === 'matrix' && matrices.length > 0 ? (

@@ -80,12 +80,23 @@ function saveBest(value: number): void {
   }
 }
 
+export interface TetrisResult {
+  score: number;
+  lines: number;
+  level: number;
+  /** over = 游戏结束；exit = 玩家主动返回。 */
+  reason: 'over' | 'exit';
+}
+
 interface TetrisSceneProps {
   language: Language;
+  /** 世界绑定时显示写入目标。 */
+  bindingLabel?: string;
+  onResult?: (result: TetrisResult) => void;
   onExit: () => void;
 }
 
-export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element {
+export function TetrisScene({ language, bindingLabel, onResult, onExit }: TetrisSceneProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<TetrisEngine>(new TetrisEngine(1));
   const loopRef = useRef(new FixedStepLoop<TetrisAction>({ stepMs: 1000 / 60 }));
@@ -93,6 +104,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
   const gravityRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const lastRef = useRef(0);
+  const resultSentRef = useRef(false);
   const [phase, setPhase] = useState<Phase>('ready');
   const [best, setBest] = useState(() => loadBest());
   const text = TEXT[language];
@@ -285,6 +297,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
     loopRef.current = new FixedStepLoop<TetrisAction>({ stepMs: 1000 / 60 });
     gravityRef.current = 0;
     lastRef.current = 0;
+    resultSentRef.current = false;
     setPhaseBoth('playing');
     draw();
   }, [draw, setPhaseBoth]);
@@ -300,14 +313,29 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
     }
   }, [setPhaseBoth]);
 
+  const emitResult = useCallback(
+    (reason: 'over' | 'exit') => {
+      if (resultSentRef.current) return;
+      resultSentRef.current = true;
+      onResult?.({
+        score: engineRef.current.scoreValue,
+        lines: engineRef.current.linesValue,
+        level: engineRef.current.levelValue,
+        reason,
+      });
+    },
+    [onResult],
+  );
+
   const finish = useCallback(() => {
     const score = engineRef.current.scoreValue;
     if (score > loadBest()) {
       saveBest(score);
       setBest(score);
     }
+    emitResult('over');
     setPhaseBoth('over');
-  }, [setPhaseBoth]);
+  }, [emitResult, setPhaseBoth]);
 
   // 固定 60Hz 主循环。
   useEffect(() => {
@@ -349,6 +377,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
       }
       const phaseNow = phaseRef.current;
       if (command === 'exit') {
+        if (phaseNow !== 'ready') emitResult('exit');
         onExit();
         return;
       }
@@ -370,7 +399,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [onExit, startGame, togglePause]);
+  }, [emitResult, onExit, startGame, togglePause]);
 
   // 调试/验收 API。
   useEffect(() => {
@@ -387,7 +416,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
     return () => {
       delete (window as unknown as { __neurouTetris?: typeof api }).__neurouTetris;
     };
-  }, [onExit, startGame, togglePause]);
+  }, [emitResult, onExit, startGame, togglePause]);
 
   useEffect(() => {
     draw();
@@ -408,7 +437,7 @@ export function TetrisScene({ language, onExit }: TetrisSceneProps): JSX.Element
           <div className="tetris-scene__overlay-hint">
             {phase === 'ready' ? text.hint : phase === 'paused' ? text.paused : text.overHint}
           </div>
-          {phase === 'ready' ? <div className="tetris-scene__overlay-note">{text.restart}</div> : null}
+          {phase === 'ready' && bindingLabel ? <div className="tetris-scene__overlay-note">{bindingLabel}</div> : null}\n          {phase === 'ready' ? <div className="tetris-scene__overlay-note">{text.restart}</div> : null}
         </div>
       ) : null}
     </div>
