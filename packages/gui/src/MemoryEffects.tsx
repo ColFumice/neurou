@@ -5,6 +5,7 @@ import { getStringAudio, type KindEffects } from './stringAudio.js';
 interface MemoryEffectsProps {
   open: boolean;
   kind: StringKind;
+  stringName?: string;
   onClose: () => void;
 }
 
@@ -26,7 +27,7 @@ function formatEffect(key: keyof KindEffects, effects: KindEffects): string {
 }
 
 /** F9 记忆模式效果器：按当前弹奏弦类型调混响/低通。 */
-export function MemoryEffects({ open, kind, onClose }: MemoryEffectsProps): JSX.Element | null {
+export function MemoryEffects({ open, kind, stringName, onClose }: MemoryEffectsProps): JSX.Element | null {
   const [effects, setEffects] = useState<KindEffects>(() => getStringAudio().getKindEffects(kind));
   const [selected, setSelected] = useState(0);
 
@@ -69,7 +70,7 @@ export function MemoryEffects({ open, kind, onClose }: MemoryEffectsProps): JSX.
   if (!open) return null;
   return (
     <div className="memory-effects" data-testid="memory-effects" data-effect-kind={kind} data-effect-reverb={effects.reverb} data-effect-cutoff={Math.round(effects.cutoff)}>
-      <div className="memory-effects__title">声场效果器 · {kind}</div>
+      <div className="memory-effects__title">声场效果器 · {kind}{stringName ? ` · ${stringName}` : ''}</div>
       <div className="memory-effects__hint">↑/↓ 选参数 · ←/→ 调整 · F9/Esc 关闭</div>
       {FIELDS.map((field, index) => (
         <div key={field.key} className={`memory-effects__row${index === selected ? ' memory-effects__row--selected' : ''}`}>

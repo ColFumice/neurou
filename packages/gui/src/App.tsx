@@ -52,7 +52,7 @@ import { FlowField } from './FlowField.js';
 import { ContextDslEditor } from './ContextDslEditor.js';
 import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
-import { START_TEXT, loadLanguage, saveLanguage, type Language } from './i18n.js';
+import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -599,6 +599,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     saveLanguage(language);
+    applyLanguageDom(language);
   }, [language]);
   const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
   const startItems = useMemo(() => startItemsFor(localWorlds, language), [localWorlds, language]);
@@ -938,6 +939,12 @@ export function App() {
           setMemoryFxOpen((open) => !open);
           return;
         }
+        if (!event.shiftKey && screenRef.current === 'strings') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setMemoryFxOpen((open) => !open);
+          return;
+        }
         if (!event.shiftKey) return;
         if (!chapterGraphOpen && screenRef.current !== 'strings') return;
         event.preventDefault();
@@ -1173,7 +1180,8 @@ export function App() {
     let readOnly = false;
     let append = false;
     if (flowMode) {
-      label = `流场 · ${focusKind}`;
+      const targetName = worldIR?.strings.find((item) => item.kind === focusKind)?.name;
+      label = `流场 · ${focusKind}${targetName ? ` · ${targetName}` : ''}`;
       const profile = worldIR?.flowProfiles?.find((item) => item.kind === focusKind);
       block = profile ? blockOf(profile.span) : generatedFlow(focusKind);
       append = !profile;
@@ -1388,14 +1396,16 @@ export function App() {
     const onPreviewKey = (event: KeyboardEvent): void => {
       if (flowMode) return;
       if (event.code !== 'Space' || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.repeat) return;
       if (screenRef.current !== 'strings') return;
+      if (STRING_INTERACTIONS[focusKind] === '持续') return;
       event.preventDefault();
       event.stopImmediatePropagation();
       setPreviewOpen((open) => !open);
     };
     window.addEventListener('keydown', onPreviewKey, true);
     return () => window.removeEventListener('keydown', onPreviewKey, true);
-  }, [flowMode]);
+  }, [flowMode, focusKind]);
 
   // v5.10：F8 切换运行场景；只在世界有多个场景时生效。
   useEffect(() => {
@@ -1986,6 +1996,7 @@ export function App() {
           worldFile={WORLD_FILE}
           targetKind={memoryMode ? memoryKind : focusKind}
           kinds={KIND_ORDER}
+          kindLabels={Object.fromEntries((worldIR?.strings ?? []).map((item) => [item.kind, item.name])) as Partial<Record<StringKind, string>>}
           onTargetKindChange={(kind) => {
             setFocusKind(kind);
             if (memoryMode) setMemoryKind(kind);
@@ -2331,7 +2342,12 @@ export function App() {
         </>
       ) : null}
       <MemoryMode active={memoryMode} screen={screen} onExit={() => setMemoryMode(false)} />
-      <MemoryEffects open={memoryMode && memoryFxOpen} kind={memoryMode ? memoryKind : focusKind} onClose={() => setMemoryFxOpen(false)} />
+      <MemoryEffects
+        open={memoryFxOpen && (memoryMode || screen === 'strings')}
+        kind={memoryMode ? memoryKind : focusKind}
+        stringName={worldIR?.strings.find((item) => item.kind === (memoryMode ? memoryKind : focusKind))?.name}
+        onClose={() => setMemoryFxOpen(false)}
+      />
       <Metronome />
       <StringHighlight />
       <CursorLayer />

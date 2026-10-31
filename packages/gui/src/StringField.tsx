@@ -556,6 +556,7 @@ export function StringField({
   const [holding, setHolding] = useState(false);
   const [heldAmplitude, setHeldAmplitude] = useState(0);
   const [heldCount, setHeldCount] = useState(0);
+  const [spaceHeldUi, setSpaceHeldUi] = useState(false);
   const [linkTargetName, setLinkTargetName] = useState('');
 
   // v3.3：粗指针/触控检测（手机底部 16% 长按动作层、触控列表点击）。
@@ -640,6 +641,7 @@ export function StringField({
     let mouseHold: MouseHold | null = null;
     /** v5.36：鼠标持续型弦的声源 id。 */
     let mouseSustainId: number | null = null;
+    let spaceHeldNow = false;
     const keyHolds = new Map<string, KeyboardHold>();
     /** v5.34：持续型弦按住期间的声音 id。 */
     const sustainedKeyVoices = new Map<string, number>();
@@ -2382,6 +2384,12 @@ export function StringField({
 
     function onKeyDown(event: KeyboardEvent): void {
       if (event.repeat) return;
+      if (event.code === 'Space' && modeNow === 'strings' && interactionOf(focusIdx) === '持续') {
+        event.preventDefault();
+        spaceHeldNow = true;
+        setSpaceHeldUi(true);
+        return;
+      }
       // Alt+Enter / Alt+Backspace：增删弦（Alt 组合优先于普通按键，避免被 alt 守卫吞掉）。
       if (event.altKey && !event.ctrlKey && !event.metaKey) {
         if (event.code === 'Enter' || event.code === 'Backspace') {
@@ -2528,8 +2536,10 @@ export function StringField({
             ...sustainedKeys.map((cell) => Math.abs(cell.cy - baseline)),
           );
           const amp = clamp(rawDistance / maxKeyDistance, 0, 1);
-          const waveBands = sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
-          commitWaveform(waveBands);
+          const waveBands = spaceHeldNow
+            ? sustainedWaves.getFor(laneId, kind)
+            : sustainedWaves.editAtString(laneId, kind, clamp(key.cx / LOGICAL_W, 0, 1), amp, direction);
+          if (!spaceHeldNow) commitWaveform(waveBands);
           const id = audio.startSustainedSpectrum(
             sustainedWaves.getFor(laneId, kind),
             clamp(key.cx / LOGICAL_W, 0, 1),
@@ -2547,6 +2557,11 @@ export function StringField({
     }
 
     function onKeyUp(event: KeyboardEvent): void {
+      if (event.code === 'Space') {
+        spaceHeldNow = false;
+        setSpaceHeldUi(false);
+        return;
+      }
       const session = keyHolds.get(event.code);
       if (!session) return;
       keyHolds.delete(event.code);
@@ -3078,6 +3093,7 @@ export function StringField({
       data-holding={holding ? 'true' : 'false'}
       data-held-amplitude={heldAmplitude.toFixed(1)}
       data-held-count={heldCount}
+      data-space-hold={spaceHeldUi ? 'true' : 'false'}
       data-link-target={linkTargetName}
       data-focus-id={focusLane?.id ?? ''}
       data-resting={resting ? 'true' : 'false'}

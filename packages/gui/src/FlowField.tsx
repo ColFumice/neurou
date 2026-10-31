@@ -133,6 +133,7 @@ interface FlowFieldProps {
   worldFile: string;
   targetKind?: StringKind;
   kinds?: readonly StringKind[];
+  kindLabels?: Partial<Record<StringKind, string>>;
   onTargetKindChange?: (kind: StringKind) => void;
   onClose: () => void;
 }
@@ -189,7 +190,7 @@ function quantizeCurve(bits: number): Float32Array {
  * 流场统一模型：一个 FlowNode = 声场 + 滤波 + 包络 + LFO + LoFi。
  * 多个节点通过标量场融合成连续闭环。
  */
-export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
+export function FlowField({ worldFile, targetKind, kinds, kindLabels, onTargetKindChange, onClose }: FlowFieldProps): JSX.Element {
   const storageKey = targetKind ? `${worldFile}:${targetKind}` : worldFile;
   const keyFor = (kind?: StringKind): string => (kind ? `${worldFile}:${kind}` : worldFile);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1084,7 +1085,7 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
         onContextMenu={(event) => event.preventDefault()}
       />
       <div className="flow-screen__hud">
-        <strong>{targetKind ? `流场 · ${targetKind} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
+        <strong>{targetKind ? `流场 · ${targetKind}${kindLabels?.[targetKind] ? ` · ${kindLabels[targetKind]}` : ''} 音色目标` : '流场统一节点 · 声场 / 滤波 / ADSR / LFO / LoFi'}</strong>
         <span>键盘沿用弦界面映射实时试听 · Ctrl+←/→ 切换音色目标 · 拖节点 · Tab 切节点 · [ ] 参数 · - = 调整 · Ctrl+C 复制 · Delete 删除 · PageUp/Down 层级 · Ctrl+E 导出 · Ctrl+I 导入 · Ctrl+M 静音 · Ctrl+S 保存 · Ctrl+R 重置 · F10/Esc 返回</span>
       </div>
       <div className="flow-screen__node-panel" data-testid="flow-node-panel">
@@ -1101,7 +1102,7 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
                 data-flow-target-kind={kind}
                 onClick={() => onTargetKindChange?.(kind)}
               >
-                {kind}
+                {kindLabels?.[kind] ?? kind}
               </button>
             ))}
           </div>
