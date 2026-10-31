@@ -102,6 +102,7 @@ interface RunSave {
   slot: number;
   tick: number;
   ended: boolean;
+  games?: Record<string, unknown>;
   state: WorldState;
 }
 
@@ -200,6 +201,29 @@ const GAME_SAVE_PREFIX = 'neurou.game.snapshot:';
 
 function gameSaveKey(worldFile: string, binding: { kind: string; module: string }): string {
   return `${GAME_SAVE_PREFIX}${worldFile}:${binding.kind}:${binding.module}`;
+}
+
+function collectGameSaves(worldFile: string): Record<string, unknown> {
+  const prefix = `${GAME_SAVE_PREFIX}${worldFile}:`;
+  const result: Record<string, unknown> = {};
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key || !key.startsWith(prefix)) continue;
+      const raw = window.localStorage.getItem(key);
+      if (raw) result[key.slice(prefix.length)] = JSON.parse(raw) as unknown;
+    }
+  } catch {
+    /* ignore */
+  }
+  return result;
+}
+
+function restoreGameSaves(worldFile: string, games: Record<string, unknown> | undefined): void {
+  if (!games) return;
+  for (const [suffix, data] of Object.entries(games)) {
+    writeGameSave(`${GAME_SAVE_PREFIX}${worldFile}:${suffix}`, data);
+  }
 }
 
 function readGameSave(key: string): unknown {
@@ -754,6 +778,7 @@ export function App() {
         if (saved) {
           try {
             nextUniverse.restore(saved.state);
+            restoreGameSaves(WORLD_FILE, saved.games);
             setResumed(true);
             setSavedTick(saved.tick);
           } catch {
@@ -835,6 +860,7 @@ export function App() {
           tick: universe.state.tick,
           ended: universe.state.ended !== null,
           state: universe.snapshot(),
+          games: collectGameSaves(WORLD_FILE),
         };
         window.localStorage.setItem(runSaveKey(WORLD_FILE, INITIAL_SEED, RUN_SLOT), JSON.stringify(payload));
         setSavedTick(payload.tick);
@@ -2568,6 +2594,15 @@ export function App() {
   const handleGameSave = (data: unknown | null): void => {
     if (!gameBinding) return;
     writeGameSave(gameSaveKey(WORLD_FILE, gameBinding), data);
+    const run = readRunSave(WORLD_FILE, INITIAL_SEED, RUN_SLOT);
+    if (run) {
+      run.games = collectGameSaves(WORLD_FILE);
+      try {
+        window.localStorage.setItem(runSaveKey(WORLD_FILE, INITIAL_SEED, RUN_SLOT), JSON.stringify(run));
+      } catch {
+        /* ignore */
+      }
+    }
   };
 
   const handleGameResult = (result: GameResult): void => {

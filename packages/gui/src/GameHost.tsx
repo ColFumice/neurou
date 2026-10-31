@@ -46,6 +46,7 @@ interface GameHostProps<S, C> {
   onExit: () => void;
   commandFor: (code: string, repeat: boolean) => HostInput<C> | null;
   draw: (ctx: CanvasRenderingContext2D, state: S, viewport: HostViewport, phase: HostPhase, best: number) => void;
+  debugSnapshot?: (state: S) => unknown;
 }
 
 function loadBest(key?: string): number {
@@ -86,6 +87,7 @@ export function GameHost<S, C>({
   onExit,
   commandFor,
   draw,
+  debugSnapshot,
 }: GameHostProps<S, C>): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sessionRef = useRef(new GameSession(module, 1));
@@ -220,7 +222,7 @@ export function GameHost<S, C>({
 
   useEffect(() => {
     const api = {
-      snapshot: () => sessionRef.current.state,
+      snapshot: () => (debugSnapshot ? debugSnapshot(sessionRef.current.state) : sessionRef.current.state),
       phase: () => phaseRef.current,
       start: startGame,
       pause: togglePause,
@@ -232,7 +234,7 @@ export function GameHost<S, C>({
     return () => {
       delete (window as unknown as Record<string, unknown>)[debugKey];
     };
-  }, [debugKey, leaveToWorld, startGame, togglePause]);
+  }, [debugKey, debugSnapshot, leaveToWorld, startGame, togglePause]);
 
   useEffect(() => {
     paint();
