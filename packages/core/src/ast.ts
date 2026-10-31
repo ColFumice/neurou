@@ -428,7 +428,7 @@ export interface GameDecl extends DeclBase {
   description?: string;
 }
 
-export const GAME_MODULES = ['俄罗斯方块', '贪吃蛇'] as const;
+export const GAME_MODULES = ['俄罗斯方块', '贪吃蛇', '乒乓'] as const;
 
 export type Decl =
   | WorldDecl

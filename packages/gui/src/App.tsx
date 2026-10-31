@@ -57,6 +57,7 @@ import { CursorLayer } from './CursorLayer.js';
 import { TetrisScene } from './TetrisScene.js';
 import { SnakeScene } from './SnakeScene.js';
 import { GamePicker } from './GamePicker.js';
+import { PongScene } from './PongScene.js';
 import { selectGameForFocus, type GameResult } from './gameSdk.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -2999,6 +3000,20 @@ export function App() {
             setGameBinding(null);
           }}
         />
+      ) : gameBinding?.module === '乒乓' ? (
+        <PongScene
+          language={language}
+          resume={gameResume ?? undefined}
+          onSave={handleGameSave}
+          onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
+          bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
+          onResult={handleGameResult}
+          onExit={() => {
+            setScreen('strings');
+            setStartOpen(!gameFromWorldRef.current);
+            setGameBinding(null);
+          }}
+        />
       ) : (
         <TetrisScene
           language={language}
@@ -3008,7 +3023,6 @@ export function App() {
           bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
           onResult={handleGameResult}
           onExit={() => {
-            const fromWorld = gameBinding !== null;
             setScreen('strings');
             setStartOpen(!gameFromWorldRef.current);
             setGameBinding(null);
