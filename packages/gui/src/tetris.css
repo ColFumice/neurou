@@ -1,0 +1,57 @@
+/* 阶段 4/5：俄罗斯方块棋盘场景 */
+.tetris-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: #0a0b0d;
+  overflow: hidden;
+  color: #fff4e2;
+  font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+}
+
+.tetris-scene__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tetris-scene__overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: min(420px, 80vw);
+  padding: 30px 38px;
+  text-align: center;
+  background: rgba(8, 9, 11, 0.78);
+  border: 1px solid rgba(255, 236, 205, 0.14);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+
+.tetris-scene__overlay-kicker,
+.tetris-scene__overlay-note {
+  font: 300 10px/1.8 ui-monospace, monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 240, 220, 0.35);
+}
+
+.tetris-scene__overlay-title {
+  margin: 8px 0 10px;
+  font-size: clamp(22px, 3.2vw, 38px);
+  font-weight: 300;
+  letter-spacing: 0.06em;
+}
+
+.tetris-scene__overlay-hint {
+  font-size: 12px;
+  color: rgba(255, 240, 220, 0.72);
+}
+
+html[data-lang='en'] .tetris-scene {
+  font-family: 'Segoe Script', 'Bradley Hand', 'Lucida Handwriting', cursive;
+  font-style: italic;
+}

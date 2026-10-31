@@ -54,6 +54,7 @@ import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { CursorLayer } from './CursorLayer.js';
+import { TetrisScene } from './TetrisScene.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
 import { Metronome } from './Metronome.js';
@@ -204,6 +205,7 @@ const BASE_START_ITEMS: StartItem[] = [
   { id: 'settings', label: '设置', note: '语言 / 字体', file: '' },
   { id: 'graph', label: '章节路线', note: 'Shift+F9', file: '' },
   { id: 'help', label: '操作说明', note: '完整流程', file: '' },
+  { id: 'blocks', label: '俄罗斯方块', note: '实时 · 60Hz', file: '' },
 ];
 
 function startItemsFor(localWorlds: LocalWorld[], language: Language): StartItem[] {
@@ -231,6 +233,7 @@ function startItemsFor(localWorlds: LocalWorld[], language: Language): StartItem
     if (item.id === 'settings') return { ...item, label: text.settings, note: text.settingsNote };
     if (item.id === 'graph') return { ...item, label: text.graph, note: text.graphNote };
     if (item.id === 'help') return { ...item, label: text.help, note: text.helpNote };
+    if (item.id === 'blocks') return { ...item, label: text.blocks, note: text.blocksNote };
     return item;
   });
 }
@@ -622,7 +625,7 @@ export function App() {
   const [stringAdds, setStringAdds] = useState(0);
   const [stringRemoves, setStringRemoves] = useState(0);
   /** 谱模式（v1.9）：'strings' 八弦 / 'spectrum' 谱编辑 / 'matrix' 关系谱。 */
-  const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix'>('strings');
+  const [screen, setScreen] = useState<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
   const [ruleOpen, setRuleOpen] = useState(false);
   const [dslOpen, setDslOpen] = useState(false);
   const [dslError, setDslError] = useState('');
@@ -657,7 +660,7 @@ export function App() {
   const [matrixCurveAdds, setMatrixCurveAdds] = useState(0);
   const [matrixCurveRemoves, setMatrixCurveRemoves] = useState(0);
   const [matrixTimingEdits, setMatrixTimingEdits] = useState(0);
-  const screenRef = useRef<'strings' | 'spectrum' | 'matrix'>('strings');
+  const screenRef = useRef<'strings' | 'spectrum' | 'matrix' | 'tetris'>('strings');
   screenRef.current = screen;
   const [lastCoupling, setLastCoupling] = useState<{ from: string; to: string; strength: number } | null>(null);
   /** 撤销/重做的缓动状态。 */
@@ -1155,6 +1158,7 @@ export function App() {
       setStartLeaving(false);
       if (item.id === 'graph') setChapterGraphOpen(true);
       else if (item.id === 'help') setHelpOpen(true);
+      else if (item.id === 'blocks') setScreen('tetris');
       else if (item.id === 'settings') {
         setStartOpen(false);
         setSettingsOpen(true);
@@ -2826,7 +2830,15 @@ export function App() {
   };
 
   return shell(
-    screen === 'matrix' && matrices.length > 0 ? (
+    screen === 'tetris' ? (
+      <TetrisScene
+        language={language}
+        onExit={() => {
+          setScreen('strings');
+          setStartOpen(true);
+        }}
+      />
+    ) : screen === 'matrix' && matrices.length > 0 ? (
       <Suspense fallback={null}>
       <MatrixField
         matrices={matrices}
