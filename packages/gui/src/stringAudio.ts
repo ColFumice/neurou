@@ -17,14 +17,36 @@ export interface KindEffects {
   reverb: number;
   /** 200..12000Hz 低通。 */
   cutoff: number;
+  /** 0.1..12，滤波共振。 */
+  resonance: number;
+  /** 0..1，LoFi/失真驱动。 */
+  drive: number;
+  /** 0..1.2Hz，滤波 LFO。 */
+  lfoRate: number;
+  /** 0..4000Hz，LFO 深度。 */
+  lfoDepth: number;
 }
 
 interface KindBus {
   input: GainNode;
   filter: BiquadFilterNode;
+  shaper: WaveShaperNode;
+  lfo: OscillatorNode;
+  lfoGain: GainNode;
   dry: GainNode;
   wet: GainNode;
   convolver: ConvolverNode;
+}
+
+function driveCurve(drive: number): Float32Array {
+  const size = 1024;
+  const curve = new Float32Array(size);
+  const amount = drive * 24;
+  for (let i = 0; i < size; i += 1) {
+    const x = (i / (size - 1)) * 2 - 1;
+    curve[i] = amount < 0.01 ? x : Math.tanh(x * amount) / Math.tanh(amount);
+  }
+  return curve;
 }
 
 /** v3.6：master 基础增益；有效增益 = 0.4 × volume（muted 时 0）。 */
@@ -214,7 +236,7 @@ export class StringAudioEngine {
   }
 
   getKindEffects(kind: StringKind): KindEffects {
-    return this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000 };
+    return this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000, resonance: 1, drive: 0, lfoRate: 0, lfoDepth: 0 };
   }
 
   /** F9：调整当前弦类型的效果器总线。 */
@@ -223,14 +245,22 @@ export class StringAudioEngine {
     const next: KindEffects = {
       reverb: Math.max(0, Math.min(1, patch.reverb ?? current.reverb)),
       cutoff: Math.max(200, Math.min(12000, patch.cutoff ?? current.cutoff)),
+      resonance: Math.max(0.1, Math.min(12, patch.resonance ?? current.resonance)),
+      drive: Math.max(0, Math.min(1, patch.drive ?? current.drive)),
+      lfoRate: Math.max(0, Math.min(1.2, patch.lfoRate ?? current.lfoRate)),
+      lfoDepth: Math.max(0, Math.min(4000, patch.lfoDepth ?? current.lfoDepth)),
     };
     this.kindEffects.set(kind, next);
     const bus = this.kindBuses.get(kind);
     if (bus) {
       const now = this.ctx?.currentTime ?? 0;
-      bus.dry.gain.setTargetAtTime(1 - next.reverb * 0.55, now, 0.03);
-      bus.wet.gain.setTargetAtTime(next.reverb * 0.7, now, 0.03);
+      bus.dry.gain.setTargetAtTime(1 - next.reverb * 0.65, now, 0.03);
+      bus.wet.gain.setTargetAtTime(next.reverb * 1.05, now, 0.03);
       bus.filter.frequency.setTargetAtTime(next.cutoff, now, 0.03);
+      bus.filter.Q.setTargetAtTime(next.resonance, now, 0.03);
+      bus.shaper.curve = driveCurve(next.drive);
+      bus.lfo.frequency.setTargetAtTime(next.lfoRate, now, 0.05);
+      bus.lfoGain.gain.setTargetAtTime(next.lfoDepth, now, 0.05);
     }
     return next;
   }
@@ -253,18 +283,30 @@ export class StringAudioEngine {
       const input = ctx.createGain();
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
+      filter.Q.value = 1;
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = driveCurve(0);
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.type = 'sine';
+      lfo.frequency.value = 0;
+      lfoGain.gain.value = 0;
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+      lfo.start();
       const dry = ctx.createGain();
       const wet = ctx.createGain();
       const convolver = ctx.createConvolver();
       convolver.buffer = impulse;
       input.connect(filter);
-      filter.connect(dry);
-      filter.connect(convolver);
+      filter.connect(shaper);
+      shaper.connect(dry);
+      shaper.connect(convolver);
       convolver.connect(wet);
       dry.connect(master);
       wet.connect(master);
-      this.kindBuses.set(kind, { input, filter, dry, wet, convolver });
-      this.setKindEffects(kind, this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000 });
+      this.kindBuses.set(kind, { input, filter, shaper, lfo, lfoGain, dry, wet, convolver });
+      this.setKindEffects(kind, this.kindEffects.get(kind) ?? { reverb: 0.16, cutoff: 9000, resonance: 1, drive: 0, lfoRate: 0, lfoDepth: 0 });
     }
   }
 

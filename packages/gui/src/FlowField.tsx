@@ -203,6 +203,7 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
   const sustainedVoicesRef = useRef(new Map<string, number>());
   const stringKeyVoicesRef = useRef(new Map<string, number>());
   const previousTargetRef = useRef(targetKind);
+  const fixedWavesRef = useRef(new Map<StringKind, { bands: number[]; smooth: boolean; loop: boolean }>());
   const keyLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, false);
   const sustainLayout = layoutKeyboard(LOGICAL_W, LOGICAL_H, true);
   const heldKeysRef = useRef(new Map<string, string>());
@@ -213,17 +214,37 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
   const [audioState, setAudioState] = useState('off');
   const [audition, setAudition] = useState('');
 
+  const fixedWaveFor = (kind: StringKind): { bands: number[]; smooth: boolean; loop: boolean } => {
+    const existing = fixedWavesRef.current.get(kind);
+    if (existing) return existing;
+    const timbre = getStringAudio().getKindTimbre(kind);
+    const fixed = {
+      bands: timbre?.bands ? [...timbre.bands] : [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3],
+      smooth: timbre?.smooth ?? true,
+      loop: timbre?.loop ?? true,
+    };
+    fixedWavesRef.current.set(kind, fixed);
+    return fixed;
+  };
+
+  const applyNodeEffects = (node: FlowNode): void => {
+    if (!targetKind) return;
+    const bitDrive = 1 - Math.max(0, Math.min(1, (node.bits - 4) / 12));
+    const rateDrive = 1 - Math.max(0, Math.min(1, (node.sampleRate - 4000) / 40100));
+    getStringAudio().setKindEffects(targetKind, {
+      reverb: node.depth,
+      cutoff: node.cutoff,
+      resonance: node.resonance,
+      drive: Math.max(0, Math.min(1, bitDrive * 0.78 + rateDrive * 0.22)),
+      lfoRate: node.lfoRate,
+      lfoDepth: node.lfoDepth * 140,
+    });
+  };
+
   const commit = (): void => {
     saveNodes(storageKey, nodesRef.current);
-    if (targetKind) {
-      const node = nodesRef.current[selectedRef.current];
-      if (node) {
-        getStringAudio().setKindEffects(targetKind, {
-          reverb: node.depth,
-          cutoff: node.cutoff,
-        });
-      }
-    }
+    const node = nodesRef.current[selectedRef.current];
+    if (node) applyNodeEffects(node);
     setVersion((value) => value + 1);
   };
 
@@ -243,9 +264,8 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
     const x = cell.cx / LOGICAL_W;
     const y = 1 - cell.cy / LOGICAL_H;
     if (sustained) {
-      const timbre = audio.getKindTimbre(targetKind);
-      const bands = timbre?.bands ?? [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3];
-      const voiceId = audio.startSustainedSpectrum(bands, x, y, timbre?.smooth ?? true, timbre?.loop ?? true, 0.72);
+      const fixed = fixedWaveFor(targetKind);
+      const voiceId = audio.startSustainedSpectrum(fixed.bands, x, y, fixed.smooth, fixed.loop, 0.72);
       stringKeyVoicesRef.current.set(code, voiceId);
     } else {
       audio.pluck(targetKind, x, y, 0.82, 1);
@@ -263,11 +283,13 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
     gateRef.current.clear();
     nodesRef.current = loadNodes(keyFor(targetKind));
     previousTargetRef.current = targetKind;
+    fixedWavesRef.current.clear();
+    if (targetKind) fixedWaveFor(targetKind);
     selectedRef.current = 0;
     setSelected(0);
     setVersion((value) => value + 1);
     const first = nodesRef.current[0];
-    if (targetKind && first) getStringAudio().setKindEffects(targetKind, { reverb: first.depth, cutoff: first.cutoff });
+    if (targetKind && first) applyNodeEffects(first);
   }, [targetKind]);
 
   const envelopeOf = (node: FlowNode, now: number): number => {
@@ -298,16 +320,15 @@ export function FlowField({ worldFile, targetKind, kinds, onTargetKindChange, on
     });
     if (targetKind) {
       const audio = getStringAudio();
-      audio.setKindEffects(targetKind, { reverb: node.depth, cutoff: node.cutoff });
+      applyNodeEffects(node);
       if (STRING_INTERACTIONS[targetKind] === '持续') {
-        const timbre = audio.getKindTimbre(targetKind);
-        const bands = timbre?.bands ?? [0.22, 0.34, 0.52, 0.7, 0.84, 0.66, 0.46, 0.3];
+        const fixed = fixedWaveFor(targetKind);
         const voiceId = audio.startSustainedSpectrum(
-          bands,
+          fixed.bands,
           node.x / COLS,
           1 - node.y / ROWS,
-          timbre?.smooth ?? true,
-          timbre?.loop ?? true,
+          fixed.smooth,
+          fixed.loop,
           0.72,
         );
         sustainedVoicesRef.current.set(node.id, voiceId);

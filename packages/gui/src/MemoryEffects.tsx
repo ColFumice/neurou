@@ -11,7 +11,19 @@ interface MemoryEffectsProps {
 const FIELDS: Array<{ key: keyof KindEffects; label: string; step: number; min: number; max: number }> = [
   { key: 'reverb', label: '混响', step: 0.05, min: 0, max: 1 },
   { key: 'cutoff', label: '低通', step: 400, min: 200, max: 12000 },
+  { key: 'resonance', label: '共振', step: 0.4, min: 0.1, max: 12 },
+  { key: 'drive', label: '驱动', step: 0.05, min: 0, max: 1 },
+  { key: 'lfoRate', label: 'LFO 速率', step: 0.04, min: 0, max: 1.2 },
+  { key: 'lfoDepth', label: 'LFO 深度', step: 100, min: 0, max: 4000 },
 ];
+
+function formatEffect(key: keyof KindEffects, effects: KindEffects): string {
+  if (key === 'cutoff') return `${Math.round(effects.cutoff)} Hz`;
+  if (key === 'resonance') return effects.resonance.toFixed(1);
+  if (key === 'lfoDepth') return `${Math.round(effects.lfoDepth)} Hz`;
+  if (key === 'lfoRate') return effects.lfoRate.toFixed(2);
+  return effects[key].toFixed(2);
+}
 
 /** F9 记忆模式效果器：按当前弹奏弦类型调混响/低通。 */
 export function MemoryEffects({ open, kind, onClose }: MemoryEffectsProps): JSX.Element | null {
@@ -62,7 +74,7 @@ export function MemoryEffects({ open, kind, onClose }: MemoryEffectsProps): JSX.
       {FIELDS.map((field, index) => (
         <div key={field.key} className={`memory-effects__row${index === selected ? ' memory-effects__row--selected' : ''}`}>
           <span>{field.label}</span>
-          <em>{field.key === 'cutoff' ? `${Math.round(effects.cutoff)} Hz` : effects.reverb.toFixed(2)}</em>
+          <em>{formatEffect(field.key, effects)}</em>
         </div>
       ))}
     </div>
