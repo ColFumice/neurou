@@ -216,14 +216,40 @@ export interface GameModuleInfo {
   /** 与 `游戏 模块` 字段对齐。 */
   moduleName: string;
   title: { zh: string; en: string };
+  description: { zh: string; en: string };
+  controls: { zh: string; en: string };
 }
 
 /** v1.35：已注册的游戏模块；`游戏 模块 名字` 必须命中这里。 */
 export const GAME_MODULES: readonly GameModuleInfo[] = [
-  { id: 'tetris', moduleName: '俄罗斯方块', title: TETRIS_MODULE.title },
-  { id: 'snake', moduleName: '贪吃蛇', title: SNAKE_MODULE.title },
-  { id: 'pong', moduleName: '乒乓', title: PONG_MODULE.title },
-  { id: 'breakout', moduleName: '打砖块', title: BREAKOUT_MODULE.title },
+  {
+    id: 'tetris',
+    moduleName: '俄罗斯方块',
+    title: TETRIS_MODULE.title,
+    description: { zh: '七种方块、消行与计分。', en: 'Seven pieces, line clears, score.' },
+    controls: { zh: '← → 移动 · ↑ 旋转 · ↓ 软降 · Space 硬降', en: '← → move · ↑ rotate · ↓ soft · Space hard' },
+  },
+  {
+    id: 'snake',
+    moduleName: '贪吃蛇',
+    title: SNAKE_MODULE.title,
+    description: { zh: '转向吃食物，撞墙或撞自己结束。', en: 'Eat, avoid walls and yourself.' },
+    controls: { zh: '方向键 / WASD 转向', en: 'Arrows / WASD' },
+  },
+  {
+    id: 'pong',
+    moduleName: '乒乓',
+    title: PONG_MODULE.title,
+    description: { zh: '上下移动球拍，先到 5 分获胜。', en: 'Move the paddle, first to five.' },
+    controls: { zh: '↑/↓ 或 W/S 移动球拍', en: '↑/↓ or W/S' },
+  },
+  {
+    id: 'breakout',
+    moduleName: '打砖块',
+    title: BREAKOUT_MODULE.title,
+    description: { zh: '左右移动挡板，消完砖块。', en: 'Move the paddle, clear all bricks.' },
+    controls: { zh: '← → 移动挡板', en: '← → paddle' },
+  },
 ];
 
 export function gameModuleForName(name: string): GameModuleInfo | undefined {

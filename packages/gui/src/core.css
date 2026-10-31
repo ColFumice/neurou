@@ -1459,3 +1459,25 @@ html[data-lang='en'] .game-picker { font-family: 'Segoe Script', 'Bradley Hand',
   border-color: rgba(255, 160, 90, 0.55);
   background: rgba(255, 148, 72, 0.06);
 }
+
+/* v1.44：游戏内帮助层 */
+.game-help {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 70;
+  width: min(620px, 84vw);
+  padding: 26px 30px;
+  background: rgba(8, 9, 11, 0.92);
+  border: 1px solid rgba(255, 236, 205, 0.16);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 244, 226, 0.9);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+.game-help__title { font-size: 22px; font-weight: 300; letter-spacing: .06em; }
+.game-help__subtitle { margin-top: 4px; font: 300 10px/1.8 ui-monospace, monospace; color: rgba(255,240,220,.32); }
+.game-help__row { display: grid; grid-template-columns: 90px 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255,236,205,.07); font-size: 12px; }
+.game-help__row span { color: rgba(255,240,220,.35); }
+.game-help__row strong { font-weight: 300; color: rgba(255,246,230,.82); }
+.game-help__hint { margin-top: 14px; font: 300 10px/1.6 ui-monospace, monospace; color: rgba(255,240,220,.28); }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameSession, type GameModule, type GameResult } from './gameSdk.js';
 import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
+import { drawGameChrome } from './gameTheme.js';
 import './tetris.css';
 
 export type HostPhase = 'ready' | 'playing' | 'paused' | 'over';
@@ -98,6 +99,9 @@ export function GameHost<S, C>({
   const lastRef = useRef(0);
   const [phase, setPhase] = useState<HostPhase>('ready');
   const [best, setBest] = useState(() => loadBest(bestKey));
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpOpenRef = useRef(false);
+  const helpWasPlayingRef = useRef(false);
 
   const setPhaseBoth = useCallback((next: HostPhase) => {
     phaseRef.current = next;
@@ -118,7 +122,14 @@ export function GameHost<S, C>({
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     draw(ctx, sessionRef.current.state, { width, height, dpr }, phaseRef.current, best);
-  }, [best, draw]);
+    drawGameChrome(ctx, width, height, {
+      title: overlay.title,
+      subtitle: overlay.subtitle,
+      keys: overlay.keys,
+      best,
+      bestLabel: 'BEST',
+    });
+  }, [best, draw, overlay.keys, overlay.subtitle, overlay.title]);
 
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
@@ -127,6 +138,24 @@ export function GameHost<S, C>({
     setPhaseBoth('playing');
     paint();
   }, [difficulty, paint, setPhaseBoth]);
+
+  const toggleHelp = useCallback(() => {
+    if (helpOpenRef.current) {
+      helpOpenRef.current = false;
+      setHelpOpen(false);
+      if (helpWasPlayingRef.current && phaseRef.current === 'playing') {
+        sessionRef.current.resume();
+      }
+      helpWasPlayingRef.current = false;
+      return;
+    }
+    helpOpenRef.current = true;
+    helpWasPlayingRef.current = phaseRef.current === 'playing';
+    if (helpWasPlayingRef.current) {
+      sessionRef.current.pause();
+    }
+    setHelpOpen(true);
+  }, []);
 
   const togglePause = useCallback(() => {
     if (phaseRef.current === 'playing') {
@@ -194,6 +223,19 @@ export function GameHost<S, C>({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      const helpKey = event.code === 'KeyH' || event.key === '?';
+      if (helpKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toggleHelp();
+        return;
+      }
+      if (helpOpenRef.current) {
+        if (event.code === 'Escape' || event.code === 'Enter') toggleHelp();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       const command = commandFor(event.code, event.repeat);
       if (!command) return;
       event.preventDefault();
@@ -220,7 +262,7 @@ export function GameHost<S, C>({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [commandFor, leaveToWorld, startGame, togglePause]);
+  }, [commandFor, leaveToWorld, startGame, toggleHelp, togglePause]);
 
   useEffect(() => {
     const api = {
@@ -231,6 +273,7 @@ export function GameHost<S, C>({
       restart: startGame,
       exit: leaveToWorld,
       save: () => sessionRef.current.save(),
+      help: () => helpOpenRef.current,
     };
     (window as unknown as Record<string, unknown>)[debugKey] = api;
     return () => {
@@ -274,6 +317,29 @@ export function GameHost<S, C>({
               onWorld={leaveToWorld}
             />
           ) : null}
+        </div>
+      ) : null}
+      {helpOpen ? (
+        <div className="game-help" data-testid="game-help">
+          <div className="game-help__title">{overlay.title} · 帮助</div>
+          <div className="game-help__subtitle">{overlay.subtitle}</div>
+          <div className="game-help__row">
+            <span>操作</span>
+            <strong>{overlay.keys}</strong>
+          </div>
+          <div className="game-help__row">
+            <span>暂停</span>
+            <strong>P · 继续 / 换游戏 / 回世界</strong>
+          </div>
+          <div className="game-help__row">
+            <span>存档</span>
+            <strong>Esc 退出后自动保存；再次进入恢复上一局</strong>
+          </div>
+          <div className="game-help__row">
+            <span>帮助</span>
+            <strong>H 或 ? 打开 · H / Esc / Enter 关闭</strong>
+          </div>
+          <div className="game-help__hint">关闭后回到刚才的游戏状态</div>
         </div>
       ) : null}
     </div>

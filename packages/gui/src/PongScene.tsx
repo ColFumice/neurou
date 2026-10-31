@@ -105,13 +105,6 @@ function drawPong(
   ctx.fillText(String(state.playerScore), left + fieldW / 2 - 46, top - 16);
   ctx.fillText(String(state.aiScore), left + fieldW / 2 + 22, top - 16);
 
-  drawGameChrome(ctx, width, height, {
-    title: text.title,
-    subtitle: text.subtitle,
-    keys: text.keys,
-    best,
-    bestLabel: 'BEST',
-  });
   if (phase === 'ready') {
     ctx.fillStyle = 'rgba(255,240,220,.35)';
     ctx.font = '300 11px ui-monospace, monospace';

@@ -147,11 +147,6 @@ function drawSnake(
 
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(255,246,230,.92)';
-  ctx.font = `300 ${Math.max(22, Math.min(36, width * 0.027))}px "Microsoft YaHei", system-ui, sans-serif`;
-  ctx.fillText(text.title, 42, 34);
-  ctx.fillStyle = 'rgba(255,240,220,.32)';
-  ctx.font = '300 11px ui-monospace, monospace';
-  ctx.fillText(text.subtitle, 44, 82);
   const hudX = Math.max(42, boardX - 170);
   ctx.fillStyle = 'rgba(255,240,220,.35)';
   ctx.fillText(text.score, hudX, boardY + 10);
@@ -170,14 +165,6 @@ function drawSnake(
   ctx.fillStyle = 'rgba(255,246,230,.8)';
   ctx.font = '300 22px ui-monospace, monospace';
   ctx.fillText(String(snakeLevel(state)), hudX, boardY + 158);
-  if (best > 0) {
-    ctx.fillStyle = 'rgba(255,240,220,.3)';
-    ctx.font = '300 10px ui-monospace, monospace';
-    ctx.fillText(`${text.best} ${best}`, 44, height - 52);
-  }
-  ctx.fillStyle = 'rgba(255,240,220,.28)';
-  ctx.font = '300 10px ui-monospace, monospace';
-  ctx.fillText(text.keys, 44, height - 30);
   ctx.fillStyle = 'rgba(255,240,220,.2)';
   ctx.fillText(`${snakeInterval(state)}ms`, 44, height - 74);
 }

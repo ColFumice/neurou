@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { IRGame } from '@neurou/core';
 import type { Language } from './i18n.js';
+import { gameModuleForName } from './gameSdk.js';
 
 interface GamePickerProps {
   games: readonly IRGame[];
@@ -78,6 +79,8 @@ export function GamePicker({ games, language, initialResultString, onChoose, onC
       <div className="game-picker__title">{text.title}</div>
       <div className="game-picker__list">
         {games.map((game, index) => {
+          const info = gameModuleForName(game.module);
+          const description = game.description ?? info?.description[language] ?? '';
           const active = index === selected;
           return (
             <button
@@ -93,7 +96,7 @@ export function GamePicker({ games, language, initialResultString, onChoose, onC
               <span className="game-picker__meta">
                 {game.module} · {text.result} {game.resultString}
               </span>
-              {game.description ? <span className="game-picker__desc">{game.description}</span> : null}
+              {description ? <span className="game-picker__desc">{description}</span> : null}
             </button>
           );
         })}
