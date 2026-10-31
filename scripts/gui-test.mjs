@@ -267,7 +267,7 @@ await startPage.waitForTimeout(120);
 check('初始界面方向键移动', (await startRoot.getAttribute('data-start-selected')) === '1', String(await startRoot.getAttribute('data-start-selected')));
 await startPage.keyboard.press('ArrowRight');
 await startPage.waitForTimeout(180);
-check('初始界面二级文件夹', (await startRoot.getAttribute('data-start-folder')) === '1' && (await startPage.locator('[data-testid="start-folder"] [data-start-child]').count()) === 1 && (await startPage.locator('[data-testid="add-world"]').count()) === 1);
+check('初始界面二级文件夹', (await startRoot.getAttribute('data-start-folder')) === '1' && (await startPage.locator('[data-testid="start-folder"] [data-start-child]').count()) === 2 && (await startPage.locator('[data-testid="add-world"]').count()) === 1 && (await startPage.locator('[data-testid="import-world"]').count()) === 1);
 await startPage.keyboard.press('Enter');
 await startPage.waitForTimeout(1000);
 check('初始界面 Enter 进入世界', (await startApp.getAttribute('data-world-file')) === 'examples/testbed.nro', String(await startApp.getAttribute('data-world-file')));
@@ -275,10 +275,17 @@ await startPage.keyboard.press('Escape');
 await startPage.waitForTimeout(650);
 await startPage.locator('[data-start-item="worlds"]').click();
 await startPage.waitForTimeout(300);
-startPage.once('dialog', (dialog) => void dialog.accept('验收世界'));
+await startPage.locator('[data-testid="add-world"]').click();
+await startPage.waitForTimeout(250);
+await startPage.locator('[data-testid="world-wizard-name"]').fill('验收世界');
+await startPage.locator('[data-testid="world-wizard-next"]').click();
+await startPage.waitForTimeout(150);
+await startPage.locator('[data-template="testbed"]').click();
+await startPage.locator('[data-testid="world-wizard-next"]').click();
+await startPage.waitForTimeout(150);
 await Promise.all([
   startPage.waitForLoadState('networkidle'),
-  startPage.locator('[data-testid="add-world"]').click(),
+  startPage.locator('[data-testid="world-wizard-create"]').click(),
 ]);
 await startPage.waitForTimeout(800);
 await startPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });

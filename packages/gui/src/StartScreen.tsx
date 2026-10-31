@@ -6,12 +6,16 @@ export interface StartItem {
   note: string;
   file?: string;
   children?: StartItem[];
+  localId?: string;
 }
 
 export interface StartScreenProps {
   items: StartItem[];
   onChoose: (item: StartItem) => void;
   onAddWorld?: () => void;
+  onRenameWorld?: (item: StartItem) => void;
+  onDeleteWorld?: (item: StartItem) => void;
+  onImportWorld?: () => void;
   leaving?: boolean;
   entering?: boolean;
 }
@@ -20,7 +24,16 @@ export interface StartScreenProps {
  * 进入界面：左半屏白底黑字文本菜单；世界收进二级文件夹。
  * 方向键 + Enter / 鼠标都可以选择。
  */
-export function StartScreen({ items, onChoose, onAddWorld, leaving = false, entering = false }: StartScreenProps): JSX.Element {
+export function StartScreen({
+  items,
+  onChoose,
+  onAddWorld,
+  onRenameWorld,
+  onDeleteWorld,
+  onImportWorld,
+  leaving = false,
+  entering = false,
+}: StartScreenProps): JSX.Element {
   const [selected, setSelected] = useState(0);
   const [folderIndex, setFolderIndex] = useState<number | null>(null);
   const [folderSelected, setFolderSelected] = useState(0);
@@ -172,39 +185,62 @@ export function StartScreen({ items, onChoose, onAddWorld, leaving = false, ente
         >
           <div className="start-folder__title">{folder.label}</div>
           {children.map((child, index) => (
-            <button
-              key={child.id}
-              type="button"
-              className={`start-folder__item${highlightChild(index) ? ' start-folder__item--selected' : ''}`}
-              data-start-child={child.id}
-              onMouseEnter={() => {
-                setKeyboardActive(false);
-                setFolderHovered(index);
-              }}
-              onMouseLeave={() => setFolderHovered((current) => (current === index ? null : current))}
-              onClick={() => {
-                setFolderHovered(null);
-                onChoose(child);
-              }}
-            >
-              <span>{child.label}</span>
-              <em>{child.note}</em>
-            </button>
+            <div className="start-folder__row" key={child.id}>
+              <button
+                type="button"
+                className={`start-folder__item${highlightChild(index) ? ' start-folder__item--selected' : ''}`}
+                data-start-child={child.id}
+                onMouseEnter={() => {
+                  setKeyboardActive(false);
+                  setFolderHovered(index);
+                }}
+                onMouseLeave={() => setFolderHovered((current) => (current === index ? null : current))}
+                onClick={() => {
+                  setFolderHovered(null);
+                  onChoose(child);
+                }}
+              >
+                <span>{child.label}</span>
+                <em>{child.note}</em>
+              </button>
+              {child.localId ? (
+                <span className="start-folder__actions">
+                  <button type="button" title="重命名" onClick={() => onRenameWorld?.(child)}>
+                    ✎
+                  </button>
+                  <button type="button" title="删除" onClick={() => onDeleteWorld?.(child)}>
+                    ×
+                  </button>
+                </span>
+              ) : null}
+            </div>
           ))}
-          {onAddWorld ? (
-            <button
-              type="button"
-              className="start-folder__add"
-              data-testid="add-world"
-              onClick={() => {
-                setFolderHovered(null);
-                onAddWorld();
-              }}
-            >
-              <span>＋ 添加世界</span>
-              <em>新建</em>
-            </button>
-          ) : null}
+          <div className="start-folder__footer">
+            {onAddWorld ? (
+              <button
+                type="button"
+                className="start-folder__add"
+                data-testid="add-world"
+                onClick={() => {
+                  setFolderHovered(null);
+                  onAddWorld();
+                }}
+              >
+                <span>＋ 添加世界</span>
+                <em>模板向导</em>
+              </button>
+            ) : null}
+            {onImportWorld ? (
+              <button
+                type="button"
+                className="start-folder__import"
+                data-testid="import-world"
+                onClick={() => onImportWorld()}
+              >
+                <span>导入 .nro</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

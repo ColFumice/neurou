@@ -50,6 +50,7 @@ import { Modal } from './Modal.js';
 import { StartScreen, type StartItem } from './StartScreen.js';
 import { FlowField } from './FlowField.js';
 import { ContextDslEditor } from './ContextDslEditor.js';
+import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { CursorLayer } from './CursorLayer.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -61,7 +62,7 @@ import type { SpectrumView } from './SpectrumField.js';
 import type { MatrixView } from './MatrixField.js';
 import type { Lane, TimbreCurve, WorldView } from './stringMath.js';
 import { collectLanes, couplingLanes, numericStringsByKind, withCurrentBaselines } from './worldView.js';
-import { getStringAudio } from './stringAudio.js';
+import { getStringAudio, type KindEffects } from './stringAudio.js';
 import { buildChapterGraph, type ChapterGraphNode } from './chapterGraph.js';
 import { compileGlsl, type GlslArtifact } from './glslBackend.js';
 import { GlslCanvas } from './GlslCanvas.js';
@@ -193,7 +194,10 @@ const BASE_START_ITEMS: StartItem[] = [
     id: 'worlds',
     label: '世界',
     note: '1 个',
-    children: [{ id: 'testbed', label: '测试世界', note: '全能力试验场', file: 'examples/testbed.nro' }],
+    children: [
+      { id: 'testbed', label: '测试世界', note: '全能力试验场', file: 'examples/testbed.nro' },
+      { id: 'ten-minute', label: '十分钟灯塔', note: '可通关示例', file: 'examples/ten-minute.nro' },
+    ],
   },
   { id: 'graph', label: '章节路线', note: 'Shift+F9', file: '' },
   { id: 'help', label: '操作说明', note: '完整流程', file: '' },
@@ -212,6 +216,7 @@ function startItemsFor(localWorlds: LocalWorld[]): StartItem[] {
           label: world.name,
           note: '本机',
           file: `local:${world.id}`,
+          localId: world.id,
         })),
       ],
     };
@@ -274,6 +279,29 @@ function bundledSourceFor(file: string): string {
 
 function isLocalWorldFile(file: string): boolean {
   return file.startsWith('local:');
+}
+
+const OVERLAY_AUDIO_PREFIX = '# @neurou:audio:';
+const OVERLAY_FLOW_PREFIX = '# @neurou:flow:';
+
+/** 把运行期音频配置与流场节点写进 .nro 注释侧车；这些行参与保存但仍可被编译器忽略。 */
+function withRuntimeOverlay(text: string, worldFile: string): string {
+  const lines = text.split(/\r?\n/).filter((line) => !line.startsWith(OVERLAY_AUDIO_PREFIX) && !line.startsWith(OVERLAY_FLOW_PREFIX));
+  const overlays: string[] = ['# 音频配置（RuntimeOverlay）', '# 流场（RuntimeOverlay）'];
+  const audio = getStringAudio();
+  for (const kind of KIND_ORDER) {
+    const effects = audio.getKindEffects(kind);
+    overlays.push(`${OVERLAY_AUDIO_PREFIX}${kind} ${JSON.stringify(effects)}`);
+    try {
+      const raw = window.localStorage.getItem(`neurou.flow.nodes:${worldFile}:${kind}`);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { nodes?: unknown };
+      if (Array.isArray(parsed.nodes)) overlays.push(`${OVERLAY_FLOW_PREFIX}${kind} ${JSON.stringify(parsed.nodes)}`);
+    } catch {
+      /* 忽略损坏的本地侧车 */
+    }
+  }
+  return `${overlays.join('\n')}\n${lines.join('\n')}`;
 }
 
 /**
@@ -515,6 +543,8 @@ export function App() {
   const [startEntering, setStartEntering] = useState(false);
   const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
   const startItems = useMemo(() => startItemsFor(localWorlds), [localWorlds]);
+  const [worldWizardOpen, setWorldWizardOpen] = useState(false);
+  const importWorldRef = useRef<HTMLInputElement | null>(null);
   const [memoryMode, setMemoryMode] = useState(false);
   const [memoryKind, setMemoryKind] = useState<StringKind>('叙事');
   const [focusKind, setFocusKind] = useState<StringKind>('叙事');
@@ -926,16 +956,93 @@ export function App() {
     return () => window.removeEventListener('keydown', onEscape, true);
   }, [memoryMode, screen, memoryFxOpen, flowMode]);
 
-  const addWorld = (): void => {
-    const name = window.prompt('新世界名称', '新世界')?.trim();
-    if (!name) return;
-    const source = bundledSource.replace(/^世界\s+.*$/m, `世界 ${name}`);
+  const createLocalWorld = (name: string, source: string, enter = true): void => {
     const id = `w${Date.now().toString(36)}`;
     const worlds = [...readLocalWorlds(), { id, name, source, createdAt: Date.now() }];
     writeLocalWorlds(worlds);
     setLocalWorlds(worlds);
-    window.location.assign(`?world=${encodeURIComponent(`local:${id}`)}&fresh=1`);
+    if (enter) window.location.assign(`?world=${encodeURIComponent(`local:${id}`)}&fresh=1`);
   };
+
+  const createFromWizard = (name: string, template: WorldTemplate): void => {
+    const templateSource =
+      template === 'game'
+        ? (BUNDLED_PROJECT['examples/ten-minute.nro'] ?? bundledSource)
+        : template === 'testbed'
+          ? bundledSource
+          : `世界 ${name}\n  版本 0.1\n  调性 小调\n\n叙事弦 状态\n  类型 数值 0..100\n  基线 50\n`;
+    const source = templateSource.replace(/^世界\s+.*$/m, `世界 ${name}`);
+    setWorldWizardOpen(false);
+    createLocalWorld(name, source);
+  };
+
+  const renameLocalWorld = (item: StartItem): void => {
+    const id = item.localId;
+    if (!id) return;
+    const name = window.prompt('重命名世界', item.label)?.trim();
+    if (!name) return;
+    const worlds = readLocalWorlds().map((world) =>
+      world.id === id
+        ? { ...world, name, source: world.source.replace(/^世界\s+.*$/m, `世界 ${name}`) }
+        : world,
+    );
+    writeLocalWorlds(worlds);
+    setLocalWorlds(worlds);
+    if (WORLD_FILE === `local:${id}`) window.location.reload();
+  };
+
+  const deleteLocalWorld = (item: StartItem): void => {
+    const id = item.localId;
+    if (!id) return;
+    if (!window.confirm(`删除世界「${item.label}」？`)) return;
+    const worlds = readLocalWorlds().filter((world) => world.id !== id);
+    writeLocalWorlds(worlds);
+    setLocalWorlds(worlds);
+    if (WORLD_FILE === `local:${id}`) window.location.assign('?fresh=1');
+  };
+
+  const importWorldFile = async (file: File): Promise<void> => {
+    const text = await file.text();
+    const check = compileText(text, file.name);
+    if (!check.ok) {
+      setSaveError(check.diagnostics.errors[0]?.message ?? '导入失败：DSL 编译错误');
+      setSaveState('error');
+      return;
+    }
+    const name = text.match(/^\s*世界\s+(.+)$/m)?.[1]?.trim() || file.name.replace(/\.nro$/, '');
+    createLocalWorld(name, text);
+  };
+
+  useEffect(() => {
+    if (!source) return;
+    for (const line of source.split(/\r?\n/)) {
+      if (line.startsWith(OVERLAY_AUDIO_PREFIX)) {
+        const rest = line.slice(OVERLAY_AUDIO_PREFIX.length);
+        const space = rest.indexOf(' ');
+        if (space < 0) continue;
+        const kind = rest.slice(0, space) as StringKind;
+        try {
+          const effects = JSON.parse(rest.slice(space + 1)) as Partial<KindEffects>;
+          if (KIND_ORDER.includes(kind)) getStringAudio().setKindEffects(kind, effects);
+        } catch {
+          /* 忽略损坏的音频侧车 */
+        }
+      } else if (line.startsWith(OVERLAY_FLOW_PREFIX)) {
+        const rest = line.slice(OVERLAY_FLOW_PREFIX.length);
+        const space = rest.indexOf(' ');
+        if (space < 0) continue;
+        const kind = rest.slice(0, space);
+        try {
+          const nodes = JSON.parse(rest.slice(space + 1)) as unknown;
+          if (Array.isArray(nodes)) {
+            window.localStorage.setItem(`neurou.flow.nodes:${WORLD_FILE}:${kind}`, JSON.stringify({ nodes }));
+          }
+        } catch {
+          /* 忽略损坏的流场侧车 */
+        }
+      }
+    }
+  }, [source]);
 
   const chooseStart = (item: StartItem): void => {
     if (startLeaving) return;
@@ -956,10 +1063,17 @@ export function App() {
     let label = '世界声明';
     let block = '';
     let readOnly = false;
+    let kind: 'source' | 'flow' = 'source';
     if (flowMode) {
-      label = `流场 · ${focusKind}`;
-      block = `# 流场节点（FlowNode）\n# 当前界面通过 F10 节点面板编辑；.nrm 侧车保存。\n# target: ${focusKind}\n`;
-      readOnly = true;
+      label = `流场 · ${focusKind} · .nrm`;
+      kind = 'flow';
+      try {
+        const raw = window.localStorage.getItem(`neurou.flow.nodes:${WORLD_FILE}:${focusKind}`);
+        const nodes = raw ? JSON.parse(raw) : null;
+        block = JSON.stringify({ version: 1, target: focusKind, nodes: nodes?.nodes ?? [] }, null, 2);
+      } catch {
+        block = JSON.stringify({ version: 1, target: focusKind, nodes: [] }, null, 2);
+      }
     } else if (screen === 'spectrum' && worldIR) {
       const spectrum = worldIR.spectra[Math.min(spectrumIndex, worldIR.spectra.length - 1)];
       if (spectrum) {
@@ -981,10 +1095,32 @@ export function App() {
     }
     if (!block) readOnly = true;
     if (!block) block = `# ${label}\n# 当前界面没有可独立编辑的 DSL 块。`;
-    return { label, block, readOnly, text };
+    return { label, block, readOnly, text, kind };
   }, [source, worldIR, screen, spectrumIndex, matrixIndex, focusKind, flowMode]);
 
   const applyDsl = (next: string): void => {
+    if (dslContext.kind === 'flow') {
+      try {
+        const parsed = JSON.parse(next) as { nodes?: unknown };
+        if (!Array.isArray(parsed.nodes)) throw new Error('缺少 nodes 数组');
+        window.localStorage.setItem(`neurou.flow.nodes:${WORLD_FILE}:${focusKind}`, JSON.stringify({ nodes: parsed.nodes }));
+        const marker = `# @neurou:flow:${focusKind} `;
+        const lines = (source ?? '').split(/\r?\n/).filter((line) => !line.startsWith(marker));
+        lines.unshift(`${marker}${JSON.stringify(parsed.nodes)}`);
+        const nextSource = lines.join('\n');
+        void (async () => {
+          if (await writeFile(nextSource)) {
+            apply(nextSource);
+            savedText.current = nextSource;
+          }
+          setDslError('');
+          setDslOpen(false);
+        })();
+      } catch (error) {
+        setDslError(error instanceof Error ? error.message : 'FlowNode JSON 无效');
+      }
+      return;
+    }
     if (dslContext.readOnly || !source) return;
     const current = dslContext.text;
     const labelIndex = current.indexOf(dslContext.block);
@@ -1428,6 +1564,9 @@ export function App() {
         text = serialize(candidate);
         setSaveMode('fallback');
       }
+      if (isLocalWorldFile(WORLD_FILE) || WORLD_FILE.includes('testbed') || WORLD_FILE.includes('ten-minute')) {
+        text = withRuntimeOverlay(text, WORLD_FILE);
+      }
       const check = compileText(text, `${WORLD_FILE}.edit`);
       if (!check.ok) {
         const first = check.diagnostics.errors[0];
@@ -1774,13 +1913,33 @@ export function App() {
         />
       ) : null}
       {startOpen ? (
-        <StartScreen
-          items={startItems}
-          onAddWorld={addWorld}
-          leaving={startLeaving}
-          entering={startEntering}
-          onChoose={chooseStart}
-        />
+        <>
+          <StartScreen
+            items={startItems}
+            onAddWorld={() => setWorldWizardOpen(true)}
+            onRenameWorld={renameLocalWorld}
+            onDeleteWorld={deleteLocalWorld}
+            onImportWorld={() => importWorldRef.current?.click()}
+            leaving={startLeaving}
+            entering={startEntering}
+            onChoose={chooseStart}
+          />
+          <input
+            ref={importWorldRef}
+            type="file"
+            accept=".nro"
+            style={{ display: 'none' }}
+            data-testid="world-import-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importWorldFile(file);
+              event.target.value = '';
+            }}
+          />
+          {worldWizardOpen ? (
+            <WorldWizard onCreate={createFromWizard} onClose={() => setWorldWizardOpen(false)} />
+          ) : null}
+        </>
       ) : null}
       {helpOpen ? (
         <Modal onClose={() => setHelpOpen(false)} className="help-modal" testId="help-modal">

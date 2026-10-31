@@ -13,7 +13,7 @@ const dist = join(root, 'packages/gui/dist');
 const out = join(root, 'release/neurou');
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const worlds = readdirSync(join(root, 'examples'))
-  .filter((name) => name === 'testbed.nro')
+  .filter((name) => name === 'testbed.nro' || name === 'ten-minute.nro')
   .sort()
   .map((name) => `examples/${name}`);
 
