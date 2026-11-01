@@ -1,7 +1,7 @@
 {
   "name": "neurou",
   "private": true,
-  "version": "1.51.0",
+  "version": "1.52.0",
   "type": "module",
   "description": "neurou（雨若）— 世界弦语言与调律运行时",
   "scripts": {
@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "test:gui": "node scripts/gui-test.mjs",
     "gui": "pnpm --filter @neurou/gui dev",
+    "manifest:games": "tsx scripts/game-manifest.ts",
+    "check:games": "tsx scripts/game-manifest.ts --check",
     "preview": "pnpm --filter @neurou/gui exec vite preview --host 127.0.0.1 --port 5189 --strictPort",
     "perf": "tsx scripts/perf-bench.ts",
     "smoke:world": "node scripts/gui-prod-world-smoke.mjs",

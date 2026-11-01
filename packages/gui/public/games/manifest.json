@@ -1,0 +1,70 @@
+{
+  "schema": "neurou.games/1",
+  "version": "1.52.0",
+  "games": [
+    {
+      "id": "tetris",
+      "moduleName": "俄罗斯方块",
+      "title": {
+        "zh": "俄罗斯方块",
+        "en": "Tetris"
+      },
+      "description": {
+        "zh": "七种方块、消行与计分。",
+        "en": "Seven pieces, line clears, score."
+      },
+      "controls": {
+        "zh": "← → 移动 · ↑ 旋转 · ↓ 软降 · Space 硬降",
+        "en": "← → move · ↑ rotate · ↓ soft · Space hard"
+      }
+    },
+    {
+      "id": "snake",
+      "moduleName": "贪吃蛇",
+      "title": {
+        "zh": "贪吃蛇",
+        "en": "Snake"
+      },
+      "description": {
+        "zh": "转向吃食物，撞墙或撞自己结束。",
+        "en": "Eat, avoid walls and yourself."
+      },
+      "controls": {
+        "zh": "方向键 / WASD 转向",
+        "en": "Arrows / WASD"
+      }
+    },
+    {
+      "id": "pong",
+      "moduleName": "乒乓",
+      "title": {
+        "zh": "乒乓",
+        "en": "Pong"
+      },
+      "description": {
+        "zh": "上下移动球拍，先到 5 分获胜。",
+        "en": "Move the paddle, first to five."
+      },
+      "controls": {
+        "zh": "↑/↓ 或 W/S 移动球拍",
+        "en": "↑/↓ or W/S"
+      }
+    },
+    {
+      "id": "breakout",
+      "moduleName": "打砖块",
+      "title": {
+        "zh": "打砖块",
+        "en": "Breakout"
+      },
+      "description": {
+        "zh": "左右移动挡板，消完砖块。",
+        "en": "Move the paddle, clear all bricks."
+      },
+      "controls": {
+        "zh": "← → 移动挡板",
+        "en": "← → paddle"
+      }
+    }
+  ]
+}
