@@ -392,6 +392,7 @@ class Parser {
     let loseSignal: string | undefined;
     let difficulty = 1;
     let theme: 'dark' | 'light' | undefined;
+    let script: string | undefined;
     if (this.enterBlock('游戏')) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -422,6 +423,9 @@ class Parser {
             break;
           case '胜利信号':
             winSignal = this.readQualifiedName('胜利信号');
+            break;
+          case '脚本':
+            script = this.readString('游戏脚本');
             break;
           case '主题': {
             const value = this.readName('游戏主题');
@@ -464,6 +468,7 @@ class Parser {
       loseSignal,
       difficulty,
       theme,
+      script,
       description,
       span: this.spanFrom(start),
     };

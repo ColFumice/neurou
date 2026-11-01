@@ -427,10 +427,11 @@ export interface GameDecl extends DeclBase {
   loseSignal?: string;
   difficulty?: number;
   theme?: 'dark' | 'light';
+  script?: string;
   description?: string;
 }
 
-export const GAME_MODULES = ['俄罗斯方块', '贪吃蛇', '乒乓', '打砖块'] as const;
+export const GAME_MODULES = ['俄罗斯方块', '贪吃蛇', '乒乓', '打砖块', '外部'] as const;
 
 export type Decl =
   | WorldDecl
@@ -503,3 +504,4 @@ export const DECL_KEYWORDS = [
 export function isStringKeyword(word: string): word is keyof typeof STRING_KEYWORDS {
   return word in STRING_KEYWORDS;
 }
+

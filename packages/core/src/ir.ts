@@ -395,6 +395,7 @@ export interface IRGame {
   loseSignal?: string;
   difficulty?: number;
   theme?: 'dark' | 'light';
+  script?: string;
   description?: string;
   span?: Span;
 }

@@ -203,7 +203,7 @@ process.on('exit', restoreWorld);
 const skipTutorial = async (page) => {
   await page.evaluate(() => {
     try {
-      for (const id of ['tetris', 'snake', 'pong', 'breakout']) {
+      for (const id of ['tetris', 'snake', 'pong', 'breakout', 'reaction']) {
         localStorage.setItem(`neurou.game.tutorial:${id}`, '1');
       }
     } catch {
@@ -266,7 +266,7 @@ const startPage = await browser.newPage({ viewport: { width: 1440, height: 900 }
 // 测试默认跳过首次教学；教学页会单独清 key 验证。
 await startPage.context().addInitScript(() => {
   try {
-    for (const id of ['tetris', 'snake', 'pong', 'breakout']) {
+    for (const id of ['tetris', 'snake', 'pong', 'breakout', 'reaction']) {
       localStorage.setItem(`neurou.game.tutorial:${id}`, '1');
     }
   } catch {
@@ -578,6 +578,26 @@ await breakoutPage.keyboard.press('Escape');
 await breakoutPage.waitForTimeout(700);
 check('打砖块结果写回重力', String(await breakoutPage.locator('[data-testid="game-result"]').textContent()).includes('重力'));
 await breakoutPage.close();
+restoreWorld();
+const externalPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await externalPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await externalPage.waitForSelector('[data-testid="string-field"]');
+await externalPage.waitForTimeout(700);
+await skipTutorial(externalPage);
+await externalPage.keyboard.press('Shift+F6');
+await externalPage.waitForTimeout(500);
+await externalPage.locator('[data-game-choice="外部反应"]').click();
+await externalPage.waitForTimeout(900);
+check('外部插件游戏加载', (await externalPage.locator('[data-testid="external-scene"]').count()) === 1 && (await externalPage.locator('[data-testid="external-scene"]').getAttribute('data-phase')) === 'ready');
+await externalPage.keyboard.press('Enter');
+await externalPage.waitForTimeout(350);
+for (let tap = 0; tap < 5; tap += 1) {
+  await externalPage.keyboard.press('Space');
+  await externalPage.waitForTimeout(80);
+}
+await externalPage.waitForTimeout(600);
+check('外部插件结果写回世界', String(await externalPage.locator('[data-testid="game-result"]').textContent()).includes('重力'));
+await externalPage.close();
 restoreWorld();
 const snakePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await snakePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });

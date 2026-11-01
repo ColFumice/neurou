@@ -473,6 +473,15 @@ class Compiler {
           hint: '先声明「信号 名字 ...」，或者删掉「胜利信号」。',
         });
       }
+      if (decl.module === '外部') {
+        if (!decl.script || !/^plugins\/[A-Za-z0-9._-]+\.js$/.test(decl.script)) {
+          this.error('NRO2101', `外部游戏「${decl.name}」需要合法的「脚本”。`, decl.span, {
+            hint: '脚本必须写成 "plugins/名字.js"，只允许 plugins/ 下一层 .js 文件。',
+          });
+        }
+      } else if (decl.script) {
+        this.error('NRO2101', `游戏「${decl.name}」只有模块 外部 才能使用「脚本」。`, decl.span);
+      }
       if (decl.loseSignal && !this.signalDecls.some((item) => item.name === decl.loseSignal)) {
         this.error('NRO2101', `游戏「${decl.name}」的失败信号「${decl.loseSignal}」不存在。`, decl.span, {
           hint: '先声明「信号 名字 ...」，或者删掉「失败信号」。',
@@ -647,6 +656,7 @@ class Compiler {
       ...(d.loseSignal ? { loseSignal: d.loseSignal } : {}),
       ...(d.difficulty ? { difficulty: Math.max(1, Math.min(5, d.difficulty)) } : {}),
       ...(d.theme ? { theme: d.theme } : {}),
+      ...(d.script ? { script: d.script } : {}),
       ...(d.description ? { description: d.description } : {}),
       span: d.span,
     });

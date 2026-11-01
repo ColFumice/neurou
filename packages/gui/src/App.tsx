@@ -60,6 +60,7 @@ import { SnakeScene } from './SnakeScene.js';
 import { GamePicker } from './GamePicker.js';
 import { PongScene } from './PongScene.js';
 import { BreakoutScene } from './BreakoutScene.js';
+import { ExternalScene } from './ExternalScene.js';
 import { selectGameForFocus, type GameResult } from './gameSdk.js';
 import { StringHighlight } from './StringHighlight.js';
 import { MemoryMode } from './MemoryMode.js';
@@ -715,6 +716,7 @@ export function App() {
     loseSignal?: string;
     difficulty?: number;
     theme?: 'dark' | 'light';
+    script?: string;
     loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
@@ -1649,6 +1651,7 @@ export function App() {
         ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
         ...(game?.difficulty ? { difficulty: game.difficulty } : {}),
         ...(game?.theme ? { theme: game.theme } : {}),
+        ...(game?.script ? { script: game.script } : {}),
       };
       setGameBinding(binding);
       setGameResume(readGameSave(gameSaveKey(WORLD_FILE, binding)));
@@ -3057,6 +3060,22 @@ export function App() {
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
+          onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
+          bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
+          onResult={handleGameResult}
+          onExit={() => {
+            setScreen('strings');
+            setStartOpen(!gameFromWorldRef.current);
+            setGameBinding(null);
+          }}
+        />
+      ) : gameBinding?.module === '外部' ? (
+        <ExternalScene
+          script={gameBinding.script ?? ''}
+          language={language}
+          theme={gameBinding?.theme ?? gameTheme}
+          resume={gameResume ?? undefined}
+          onSave={handleGameSave}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
