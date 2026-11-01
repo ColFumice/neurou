@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameSession, type GameModule, type GameResult } from './gameSdk.js';
 import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
@@ -109,6 +109,7 @@ export function GameHost<S, C>({
     }
   });
   const [helpOpen, setHelpOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   const helpOpenRef = useRef(false);
   const helpWasPlayingRef = useRef(false);
 
@@ -235,6 +236,29 @@ export function GameHost<S, C>({
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     };
   }, [finish, paint]);
+  const moduleInfo = gameModuleForName(module.id);
+  const showOverlay = phase !== 'playing';
+  const tutorialPages = useMemo(() => {
+    const description = moduleInfo?.description[language] ?? overlay.hint;
+    const controls = moduleInfo?.controls[language] ?? overlay.keys;
+    return [
+      { title: overlay.title, body: description, hint: '目标' },
+      { title: '操作', body: controls, hint: '把按键和结果对应起来' },
+      { title: '暂停 / 存档 / 帮助', body: 'P 暂停；Esc 退出并自动保存；H 或 ? 查看完整帮助；再次进入恢复上一局。', hint: '准备好后开始' },
+    ];
+  }, [language, moduleInfo, overlay.hint, overlay.keys, overlay.title]);
+  const tutorialVisible = phase === 'ready' && !tutorialSeen;
+  const tutorialPage = tutorialPages[Math.min(tutorialStep, tutorialPages.length - 1)]!;
+  const finishTutorial = useCallback((start: boolean) => {
+    try {
+      window.localStorage.setItem(tutorialKey, '1');
+    } catch {
+      /* ignore */
+    }
+    setTutorialSeen(true);
+    setTutorialStep(0);
+    if (start) startGame();
+  }, [startGame, tutorialKey]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -244,6 +268,27 @@ export function GameHost<S, C>({
         event.stopImmediatePropagation();
         toggleHelp();
         return;
+      }
+      if (tutorialVisible) {
+        if (event.code === 'ArrowLeft') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setTutorialStep((step) => Math.max(0, step - 1));
+          return;
+        }
+        if (event.code === 'ArrowRight' || event.code === 'Enter' || event.code === 'NumpadEnter') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (tutorialStep >= tutorialPages.length - 1) finishTutorial(true);
+          else setTutorialStep((step) => Math.min(tutorialPages.length - 1, step + 1));
+          return;
+        }
+        if (event.code === 'Escape') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          finishTutorial(false);
+          return;
+        }
       }
       if (helpOpenRef.current) {
         if (event.code === 'Escape' || event.code === 'Enter') toggleHelp();
@@ -277,7 +322,7 @@ export function GameHost<S, C>({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [commandFor, leaveToWorld, startGame, toggleHelp, togglePause]);
+  }, [commandFor, finishTutorial, leaveToWorld, startGame, toggleHelp, togglePause, tutorialPages.length, tutorialStep, tutorialVisible]);
 
   useEffect(() => {
     const api = {
@@ -303,8 +348,6 @@ export function GameHost<S, C>({
     return () => window.removeEventListener('resize', onResize);
   }, [paint]);
 
-  const showOverlay = phase !== 'playing';
-  const moduleInfo = gameModuleForName(module.id);
   return (
     <div className="tetris-scene" data-testid={testId} data-phase={phase}>
       <canvas ref={canvasRef} className="tetris-scene__canvas" />
@@ -327,15 +370,12 @@ export function GameHost<S, C>({
           {phase === 'ready' ? <div className="tetris-scene__overlay-note">{overlay.start}</div> : null}
           {phase === 'ready' && !tutorialSeen ? (
             <div className="game-tutorial" data-testid="game-tutorial">
-              <div className="game-tutorial__kicker">FIRST RUN</div>
-              <div className="game-tutorial__title">{overlay.title}</div>
-              <div className="game-tutorial__desc">
-                {moduleInfo?.description[language] ?? '先看操作，再开始。'}
-              </div>
-              <div className="game-tutorial__keys">
-                {moduleInfo?.controls[language] ?? overlay.keys}
-              </div>
-              <div className="game-tutorial__hint">Enter 开始 · H 查看完整帮助</div>
+              <div className="game-tutorial__kicker">STEP {tutorialStep + 1} / {tutorialPages.length}</div>
+              <div className="game-tutorial__title">{tutorialPage.title}</div>
+              <div className="game-tutorial__desc">{tutorialPage.body}</div>
+              <div className="game-tutorial__keys">{tutorialPage.hint}</div>
+              <div className="game-tutorial__dots">{tutorialPages.map((_, index) => <span key={index} className={index === tutorialStep ? 'game-tutorial__dot game-tutorial__dot--active' : 'game-tutorial__dot'} />)}</div>
+              <div className="game-tutorial__hint">←/→ 翻页 · Enter 下一步 / 开始 · Esc 跳过 · H 帮助</div>
             </div>
           ) : null}
           {phase === 'paused' ? (

@@ -200,6 +200,17 @@ const restoreWorld = () => {
 };
 process.on('exit', restoreWorld);
 
+const skipTutorial = async (page) => {
+  await page.evaluate(() => {
+    try {
+      for (const id of ['tetris', 'snake', 'pong', 'breakout']) {
+        localStorage.setItem(`neurou.game.tutorial:${id}`, '1');
+      }
+    } catch {
+      /* ignore */
+    }
+  });
+};
 const results = [];
 const consoleErrors = [];
 
@@ -249,7 +260,20 @@ const browser = await chromium.launch({
 });
 
 // v7.0：初始进入界面（无 ?world= 时）
+// 测试默认跳过首次教学；教学页会单独清 key 验证。
+
 const startPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+// 测试默认跳过首次教学；教学页会单独清 key 验证。
+await startPage.context().addInitScript(() => {
+  try {
+    for (const id of ['tetris', 'snake', 'pong', 'breakout']) {
+      localStorage.setItem(`neurou.game.tutorial:${id}`, '1');
+    }
+  } catch {
+    /* about:blank */
+  }
+});
+
 await startPage.goto(URL, { waitUntil: 'networkidle' });
 await startPage.waitForSelector('[data-testid="start-screen"]', { timeout: 10000 });
 const startApp = startPage.locator('[data-testid="ink-app"]');
@@ -315,6 +339,10 @@ await gamePage.waitForSelector('[data-testid="start-screen"]');
 await gamePage.locator('[data-start-item="blocks"]').click();
 await gamePage.waitForTimeout(700);
 check('初始界面进入俄罗斯方块', (await gamePage.locator('[data-testid="tetris-scene"]').count()) === 1);
+if ((await gamePage.locator('[data-testid="game-tutorial"]').count()) === 1) {
+  await gamePage.keyboard.press('Escape');
+  await gamePage.waitForTimeout(250);
+}
 await gamePage.keyboard.press('Enter');
 await gamePage.waitForTimeout(400);
 check('Enter 开始实时游戏', await gamePage.evaluate(() => window.__neurouTetris?.phase()) === 'playing');
@@ -337,6 +365,7 @@ const bridgePage = await browser.newPage({ viewport: { width: 1440, height: 900 
 await bridgePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await bridgePage.waitForSelector('[data-testid="string-field"]');
 await bridgePage.waitForTimeout(800);
+await skipTutorial(bridgePage);
 const bridgeBefore = JSON.parse(String(await bridgePage.locator('[data-testid="string-field"]').getAttribute('data-values')))[0];
 await bridgePage.keyboard.press('F6');
 await bridgePage.waitForTimeout(650);
@@ -355,6 +384,7 @@ const resumePage = await browser.newPage({ viewport: { width: 1440, height: 900 
 await resumePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await resumePage.waitForSelector('[data-testid="string-field"]');
 await resumePage.waitForTimeout(700);
+await skipTutorial(resumePage);
 await resumePage.keyboard.press('F6');
 await resumePage.waitForTimeout(600);
 await resumePage.keyboard.press('Enter');
@@ -376,6 +406,7 @@ const pausePage = await browser.newPage({ viewport: { width: 1440, height: 900 }
 await pausePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await pausePage.waitForSelector('[data-testid="string-field"]');
 await pausePage.waitForTimeout(700);
+await skipTutorial(pausePage);
 await pausePage.keyboard.press('F6');
 await pausePage.waitForTimeout(600);
 await pausePage.keyboard.press('Enter');
@@ -393,6 +424,7 @@ const helpPage = await browser.newPage({ viewport: { width: 1440, height: 900 } 
 await helpPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await helpPage.waitForSelector('[data-testid="string-field"]');
 await helpPage.waitForTimeout(700);
+await skipTutorial(helpPage);
 await helpPage.keyboard.press('F6');
 await helpPage.waitForTimeout(600);
 await helpPage.keyboard.press('Enter');
@@ -419,6 +451,12 @@ await tutorialPage.evaluate(() => {
 await tutorialPage.keyboard.press('F6');
 await tutorialPage.waitForTimeout(650);
 check('首次进入游戏显示教学层', (await tutorialPage.locator('[data-testid="game-tutorial"]').count()) === 1);
+check('教学第一页显示目标', String(await tutorialPage.locator('[data-testid="game-tutorial"]').textContent()).includes('目标'));
+await tutorialPage.keyboard.press('Enter');
+await tutorialPage.waitForTimeout(200);
+check('教学翻页到操作', String(await tutorialPage.locator('[data-testid="game-tutorial"]').textContent()).includes('操作'));
+await tutorialPage.keyboard.press('Enter');
+await tutorialPage.waitForTimeout(200);
 await tutorialPage.keyboard.press('Enter');
 await tutorialPage.waitForTimeout(350);
 check('Enter 开始后教学已读', await tutorialPage.evaluate(() => localStorage.getItem('neurou.game.tutorial:tetris')) === '1');
@@ -440,6 +478,7 @@ const pongPage = await browser.newPage({ viewport: { width: 1440, height: 900 } 
 await pongPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await pongPage.waitForSelector('[data-testid="string-field"]');
 await pongPage.waitForTimeout(700);
+await skipTutorial(pongPage);
 await pongPage.keyboard.press('Shift+F6');
 await pongPage.waitForTimeout(500);
 await pongPage.locator('[data-game-choice="对拍"]').click();
@@ -458,6 +497,7 @@ const breakoutPage = await browser.newPage({ viewport: { width: 1440, height: 90
 await breakoutPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await breakoutPage.waitForSelector('[data-testid="string-field"]');
 await breakoutPage.waitForTimeout(700);
+await skipTutorial(breakoutPage);
 await breakoutPage.keyboard.press('Shift+F6');
 await breakoutPage.waitForTimeout(500);
 await breakoutPage.locator('[data-game-choice="拆墙"]').click();
@@ -476,6 +516,7 @@ const snakePage = await browser.newPage({ viewport: { width: 1440, height: 900 }
 await snakePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await snakePage.waitForSelector('[data-testid="string-field"]');
 await snakePage.waitForTimeout(700);
+await skipTutorial(snakePage);
 await snakePage.keyboard.press('Tab');
 await snakePage.waitForTimeout(250);
 await snakePage.keyboard.press('Shift+F6');
@@ -2247,6 +2288,7 @@ const editorPage = await browser.newPage({ viewport: { width: 1440, height: 900 
 await editorPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await editorPage.waitForSelector('[data-testid="string-field"]', { timeout: 10000 });
 await editorPage.waitForTimeout(500);
+await skipTutorial(editorPage);
 const editorApp = editorPage.locator('[data-testid="ink-app"]');
 await editorPage.keyboard.press('F6');
 await editorPage.waitForTimeout(250);
