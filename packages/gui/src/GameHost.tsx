@@ -5,6 +5,7 @@ import { GameParamPanel } from './GameParamPanel.js';
 import type { Language } from './i18n.js';
 import { drawGameChrome, themeFor, type GameTheme, type GameThemeName } from './gameTheme.js';
 import { accentFor } from './gamePalette.js';
+import { applyGameThemePreset, loadGameThemePreset } from './gameThemePreset.js';
 import { gameModuleForName } from './gameSdk.js';
 import './tetris.css';
 
@@ -141,7 +142,8 @@ export function GameHost<S, C>({
       canvas.height = Math.floor(height * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const baseTheme = themeFor(theme);
+    const preset = loadGameThemePreset();
+    const baseTheme = applyGameThemePreset(themeFor(theme), preset);
     const accent = accentFor(module.id, theme ?? 'dark');
     const themeTokens = accent === baseTheme.accent ? baseTheme : { ...baseTheme, accent };
     draw(ctx, sessionRef.current.state, { width, height, dpr }, phaseRef.current, best, themeTokens);
@@ -376,7 +378,7 @@ export function GameHost<S, C>({
   }, [paint]);
 
   return (
-    <div className="tetris-scene" data-testid={testId} data-phase={phase} data-accent={accentFor(module.id, theme ?? 'dark')}>
+    <div className="tetris-scene" data-testid={testId} data-phase={phase} data-accent={accentFor(module.id, theme ?? 'dark')} data-preset={loadGameThemePreset()}>
       <canvas ref={canvasRef} className="tetris-scene__canvas" />
       {showOverlay ? (
         <div className="tetris-scene__overlay">

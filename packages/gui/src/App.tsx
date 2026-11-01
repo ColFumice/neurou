@@ -54,6 +54,7 @@ import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
 import { loadGameTheme, resolveGameTheme, saveGameTheme, type GameThemePreference } from './gameTheme.js';
+import { loadGameThemePreset, saveGameThemePreset, type GameThemePresetName } from './gameThemePreset.js';
 import { CursorLayer } from './CursorLayer.js';
 import { TetrisScene } from './TetrisScene.js';
 import { SnakeScene } from './SnakeScene.js';
@@ -656,8 +657,10 @@ export function App() {
   const [language, setLanguage] = useState<Language>(() => loadLanguage());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gameThemePreference, setGameThemePreference] = useState<GameThemePreference>(() => loadGameTheme());
+  const [gamePreset, setGamePreset] = useState<GameThemePresetName>(() => loadGameThemePreset());
   const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() => resolveGameTheme('auto'));
   const gameTheme = gameThemePreference === 'auto' ? systemTheme : gameThemePreference;
+  useEffect(() => { saveGameThemePreset(gamePreset); }, [gamePreset]);
 
   useEffect(() => {
     (window as unknown as { __neurouAudio?: unknown }).__neurouAudio = getStringAudio();
@@ -2191,6 +2194,8 @@ export function App() {
             <SettingsScreen
               language={language}
               theme={gameThemePreference}
+              preset={gamePreset}
+              onPreset={setGamePreset}
               onTheme={setGameThemePreference}
               onLanguage={setLanguage}
               onClose={() => {
