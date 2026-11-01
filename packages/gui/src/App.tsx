@@ -655,7 +655,9 @@ export function App() {
   const [language, setLanguage] = useState<Language>(() => loadLanguage());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [gameThemePreference, setGameThemePreference] = useState<GameThemePreference>(() => loadGameTheme());
-  const gameTheme = resolveGameTheme(gameThemePreference);
+  const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() => resolveGameTheme('auto'));
+  const gameTheme = gameThemePreference === 'auto' ? systemTheme : gameThemePreference;
+
   useEffect(() => {
     (window as unknown as { __neurouAudio?: unknown }).__neurouAudio = getStringAudio();
   }, []);
@@ -668,14 +670,14 @@ export function App() {
   useEffect(() => {
     saveGameTheme(gameThemePreference);
     document.documentElement.dataset.gameTheme = gameTheme;
-  }, [gameTheme]);
+  }, [gameTheme, gameThemePreference]);
 
   useEffect(() => {
     if (gameThemePreference !== 'auto') return;
     const query = window.matchMedia('(prefers-color-scheme: light)');
+    setSystemTheme(resolveGameTheme('auto'));
     const onChange = (): void => {
-      const next = resolveGameTheme('auto');
-      document.documentElement.dataset.gameTheme = next;
+      setSystemTheme(resolveGameTheme('auto'));
     };
     query.addEventListener('change', onChange);
     return () => query.removeEventListener('change', onChange);

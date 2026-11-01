@@ -508,6 +508,33 @@ check('浅色主题使用浅色画布', typeof lightPixel === 'number' && lightP
 await lightPage.evaluate(() => localStorage.setItem('neurou.game.theme', 'dark'));
 await lightPage.close();
 restoreWorld();
+const livePage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await livePage.emulateMedia({ colorScheme: 'light' });
+await livePage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await livePage.waitForSelector('[data-testid="string-field"]');
+await livePage.evaluate(() => localStorage.setItem('neurou.game.theme', 'auto'));
+await livePage.reload({ waitUntil: 'networkidle' });
+await livePage.waitForSelector('[data-testid="string-field"]');
+await livePage.waitForTimeout(600);
+await skipTutorial(livePage);
+await livePage.keyboard.press('F6');
+await livePage.waitForTimeout(700);
+const liveLight = await livePage.evaluate(() => {
+  const canvas = document.querySelector('[data-testid="tetris-scene"] canvas');
+  if (!(canvas instanceof HTMLCanvasElement)) return -1;
+  return canvas.getContext('2d')?.getImageData(6, 6, 1, 1).data[0] ?? -1;
+});
+await livePage.emulateMedia({ colorScheme: 'dark' });
+await livePage.waitForTimeout(500);
+const liveDark = await livePage.evaluate(() => {
+  const canvas = document.querySelector('[data-testid="tetris-scene"] canvas');
+  if (!(canvas instanceof HTMLCanvasElement)) return -1;
+  return canvas.getContext('2d')?.getImageData(6, 6, 1, 1).data[0] ?? -1;
+});
+check('系统主题变化实时重绘画布', typeof liveLight === 'number' && liveLight > 200 && typeof liveDark === 'number' && liveDark < 60, `${liveLight}→${liveDark}`);
+await livePage.evaluate(() => localStorage.setItem('neurou.game.theme', 'dark'));
+await livePage.close();
+restoreWorld();
 const pongPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await pongPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await pongPage.waitForSelector('[data-testid="string-field"]');
