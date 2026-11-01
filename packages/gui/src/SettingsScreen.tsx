@@ -1,18 +1,37 @@
 import { useEffect, useState } from 'react';
+import type { GameThemeName } from './gameTheme.js';
 import { SETTINGS_TEXT, type Language } from './i18n.js';
 
 interface SettingsScreenProps {
   language: Language;
+  theme: GameThemeName;
   onLanguage: (language: Language) => void;
+  onTheme: (theme: GameThemeName) => void;
   onClose: () => void;
 }
 
-/** 设置页：沿用初始界面的文本菜单风格；不使用弹窗，光标继续跟随。 */
-export function SettingsScreen({ language, onLanguage, onClose }: SettingsScreenProps): JSX.Element {
+/** 设置页：语言 + 游戏主题；沿用初始界面的文本菜单风格。 */
+export function SettingsScreen({
+  language,
+  theme,
+  onLanguage,
+  onTheme,
+  onClose,
+}: SettingsScreenProps): JSX.Element {
   const text = SETTINGS_TEXT[language];
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const [hovered, setHovered] = useState<number | null>(null);
-  const [selected, setSelected] = useState(language === 'en' ? 1 : 0);
+  const rows = [
+    { kind: 'language' as const, id: 'zh' as Language, label: text.zh, note: '中文 · Microsoft YaHei Light' },
+    { kind: 'language' as const, id: 'en' as Language, label: text.en, note: 'English · handwritten italic' },
+    { kind: 'theme' as const, id: 'dark' as GameThemeName, label: text.dark, note: 'Game theme · 深色' },
+    { kind: 'theme' as const, id: 'light' as GameThemeName, label: text.light, note: 'Game theme · 浅色' },
+  ];
+  const activeIndex = Math.max(
+    0,
+    rows.findIndex((row) => (row.kind === 'language' ? row.id === language : row.id === theme)),
+  );
+  const [selected, setSelected] = useState(activeIndex);
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent): void => {
@@ -36,19 +55,17 @@ export function SettingsScreen({ language, onLanguage, onClose }: SettingsScreen
         return;
       }
       if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
-        setSelected((index) => (index + (event.code === 'ArrowDown' ? 1 : -1) + 2) % 2);
+        setSelected((index) => (index + (event.code === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
         return;
       }
-      onLanguage(selected === 0 ? 'zh' : 'en');
+      const row = rows[selected];
+      if (!row) return;
+      if (row.kind === 'language') onLanguage(row.id);
+      else onTheme(row.id);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [selected, onLanguage, onClose]);
-
-  const rows = [
-    { id: 'zh' as Language, label: text.zh, note: '中文 · Microsoft YaHei Light' },
-    { id: 'en' as Language, label: text.en, note: 'English · handwritten italic' },
-  ];
+  }, [selected, onLanguage, onTheme, onClose, rows]);
 
   return (
     <div className="start-screen start-screen--settings" data-testid="settings-screen" data-language={language}>
@@ -60,23 +77,28 @@ export function SettingsScreen({ language, onLanguage, onClose }: SettingsScreen
           {text.title}
         </div>
         <div className="start-subtitle" style={{ transform: `translate3d(${pointer.x * 5}px, ${pointer.y * 3}px, 0)` }}>
-          {text.language}
+          {text.language} · {text.theme}
         </div>
         <div className="start-list" onMouseLeave={() => setHovered(null)}>
           {rows.map((row, index) => {
-            const active = hovered === index || (hovered === null && selected === index) || language === row.id;
+            const isActive = row.kind === 'language' ? row.id === language : row.id === theme;
+            const active = hovered === index || (hovered === null && selected === index) || isActive;
             return (
               <button
-                key={row.id}
+                key={`${row.kind}-${row.id}`}
                 type="button"
                 className={`start-item${active ? ' start-item--selected' : ''}`}
-                data-settings-language={row.id}
+                data-settings-language={row.kind === 'language' ? row.id : undefined}
+                data-settings-theme={row.kind === 'theme' ? row.id : undefined}
                 style={{
                   transform: `translate3d(${pointer.x * (active ? 30 : 8)}px, ${pointer.y * (active ? 16 : 5)}px, 0)`,
                 }}
                 onMouseEnter={() => setHovered(index)}
                 onMouseLeave={() => setHovered((current) => (current === index ? null : current))}
-                onClick={() => onLanguage(row.id)}
+                onClick={() => {
+                  if (row.kind === 'language') onLanguage(row.id);
+                  else onTheme(row.id);
+                }}
               >
                 <span>{row.label}</span>
                 <em>{row.note}</em>
@@ -92,7 +114,7 @@ export function SettingsScreen({ language, onLanguage, onClose }: SettingsScreen
         </div>
       </div>
       <div className="start-stage">
-        <div className="start-stage__hint">Language / Type</div>
+        <div className="start-stage__hint">Language / Game theme</div>
       </div>
     </div>
   );

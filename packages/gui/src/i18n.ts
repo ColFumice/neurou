@@ -71,6 +71,9 @@ export const SETTINGS_TEXT = {
   zh: {
     title: '设置',
     language: '语言 / Language',
+    theme: '游戏主题',
+    dark: '深色',
+    light: '浅色',
     zh: '中文',
     en: 'English',
     note: '选择后立即生效，并保存到本机。',
@@ -79,6 +82,9 @@ export const SETTINGS_TEXT = {
   en: {
     title: 'Settings',
     language: 'Language / 语言',
+    theme: 'Game theme',
+    dark: 'Dark',
+    light: 'Light',
     zh: '中文',
     en: 'English',
     note: 'Applies immediately and is remembered on this device.',

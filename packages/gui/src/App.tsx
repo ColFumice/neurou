@@ -53,6 +53,7 @@ import { ContextDslEditor } from './ContextDslEditor.js';
 import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
+import { loadGameTheme, saveGameTheme, type GameThemeName } from './gameTheme.js';
 import { CursorLayer } from './CursorLayer.js';
 import { TetrisScene } from './TetrisScene.js';
 import { SnakeScene } from './SnakeScene.js';
@@ -653,6 +654,7 @@ export function App() {
   const [startEntering, setStartEntering] = useState(false);
   const [language, setLanguage] = useState<Language>(() => loadLanguage());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [gameTheme, setGameTheme] = useState<GameThemeName>(() => loadGameTheme());
   useEffect(() => {
     (window as unknown as { __neurouAudio?: unknown }).__neurouAudio = getStringAudio();
   }, []);
@@ -661,6 +663,11 @@ export function App() {
     saveLanguage(language);
     applyLanguageDom(language);
   }, [language]);
+
+  useEffect(() => {
+    saveGameTheme(gameTheme);
+    document.documentElement.dataset.gameTheme = gameTheme;
+  }, [gameTheme]);
   const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
   const startItems = useMemo(() => startItemsFor(localWorlds, language), [localWorlds, language]);
   const [worldWizardOpen, setWorldWizardOpen] = useState(false);
@@ -2162,6 +2169,8 @@ export function App() {
           {settingsOpen ? (
             <SettingsScreen
               language={language}
+              theme={gameTheme}
+              onTheme={setGameTheme}
               onLanguage={setLanguage}
               onClose={() => {
                 setSettingsOpen(false);

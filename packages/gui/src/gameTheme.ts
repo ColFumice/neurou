@@ -3,6 +3,26 @@
  *
  * 新游戏只使用这些 token 与 drawGameChrome，不再各自写一套背景/标题/页脚。
  */
+export type GameThemeName = 'dark' | 'light';
+
+const GAME_THEME_KEY = 'neurou.game.theme';
+
+export function loadGameTheme(): GameThemeName {
+  try {
+    return window.localStorage.getItem(GAME_THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+export function saveGameTheme(theme: GameThemeName): void {
+  try {
+    window.localStorage.setItem(GAME_THEME_KEY, theme);
+  } catch {
+    /* ignore */
+  }
+}
+
 export interface GameTheme {
   background: string;
   ink: string;
