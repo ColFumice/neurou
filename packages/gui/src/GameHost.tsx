@@ -38,6 +38,7 @@ interface GameHostProps<S, C> {
   language: Language;
   theme?: GameThemeName;
   difficulty?: number;
+  waves?: number;
   testId: string;
   debugKey: string;
   bestKey?: string;
@@ -81,6 +82,7 @@ export function GameHost<S, C>({
   language,
   theme,
   difficulty,
+  waves,
   testId,
   debugKey,
   bestKey,
@@ -136,18 +138,20 @@ export function GameHost<S, C>({
     const themeTokens = themeFor(theme);
     draw(ctx, sessionRef.current.state, { width, height, dpr }, phaseRef.current, best, themeTokens);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const wave = sessionRef.current.module.wave?.(sessionRef.current.state);
     drawGameChrome(ctx, width, height, {
       title: overlay.title,
       subtitle: overlay.subtitle,
       keys: overlay.keys,
       best,
       bestLabel: 'BEST',
+      wave,
     }, themeTokens);
   }, [best, draw, overlay.keys, overlay.subtitle, overlay.title, theme]);
 
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
-    sessionRef.current.start(seed, { difficulty });
+    sessionRef.current.start(seed, { difficulty, waves });
     try {
       window.localStorage.setItem(tutorialKey, '1');
     } catch {
@@ -157,7 +161,7 @@ export function GameHost<S, C>({
     lastRef.current = 0;
     setPhaseBoth('playing');
     paint();
-  }, [difficulty, paint, setPhaseBoth, tutorialKey]);
+  }, [difficulty, paint, setPhaseBoth, tutorialKey, waves]);
 
   const toggleHelp = useCallback(() => {
     if (helpOpenRef.current) {

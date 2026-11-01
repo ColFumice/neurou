@@ -570,6 +570,11 @@ await breakoutPage.waitForTimeout(500);
 await breakoutPage.locator('[data-game-choice="拆墙"]').click();
 await breakoutPage.waitForTimeout(650);
 check('选择层启动第四款游戏', (await breakoutPage.locator('[data-testid="breakout-scene"]').count()) === 1);
+const breakoutWave = await breakoutPage.evaluate(() => {
+  const state = window.__neurouBreakout?.snapshot();
+  return state ? { wave: state.wave, maxWaves: state.maxWaves } : null;
+});
+check('波次参数进入游戏', breakoutWave?.wave === 1 && breakoutWave?.maxWaves === 3, JSON.stringify(breakoutWave));
 await breakoutPage.keyboard.press('Enter');
 await breakoutPage.waitForTimeout(350);
 await breakoutPage.keyboard.press('ArrowLeft');

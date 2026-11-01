@@ -16,6 +16,7 @@ interface SnakeSceneProps {
   language: Language;
   theme?: GameThemeName;
   difficulty?: number;
+  waves?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -175,6 +176,7 @@ export function SnakeScene({
   language,
   theme,
   difficulty,
+  waves,
   bindingLabel,
   resume,
   onSave,
@@ -200,6 +202,7 @@ export function SnakeScene({
       language={language}
       theme={theme}
       difficulty={difficulty}
+      waves={waves}
       testId="snake-scene"
       debugKey="__neurouSnake"
       bestKey="neurou.snake.best"

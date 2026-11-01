@@ -16,6 +16,7 @@ interface BreakoutSceneProps {
   language: Language;
   theme?: GameThemeName;
   difficulty?: number;
+  waves?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -125,6 +126,7 @@ export function BreakoutScene({
   language,
   theme,
   difficulty,
+  waves,
   bindingLabel,
   resume,
   onSave,
@@ -150,6 +152,7 @@ export function BreakoutScene({
       language={language}
       theme={theme}
       difficulty={difficulty}
+      waves={waves}
       testId="breakout-scene"
       debugKey="__neurouBreakout"
       bestKey="neurou.breakout.best"

@@ -428,6 +428,7 @@ export interface GameDecl extends DeclBase {
   difficulty?: number;
   theme?: 'dark' | 'light';
   script?: string;
+  waves?: number;
   description?: string;
 }
 

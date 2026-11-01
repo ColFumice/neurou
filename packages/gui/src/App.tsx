@@ -717,6 +717,7 @@ export function App() {
     difficulty?: number;
     theme?: 'dark' | 'light';
     script?: string;
+    waves?: number;
     loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
@@ -1652,6 +1653,7 @@ export function App() {
         ...(game?.difficulty ? { difficulty: game.difficulty } : {}),
         ...(game?.theme ? { theme: game.theme } : {}),
         ...(game?.script ? { script: game.script } : {}),
+        ...(game?.waves ? { waves: game.waves } : {}),
       };
       setGameBinding(binding);
       setGameResume(readGameSave(gameSaveKey(WORLD_FILE, binding)));
@@ -3060,6 +3062,7 @@ export function App() {
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
+          waves={gameBinding?.waves}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
@@ -3092,6 +3095,7 @@ export function App() {
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
+          waves={gameBinding?.waves}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
@@ -3108,6 +3112,7 @@ export function App() {
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
+          waves={gameBinding?.waves}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`}
           onResult={handleGameResult}
@@ -3124,6 +3129,7 @@ export function App() {
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
+          waves={gameBinding?.waves}
           onPickGame={() => { setScreen('strings'); setStartOpen(false); setGameBinding(null); setGameResume(null); setGamePickerOpen(true); }}
           bindingLabel={gameBinding ? (language === 'en' ? `Result → ${gameBinding.name}` : `结果 → ${gameBinding.name}`) : undefined}
           onResult={handleGameResult}

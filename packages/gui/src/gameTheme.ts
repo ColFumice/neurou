@@ -113,6 +113,7 @@ export interface GameChrome {
   keys: string;
   best?: number;
   bestLabel?: string;
+  wave?: number;
 }
 
 /** 统一左上标题、右上/左下 HUD 与底部键位。 */
@@ -131,6 +132,11 @@ export function drawGameChrome(
   ctx.fillStyle = theme.dim;
   ctx.font = `300 11px ${theme.monoFont}`;
   ctx.fillText(chrome.subtitle, 44, 80);
+  if (chrome.wave && chrome.wave > 0) {
+    ctx.fillStyle = theme.accent;
+    ctx.font = `300 10px ${theme.monoFont}`;
+    ctx.fillText(`WAVE ${chrome.wave}`, width - 110, 44);
+  }
   if (chrome.best && chrome.best > 0) {
     ctx.fillStyle = theme.dim;
     ctx.font = `300 10px ${theme.monoFont}`;

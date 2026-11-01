@@ -657,6 +657,7 @@ class Compiler {
       ...(d.difficulty ? { difficulty: Math.max(1, Math.min(5, d.difficulty)) } : {}),
       ...(d.theme ? { theme: d.theme } : {}),
       ...(d.script ? { script: d.script } : {}),
+      ...(d.waves ? { waves: Math.max(1, Math.min(10, d.waves)) } : {}),
       ...(d.description ? { description: d.description } : {}),
       span: d.span,
     });

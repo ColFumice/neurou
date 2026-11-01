@@ -393,6 +393,7 @@ class Parser {
     let difficulty = 1;
     let theme: 'dark' | 'light' | undefined;
     let script: string | undefined;
+    let waves: number | undefined;
     if (this.enterBlock('游戏')) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -434,6 +435,9 @@ class Parser {
             else this.fail(`游戏主题「${value}」不存在。`, this.peek().span, '可用：深色、浅色。');
             break;
           }
+          case '波次':
+            waves = this.readNumber('波次');
+            break;
           case '难度':
             difficulty = this.readNumber('难度');
             break;
@@ -469,6 +473,7 @@ class Parser {
       difficulty,
       theme,
       script,
+      waves,
       description,
       span: this.spanFrom(start),
     };

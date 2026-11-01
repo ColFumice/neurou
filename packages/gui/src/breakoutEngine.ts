@@ -18,6 +18,8 @@ export interface BreakoutState {
   over: boolean;
   won: boolean;
   difficulty: number;
+  wave: number;
+  maxWaves: number;
 }
 
 export const BREAKOUT_W = 100;
@@ -29,7 +31,7 @@ const BALL_RADIUS = 1.3;
 const BRICK_W = BREAKOUT_W / BRICK_COLS;
 const BRICK_H = 4;
 
-export function createBreakout(seed = 1, difficulty = 1): BreakoutState {
+export function createBreakout(seed = 1, difficulty = 1, maxWaves = 3): BreakoutState {
   const state: BreakoutState = {
     paddleX: BREAKOUT_W / 2,
     ballX: BREAKOUT_W / 2,
@@ -42,6 +44,8 @@ export function createBreakout(seed = 1, difficulty = 1): BreakoutState {
     over: false,
     won: false,
     difficulty: Math.max(1, Math.min(5, difficulty)),
+    wave: 1,
+    maxWaves: Math.max(1, Math.min(10, maxWaves)),
   };
   // 少量随机缺口，避免完全机械。
   let rng = seed >>> 0 || 1;
@@ -62,7 +66,7 @@ function resetBall(state: BreakoutState): void {
 export const BREAKOUT_MODULE: GameModule<BreakoutState, BreakoutCommand> = {
   id: 'breakout',
   title: { zh: '打砖块', en: 'Breakout' },
-  create: (seed, params) => createBreakout(seed, params?.difficulty ?? 1),
+  create: (seed, params) => createBreakout(seed, params?.difficulty ?? 1, params?.waves ?? 3),
   step(state, command, fixedMs): void {
     if (state.over) return;
     const dt = Math.min(0.05, fixedMs / 1000);
@@ -105,8 +109,17 @@ export const BREAKOUT_MODULE: GameModule<BreakoutState, BreakoutCommand> = {
           state.score += 10;
           state.vy = -state.vy;
           if (state.bricks.every((brick) => brick === 0)) {
-            state.won = true;
-            state.over = true;
+            state.score += 25;
+            if (state.wave < state.maxWaves) {
+              state.wave += 1;
+              state.bricks = state.bricks.map((_, index) => ((index + state.wave) % 7 === 0 ? 0 : 1));
+              resetBall(state);
+              state.vx *= 1 + (state.wave - 1) * 0.08;
+              state.vy *= 1 + (state.wave - 1) * 0.08;
+            } else {
+              state.won = true;
+              state.over = true;
+            }
           }
         }
       }
@@ -124,6 +137,7 @@ export const BREAKOUT_MODULE: GameModule<BreakoutState, BreakoutCommand> = {
   score: (state) => state.score,
   lines: (state) => state.bricks.filter((brick) => brick === 0).length,
   level: (state) => 1,
+  wave: (state) => state.wave,
   isOver: (state) => state.over,
   serialize: (state) => ({ ...state, bricks: [...state.bricks] }),
   deserialize(data): BreakoutState | null {
@@ -142,6 +156,8 @@ export const BREAKOUT_MODULE: GameModule<BreakoutState, BreakoutCommand> = {
     state.over = Boolean(candidate.over);
     state.won = Boolean(candidate.won);
     state.difficulty = Math.max(1, Math.min(5, Number(candidate.difficulty) || 1));
+    state.wave = Math.max(1, Number(candidate.wave) || 1);
+    state.maxWaves = Math.max(state.wave, Math.min(10, Number(candidate.maxWaves) || 3));
     return state;
   },
 };

@@ -21,6 +21,7 @@ const SOURCE = `世界 游戏桥测试
   结果弦 信任
   胜利分数 80
   难度 3
+  波次 2
   主题 浅色
   胜利动作 完成
   胜利结局 稳定
@@ -41,6 +42,7 @@ describe('游戏 DSL 声明', () => {
     expect(game?.winScore).toBe(80);
     expect(game?.difficulty).toBe(3);
     expect(game?.theme).toBe('light');
+    expect(game?.waves).toBe(2);
     expect(game?.winAction).toBe('完成');
     expect(game?.winEnding).toBe('稳定');
     expect(game?.loseEnding).toBe('稳定');
@@ -54,6 +56,7 @@ describe('游戏 DSL 声明', () => {
     expect(text).toContain('游戏 方块');
     expect(text).toContain('结果弦 信任');
     expect(text).toContain('难度 3');
+    expect(text).toContain('波次 2');
     expect(text).toContain('主题 浅色');
     expect(text).toContain('胜利动作 完成');
     expect(text).toContain('胜利结局 稳定');

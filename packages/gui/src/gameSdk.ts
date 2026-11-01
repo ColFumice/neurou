@@ -35,6 +35,7 @@ export interface GameResult {
  */
 export interface GameParams {
   difficulty?: number;
+  waves?: number;
 }
 
 export interface GameModule<TState, TCommand> {
@@ -46,6 +47,8 @@ export interface GameModule<TState, TCommand> {
   lines(state: TState): number;
   level(state: TState): number;
   isOver(state: TState): boolean;
+  /** 当前波次/关卡；用于 GameHost 统一 HUD。 */
+  wave?(state: TState): number;
   /** v1.39：会话存档；未提供则只存内存。 */
   serialize?(state: TState): unknown;
   deserialize?(data: unknown): TState | null;
@@ -193,6 +196,7 @@ export const TETRIS_MODULE: GameModule<TetrisModuleState, TetrisAction> = {
   score: (state) => state.engine.scoreValue,
   lines: (state) => state.engine.linesValue,
   level: (state) => state.engine.levelValue,
+  wave: (state) => state.engine.levelValue,
   isOver: (state) => state.engine.isOver,
   serialize(state) {
     return { engine: state.engine.snapshot, gravityAccumulator: state.gravityAccumulator, difficulty: state.difficulty ?? 1 };

@@ -120,6 +120,7 @@ export const PONG_MODULE: GameModule<PongState, PongCommand> = {
   score: (state) => state.playerScore * 100 - state.aiScore * 10,
   lines: (state) => state.playerScore,
   level: (state) => 1,
+  wave: (state) => 1 + Math.floor((state.playerScore + state.aiScore) / 5),
   isOver: (state) => state.over,
   serialize: (state) => ({ ...state }),
   deserialize(data): PongState | null {

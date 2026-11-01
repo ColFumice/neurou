@@ -40,6 +40,24 @@ describe('Breakout GameModule', () => {
     expect(state.over).toBe(true);
   });
 
+  it('清空砖块进入下一波，最后一波结束', () => {
+    const state = createBreakout(1, 1, 2);
+    state.bricks = state.bricks.map((_, index) => (index === 0 ? 1 : 0));
+    state.ballX = 1;
+    state.ballY = 6;
+    state.vx = 0;
+    state.vy = 0;
+    BREAKOUT_MODULE.step(state, undefined, 16.7);
+    expect(state.wave).toBe(2);
+    expect(state.over).toBe(false);
+    state.bricks = state.bricks.map((_, index) => (index === 0 ? 1 : 0));
+    state.ballX = 1;
+    state.ballY = 6;
+    BREAKOUT_MODULE.step(state, undefined, 16.7);
+    expect(state.over).toBe(true);
+    expect(state.won).toBe(true);
+  });
+
   it('存档序列化/恢复', () => {
     const state = createBreakout(4, 3);
     BREAKOUT_MODULE.step(state, 'right', 16.7);

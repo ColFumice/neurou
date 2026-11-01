@@ -8,6 +8,7 @@ interface PongSceneProps {
   language: Language;
   theme?: GameThemeName;
   difficulty?: number;
+  waves?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -118,6 +119,7 @@ export function PongScene({
   language,
   theme,
   difficulty,
+  waves,
   bindingLabel,
   resume,
   onSave,
@@ -143,6 +145,7 @@ export function PongScene({
       language={language}
       theme={theme}
       difficulty={difficulty}
+      waves={waves}
       testId="pong-scene"
       debugKey="__neurouPong"
       bestKey="neurou.pong.best"

@@ -17,6 +17,7 @@ interface TetrisSceneProps {
   language: Language;
   theme?: GameThemeName;
   difficulty?: number;
+  waves?: number;
   bindingLabel?: string;
   resume?: unknown;
   onSave?: (data: unknown | null) => void;
@@ -241,6 +242,7 @@ export function TetrisScene({
   language,
   theme,
   difficulty,
+  waves,
   bindingLabel,
   resume,
   onSave,
@@ -266,6 +268,7 @@ export function TetrisScene({
       language={language}
       theme={theme}
       difficulty={difficulty}
+      waves={waves}
       testId="tetris-scene"
       debugKey="__neurouTetris"
       bestKey={BEST_KEY}

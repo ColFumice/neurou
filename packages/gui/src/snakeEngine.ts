@@ -142,6 +142,7 @@ export const SNAKE_MODULE: GameModule<SnakeState, SnakeCommand> = {
   score: (state) => state.score,
   lines: (state) => state.eaten,
   level: (state) => snakeLevel(state),
+  wave: (state) => snakeLevel(state),
   isOver: (state) => state.over,
   serialize(state) {
     return JSON.parse(JSON.stringify(state)) as unknown;

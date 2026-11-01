@@ -396,6 +396,7 @@ export interface IRGame {
   difficulty?: number;
   theme?: 'dark' | 'light';
   script?: string;
+  waves?: number;
   description?: string;
   span?: Span;
 }

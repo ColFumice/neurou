@@ -514,6 +514,7 @@ function gameBlock(w: Writer, game: IRGame): void {
   if (game.difficulty) w.line(1, `难度 ${numberText(game.difficulty)}`);
   if (game.theme) w.line(1, `主题 ${game.theme === 'light' ? '浅色' : '深色'}`);
   if (game.script) w.line(1, `脚本 ${'"'}${game.script}${'"'}`);
+  if (game.waves) w.line(1, `波次 ${numberText(game.waves)}`);
   if (game.description) w.line(1, `描述 ${stringText(game.description)}`);
   w.blank();
 }
