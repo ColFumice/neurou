@@ -1542,3 +1542,22 @@ html[data-game-theme="light"] .game-tutorial__hint {
 html[data-game-theme="light"] .game-help__row {
   border-bottom-color: rgba(29, 27, 24, 0.08);
 }
+
+/* v1.55：游戏内参数面板 */
+.game-params {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 72;
+  width: min(420px, 80vw);
+  padding: 22px 24px;
+  background: rgba(8, 9, 11, 0.94);
+  border: 1px solid rgba(255, 236, 205, 0.16);
+  color: rgba(255, 244, 226, 0.9);
+}
+.game-params__title { font-size: 18px; font-weight: 300; margin-bottom: 14px; }
+.game-params__row { display: grid; grid-template-columns: 70px 1fr 28px; gap: 10px; align-items: center; padding: 8px 0; font-size: 12px; }
+.game-params__row input[type="range"] { width: 100%; accent-color: rgba(255, 160, 90, 0.8); }
+.game-params__actions { display: flex; gap: 10px; margin-top: 16px; }
+.game-params__actions button { flex: 1; padding: 8px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 236, 205, 0.18); color: inherit; cursor: pointer; }

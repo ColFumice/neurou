@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GameSession, type GameModule, type GameResult } from './gameSdk.js';
+import { GameSession, clampDifficulty, clampWaves, type GameModule, type GameResult } from './gameSdk.js';
 import { GamePauseMenu } from './GamePauseMenu.js';
+import { GameParamPanel } from './GameParamPanel.js';
 import type { Language } from './i18n.js';
 import { drawGameChrome, themeFor, type GameTheme, type GameThemeName } from './gameTheme.js';
 import { gameModuleForName } from './gameSdk.js';
@@ -113,6 +114,10 @@ export function GameHost<S, C>({
     }
   });
   const [helpOpen, setHelpOpen] = useState(false);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const paramsOpenRef = useRef(false);
+  const [params, setParams] = useState(() => ({ difficulty: clampDifficulty(difficulty), waves: clampWaves(waves) }));
+  const [paramDraft, setParamDraft] = useState(() => ({ difficulty: clampDifficulty(difficulty), waves: clampWaves(waves) }));
   const [tutorialStep, setTutorialStep] = useState(0);
   const helpOpenRef = useRef(false);
   const helpWasPlayingRef = useRef(false);
@@ -149,9 +154,9 @@ export function GameHost<S, C>({
     }, themeTokens);
   }, [best, draw, overlay.keys, overlay.subtitle, overlay.title, theme]);
 
-  const startGame = useCallback(() => {
+  const startGame = useCallback((override?: { difficulty: number; waves: number }) => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
-    sessionRef.current.start(seed, { difficulty, waves });
+    sessionRef.current.start(seed, override ?? params);
     try {
       window.localStorage.setItem(tutorialKey, '1');
     } catch {
@@ -161,7 +166,7 @@ export function GameHost<S, C>({
     lastRef.current = 0;
     setPhaseBoth('playing');
     paint();
-  }, [difficulty, paint, setPhaseBoth, tutorialKey, waves]);
+  }, [paint, params, setPhaseBoth, tutorialKey]);
 
   const toggleHelp = useCallback(() => {
     if (helpOpenRef.current) {
@@ -270,6 +275,15 @@ export function GameHost<S, C>({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (paramsOpenRef.current) {
+        if (event.code === 'Escape') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          paramsOpenRef.current = false;
+          setParamsOpen(false);
+        }
+        return;
+      }
       const helpKey = event.code === 'KeyH' || event.key === '?';
       if (helpKey) {
         event.preventDefault();
@@ -338,6 +352,7 @@ export function GameHost<S, C>({
       phase: () => phaseRef.current,
       start: startGame,
       pause: togglePause,
+      params: () => ({ ...params }),
       restart: startGame,
       exit: leaveToWorld,
       save: () => sessionRef.current.save(),
@@ -347,7 +362,7 @@ export function GameHost<S, C>({
     return () => {
       delete (window as unknown as Record<string, unknown>)[debugKey];
     };
-  }, [debugKey, debugSnapshot, leaveToWorld, startGame, togglePause]);
+  }, [debugKey, debugSnapshot, leaveToWorld, params, startGame, togglePause]);
 
   useEffect(() => {
     paint();
@@ -393,9 +408,26 @@ export function GameHost<S, C>({
               onSwitch={leaveToPicker}
               onWorld={leaveToWorld}
               onHelp={toggleHelp}
+              onParams={() => { setParamDraft({ ...params }); paramsOpenRef.current = true; setParamsOpen(true); }}
             />
           ) : null}
         </div>
+      ) : null}
+      {paramsOpen ? (
+        <GameParamPanel
+          language={language}
+          difficulty={paramDraft.difficulty}
+          waves={paramDraft.waves}
+          onDifficulty={(value) => setParamDraft((current) => ({ ...current, difficulty: clampDifficulty(value) }))}
+          onWaves={(value) => setParamDraft((current) => ({ ...current, waves: clampWaves(value) }))}
+          onApply={() => {
+            setParams({ ...paramDraft });
+            paramsOpenRef.current = false;
+            setParamsOpen(false);
+            startGame(paramDraft);
+          }}
+          onCancel={() => { paramsOpenRef.current = false; setParamsOpen(false); }}
+        />
       ) : null}
       {helpOpen ? (
         <div className="game-help" data-testid="game-help">

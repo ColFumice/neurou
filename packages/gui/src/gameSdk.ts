@@ -33,9 +33,18 @@ export interface GameResult {
  *   - step(state, command, fixedMs)：每个固定步；
  *   - score/lines/level/over：结果读取。
  */
+export function clampDifficulty(value: number | undefined): number {
+  return Math.max(1, Math.min(5, Math.round(Number(value) || 1)));
+}
+
+export function clampWaves(value: number | undefined): number {
+  if (value === undefined) return 3;
+  return Math.max(1, Math.min(10, Math.round(Number(value) || 1)));
+}
+
 export interface GameParams {
-  difficulty?: number;
   waves?: number;
+  difficulty?: number;
 }
 
 export interface GameModule<TState, TCommand> {
