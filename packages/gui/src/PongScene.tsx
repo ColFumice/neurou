@@ -85,12 +85,14 @@ function drawPong(
 
   paintGameBoard(ctx, left, top, fieldW, fieldH, theme);
   ctx.setLineDash([6, 8]);
-  ctx.strokeStyle = theme.line;
+  ctx.strokeStyle = theme.accent;
+  ctx.globalAlpha = 0.45;
   ctx.beginPath();
   ctx.moveTo(left + fieldW / 2, top);
   ctx.lineTo(left + fieldW / 2, top + fieldH);
   ctx.stroke();
   ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
 
   const paddleW = 2.4 * scale;
   const paddleH = 14 * scale;
@@ -98,7 +100,7 @@ function drawPong(
   ctx.fillRect(left + 4 * scale - paddleW / 2, top + state.playerY * scale - paddleH / 2, paddleW, paddleH);
   ctx.fillStyle = 'rgba(143,206,127,.85)';
   ctx.fillRect(left + (PONG_W - 4) * scale - paddleW / 2, top + state.aiY * scale - paddleH / 2, paddleW, paddleH);
-  ctx.fillStyle = '#e7c46a';
+  ctx.fillStyle = theme.accent;
   ctx.beginPath();
   ctx.arc(left + state.ballX * scale, top + state.ballY * scale, 2.4 * scale, 0, Math.PI * 2);
   ctx.fill();

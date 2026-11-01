@@ -126,9 +126,9 @@ function drawSnake(
   }
 
   ctx.save();
-  ctx.shadowColor = 'rgba(231,196,106,.7)';
+  ctx.shadowColor = theme.accent;
   ctx.shadowBlur = cell * 0.8;
-  ctx.fillStyle = '#e7c46a';
+  ctx.fillStyle = theme.accent;
   ctx.beginPath();
   ctx.arc(boardX + state.food.x * cell + cell / 2, boardY + state.food.y * cell + cell / 2, cell * 0.24, 0, Math.PI * 2);
   ctx.fill();

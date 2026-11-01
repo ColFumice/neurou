@@ -561,6 +561,7 @@ await pongPage.waitForTimeout(500);
 await pongPage.locator('[data-game-choice="对拍"]').click();
 await pongPage.waitForTimeout(650);
 check('选择层启动第三款游戏', (await pongPage.locator('[data-testid="pong-scene"]').count()) === 1);
+check('乒乓使用独立强调色', (await pongPage.locator('[data-testid="pong-scene"]').getAttribute('data-accent')) === '#b7791f');
 const pongPixel = await pongPage.evaluate(() => {
   const canvas = document.querySelector('[data-testid="pong-scene"] canvas');
   if (!(canvas instanceof HTMLCanvasElement)) return -1;

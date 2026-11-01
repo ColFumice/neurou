@@ -205,6 +205,7 @@ function drawTetris(
   ctx.fillText(text.score, hudX, boardY + 10);
   ctx.fillStyle = theme.ink;
   ctx.font = '300 32px ui-monospace, monospace';
+  ctx.fillStyle = theme.accent;
   ctx.fillText(String(snapshot.score), hudX, boardY + 28);
   ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';

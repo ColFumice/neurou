@@ -104,14 +104,16 @@ function drawBreakout(
     if (!value) return;
     const row = Math.floor(index / BRICK_COLS);
     const col = index % BRICK_COLS;
-    ctx.fillStyle = `rgba(231,196,106,${0.9 - row * 0.1})`;
+    ctx.fillStyle = theme.accent;
+    ctx.globalAlpha = 0.9 - row * 0.1;
     ctx.fillRect(left + col * brickW + 1, top + (5 + row * 4) * scale + 1, brickW - 2, brickH - 2);
+    ctx.globalAlpha = 1;
   });
 
   const paddleH = 2.4 * scale;
   ctx.fillStyle = 'rgba(236,248,232,.92)';
   ctx.fillRect(left + (state.paddleX - 6) * scale, top + (BREAKOUT_H - 7) * scale, 12 * scale, paddleH);
-  ctx.fillStyle = '#7fd1c9';
+  ctx.fillStyle = theme.accent;
   ctx.beginPath();
   ctx.arc(left + state.ballX * scale, top + state.ballY * scale, 2.1 * scale, 0, Math.PI * 2);
   ctx.fill();
