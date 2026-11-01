@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { GameThemeName } from './gameTheme.js';
+import type { GameThemePreference } from './gameTheme.js';
 import { SETTINGS_TEXT, type Language } from './i18n.js';
 
 interface SettingsScreenProps {
   language: Language;
-  theme: GameThemeName;
+  theme: GameThemePreference;
   onLanguage: (language: Language) => void;
-  onTheme: (theme: GameThemeName) => void;
+  onTheme: (theme: GameThemePreference) => void;
   onClose: () => void;
 }
 
@@ -24,8 +24,9 @@ export function SettingsScreen({
   const rows = [
     { kind: 'language' as const, id: 'zh' as Language, label: text.zh, note: '中文 · Microsoft YaHei Light' },
     { kind: 'language' as const, id: 'en' as Language, label: text.en, note: 'English · handwritten italic' },
-    { kind: 'theme' as const, id: 'dark' as GameThemeName, label: text.dark, note: 'Game theme · 深色' },
-    { kind: 'theme' as const, id: 'light' as GameThemeName, label: text.light, note: 'Game theme · 浅色' },
+    { kind: 'theme' as const, id: 'dark' as GameThemePreference, label: text.dark, note: 'Game theme · 深色' },
+    { kind: 'theme' as const, id: 'light' as GameThemePreference, label: text.light, note: 'Game theme · 浅色' },
+    { kind: 'theme' as const, id: 'auto' as GameThemePreference, label: text.auto, note: 'Game theme · 跟随系统' },
   ];
   const activeIndex = Math.max(
     0,

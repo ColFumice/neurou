@@ -304,7 +304,14 @@ check('切换浅色游戏主题', (await startPage.evaluate(() => document.docum
 await startPage.locator('[data-settings-theme="dark"]').click();
 await startPage.waitForTimeout(250);
 check('切换回深色游戏主题', (await startPage.evaluate(() => document.documentElement.dataset.gameTheme)) === 'dark');
+await startPage.emulateMedia({ colorScheme: 'light' });
+await startPage.locator('[data-settings-theme="auto"]').click();
+await startPage.waitForTimeout(250);
+check('跟随系统主题解析为浅色', (await startPage.evaluate(() => document.documentElement.dataset.gameTheme)) === 'light' && (await startPage.evaluate(() => localStorage.getItem('neurou.game.theme'))) === 'auto');
+await startPage.locator('[data-settings-theme="dark"]').click();
+await startPage.emulateMedia({ colorScheme: 'dark' });
 await startPage.keyboard.press('Escape');
+await startPage.waitForTimeout(250);
 await startPage.waitForTimeout(650);await startRoot.locator('[data-start-item="help"]').hover();
 await startPage.waitForTimeout(150);
 check('初始界面悬停高亮', (await startRoot.locator('[data-start-item="help"]').getAttribute('class'))?.includes('start-item--selected') === true);

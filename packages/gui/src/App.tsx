@@ -53,7 +53,7 @@ import { ContextDslEditor } from './ContextDslEditor.js';
 import { WorldWizard, type WorldTemplate } from './WorldWizard.js';
 import { SettingsScreen } from './SettingsScreen.js';
 import { START_TEXT, applyLanguageDom, loadLanguage, saveLanguage, type Language } from './i18n.js';
-import { loadGameTheme, saveGameTheme, type GameThemeName } from './gameTheme.js';
+import { loadGameTheme, resolveGameTheme, saveGameTheme, type GameThemePreference } from './gameTheme.js';
 import { CursorLayer } from './CursorLayer.js';
 import { TetrisScene } from './TetrisScene.js';
 import { SnakeScene } from './SnakeScene.js';
@@ -654,7 +654,8 @@ export function App() {
   const [startEntering, setStartEntering] = useState(false);
   const [language, setLanguage] = useState<Language>(() => loadLanguage());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [gameTheme, setGameTheme] = useState<GameThemeName>(() => loadGameTheme());
+  const [gameThemePreference, setGameThemePreference] = useState<GameThemePreference>(() => loadGameTheme());
+  const gameTheme = resolveGameTheme(gameThemePreference);
   useEffect(() => {
     (window as unknown as { __neurouAudio?: unknown }).__neurouAudio = getStringAudio();
   }, []);
@@ -665,9 +666,20 @@ export function App() {
   }, [language]);
 
   useEffect(() => {
-    saveGameTheme(gameTheme);
+    saveGameTheme(gameThemePreference);
     document.documentElement.dataset.gameTheme = gameTheme;
   }, [gameTheme]);
+
+  useEffect(() => {
+    if (gameThemePreference !== 'auto') return;
+    const query = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = (): void => {
+      const next = resolveGameTheme('auto');
+      document.documentElement.dataset.gameTheme = next;
+    };
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, [gameThemePreference]);
   const [localWorlds, setLocalWorlds] = useState<LocalWorld[]>(() => readLocalWorlds());
   const startItems = useMemo(() => startItemsFor(localWorlds, language), [localWorlds, language]);
   const [worldWizardOpen, setWorldWizardOpen] = useState(false);
@@ -2169,8 +2181,8 @@ export function App() {
           {settingsOpen ? (
             <SettingsScreen
               language={language}
-              theme={gameTheme}
-              onTheme={setGameTheme}
+              theme={gameThemePreference}
+              onTheme={setGameThemePreference}
               onLanguage={setLanguage}
               onClose={() => {
                 setSettingsOpen(false);

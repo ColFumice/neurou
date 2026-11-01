@@ -6,17 +6,31 @@
  */
 export type GameThemeName = 'dark' | 'light';
 
+export type GameThemePreference = GameThemeName | 'auto';
+
+export function resolveGameTheme(preference: GameThemePreference): GameThemeName {
+  if (preference === 'auto') {
+    try {
+      return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  }
+  return preference;
+}
+
 const GAME_THEME_KEY = 'neurou.game.theme';
 
-export function loadGameTheme(): GameThemeName {
+export function loadGameTheme(): GameThemePreference {
   try {
-    return window.localStorage.getItem(GAME_THEME_KEY) === 'light' ? 'light' : 'dark';
+    const value = window.localStorage.getItem(GAME_THEME_KEY);
+    return value === 'light' || value === 'auto' ? value : 'dark';
   } catch {
     return 'dark';
   }
 }
 
-export function saveGameTheme(theme: GameThemeName): void {
+export function saveGameTheme(theme: GameThemePreference): void {
   try {
     window.localStorage.setItem(GAME_THEME_KEY, theme);
   } catch {
