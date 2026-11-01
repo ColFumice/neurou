@@ -545,6 +545,12 @@ await pongPage.waitForTimeout(500);
 await pongPage.locator('[data-game-choice="对拍"]').click();
 await pongPage.waitForTimeout(650);
 check('选择层启动第三款游戏', (await pongPage.locator('[data-testid="pong-scene"]').count()) === 1);
+const pongPixel = await pongPage.evaluate(() => {
+  const canvas = document.querySelector('[data-testid="pong-scene"] canvas');
+  if (!(canvas instanceof HTMLCanvasElement)) return -1;
+  return canvas.getContext('2d')?.getImageData(6, 6, 1, 1).data[0] ?? -1;
+});
+check('世界游戏主题覆盖全局', typeof pongPixel === 'number' && pongPixel > 200, String(pongPixel));
 await pongPage.keyboard.press('Enter');
 await pongPage.waitForTimeout(350);
 await pongPage.keyboard.press('ArrowUp');

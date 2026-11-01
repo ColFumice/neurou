@@ -714,6 +714,7 @@ export function App() {
     winSignal?: string;
     loseSignal?: string;
     difficulty?: number;
+    theme?: 'dark' | 'light';
     loseEnding?: string;
   } | null>(null);
   const [gameToast, setGameToast] = useState('');
@@ -1647,6 +1648,7 @@ export function App() {
         ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
         ...(game?.loseSignal ? { loseSignal: game.loseSignal } : {}),
         ...(game?.difficulty ? { difficulty: game.difficulty } : {}),
+        ...(game?.theme ? { theme: game.theme } : {}),
       };
       setGameBinding(binding);
       setGameResume(readGameSave(gameSaveKey(WORLD_FILE, binding)));
@@ -3051,7 +3053,7 @@ export function App() {
       gameBinding?.module === '贪吃蛇' ? (
         <SnakeScene
           language={language}
-          theme={gameTheme}
+          theme={gameBinding?.theme ?? gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3067,7 +3069,7 @@ export function App() {
       ) : gameBinding?.module === '打砖块' ? (
         <BreakoutScene
           language={language}
-          theme={gameTheme}
+          theme={gameBinding?.theme ?? gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3083,7 +3085,7 @@ export function App() {
       ) : gameBinding?.module === '乒乓' ? (
         <PongScene
           language={language}
-          theme={gameTheme}
+          theme={gameBinding?.theme ?? gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3099,7 +3101,7 @@ export function App() {
       ) : (
         <TetrisScene
           language={language}
-          theme={gameTheme}
+          theme={gameBinding?.theme ?? gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}

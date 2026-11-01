@@ -391,6 +391,7 @@ class Parser {
     let winSignal: string | undefined;
     let loseSignal: string | undefined;
     let difficulty = 1;
+    let theme: 'dark' | 'light' | undefined;
     if (this.enterBlock('游戏')) {
       while (!this.at('dedent') && !this.at('eof')) {
         if (this.at('newline')) {
@@ -422,6 +423,13 @@ class Parser {
           case '胜利信号':
             winSignal = this.readQualifiedName('胜利信号');
             break;
+          case '主题': {
+            const value = this.readName('游戏主题');
+            if (value === '深色' || value === 'dark') theme = 'dark';
+            else if (value === '浅色' || value === 'light') theme = 'light';
+            else this.fail(`游戏主题「${value}」不存在。`, this.peek().span, '可用：深色、浅色。');
+            break;
+          }
           case '难度':
             difficulty = this.readNumber('难度');
             break;
@@ -455,6 +463,7 @@ class Parser {
       winSignal,
       loseSignal,
       difficulty,
+      theme,
       description,
       span: this.spanFrom(start),
     };
