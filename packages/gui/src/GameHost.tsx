@@ -3,6 +3,7 @@ import { GameSession, type GameModule, type GameResult } from './gameSdk.js';
 import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
 import { drawGameChrome } from './gameTheme.js';
+import { gameModuleForName } from './gameSdk.js';
 import './tetris.css';
 
 export type HostPhase = 'ready' | 'playing' | 'paused' | 'over';
@@ -99,6 +100,14 @@ export function GameHost<S, C>({
   const lastRef = useRef(0);
   const [phase, setPhase] = useState<HostPhase>('ready');
   const [best, setBest] = useState(() => loadBest(bestKey));
+  const tutorialKey = `neurou.game.tutorial:${module.id}`;
+  const [tutorialSeen, setTutorialSeen] = useState(() => {
+    try {
+      return window.localStorage.getItem(tutorialKey) === '1';
+    } catch {
+      return true;
+    }
+  });
   const [helpOpen, setHelpOpen] = useState(false);
   const helpOpenRef = useRef(false);
   const helpWasPlayingRef = useRef(false);
@@ -134,10 +143,16 @@ export function GameHost<S, C>({
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;
     sessionRef.current.start(seed, { difficulty });
+    try {
+      window.localStorage.setItem(tutorialKey, '1');
+    } catch {
+      /* ignore */
+    }
+    setTutorialSeen(true);
     lastRef.current = 0;
     setPhaseBoth('playing');
     paint();
-  }, [difficulty, paint, setPhaseBoth]);
+  }, [difficulty, paint, setPhaseBoth, tutorialKey]);
 
   const toggleHelp = useCallback(() => {
     if (helpOpenRef.current) {
@@ -289,6 +304,7 @@ export function GameHost<S, C>({
   }, [paint]);
 
   const showOverlay = phase !== 'playing';
+  const moduleInfo = gameModuleForName(module.id);
   return (
     <div className="tetris-scene" data-testid={testId} data-phase={phase}>
       <canvas ref={canvasRef} className="tetris-scene__canvas" />
@@ -309,12 +325,26 @@ export function GameHost<S, C>({
           </div>
           {phase === 'ready' && bindingLabel ? <div className="tetris-scene__overlay-note">{bindingLabel}</div> : null}
           {phase === 'ready' ? <div className="tetris-scene__overlay-note">{overlay.start}</div> : null}
+          {phase === 'ready' && !tutorialSeen ? (
+            <div className="game-tutorial" data-testid="game-tutorial">
+              <div className="game-tutorial__kicker">FIRST RUN</div>
+              <div className="game-tutorial__title">{overlay.title}</div>
+              <div className="game-tutorial__desc">
+                {moduleInfo?.description[language] ?? '先看操作，再开始。'}
+              </div>
+              <div className="game-tutorial__keys">
+                {moduleInfo?.controls[language] ?? overlay.keys}
+              </div>
+              <div className="game-tutorial__hint">Enter 开始 · H 查看完整帮助</div>
+            </div>
+          ) : null}
           {phase === 'paused' ? (
             <GamePauseMenu
               language={language}
               onResume={togglePause}
               onSwitch={leaveToPicker}
               onWorld={leaveToWorld}
+              onHelp={toggleHelp}
             />
           ) : null}
         </div>

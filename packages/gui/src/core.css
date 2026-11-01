@@ -1481,3 +1481,17 @@ html[data-lang='en'] .game-picker { font-family: 'Segoe Script', 'Bradley Hand',
 .game-help__row span { color: rgba(255,240,220,.35); }
 .game-help__row strong { font-weight: 300; color: rgba(255,246,230,.82); }
 .game-help__hint { margin-top: 14px; font: 300 10px/1.6 ui-monospace, monospace; color: rgba(255,240,220,.28); }
+
+/* v1.45：首次教学层 */
+.game-tutorial {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 236, 205, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+  text-align: left;
+}
+.game-tutorial__kicker { font: 300 9px/1.6 ui-monospace, monospace; letter-spacing: .22em; color: rgba(255,160,90,.65); }
+.game-tutorial__title { margin-top: 2px; font-size: 15px; font-weight: 300; }
+.game-tutorial__desc { margin-top: 6px; font-size: 11px; color: rgba(255,240,220,.55); }
+.game-tutorial__keys { margin-top: 6px; font: 300 10px/1.6 ui-monospace, monospace; color: rgba(255,246,230,.8); }
+.game-tutorial__hint { margin-top: 8px; font: 300 9px/1.6 ui-monospace, monospace; color: rgba(255,240,220,.3); }

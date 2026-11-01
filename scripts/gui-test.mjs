@@ -407,6 +407,35 @@ await helpPage.keyboard.press('Escape');
 await helpPage.waitForTimeout(500);
 await helpPage.close();
 restoreWorld();
+const tutorialPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await tutorialPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
+await tutorialPage.waitForSelector('[data-testid="string-field"]');
+await tutorialPage.waitForTimeout(700);
+await tutorialPage.evaluate(() => {
+  for (const key of Object.keys(localStorage)) {
+    if (key.includes('game.tutorial:tetris') || key.includes('neurou.game.snapshot:examples/tuner.nro')) localStorage.removeItem(key);
+  }
+});
+await tutorialPage.keyboard.press('F6');
+await tutorialPage.waitForTimeout(650);
+check('首次进入游戏显示教学层', (await tutorialPage.locator('[data-testid="game-tutorial"]').count()) === 1);
+await tutorialPage.keyboard.press('Enter');
+await tutorialPage.waitForTimeout(350);
+check('Enter 开始后教学已读', await tutorialPage.evaluate(() => localStorage.getItem('neurou.game.tutorial:tetris')) === '1');
+await tutorialPage.keyboard.press('Escape');
+await tutorialPage.waitForTimeout(600);
+await tutorialPage.keyboard.press('F6');
+await tutorialPage.waitForTimeout(650);
+check('恢复后仍为暂停菜单', (await tutorialPage.locator('[data-testid="game-pause-menu"]').count()) === 1);
+await tutorialPage.locator('[data-game-action="help"]').click();
+await tutorialPage.waitForTimeout(250);
+check('暂停菜单帮助入口', (await tutorialPage.locator('[data-testid="game-help"]').count()) === 1);
+await tutorialPage.keyboard.press('KeyH');
+await tutorialPage.waitForTimeout(200);
+await tutorialPage.keyboard.press('Escape');
+await tutorialPage.waitForTimeout(400);
+await tutorialPage.close();
+restoreWorld();
 const pongPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await pongPage.goto(`${URL}?world=${encodeURIComponent('examples/tuner.nro')}&fresh=1`, { waitUntil: 'networkidle' });
 await pongPage.waitForSelector('[data-testid="string-field"]');
