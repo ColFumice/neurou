@@ -2,7 +2,7 @@ import type { GameResult } from './gameSdk.js';
 import { TETRIS_MODULE, type TetrisModuleState } from './gameSdk.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
-import { paintGameBackdrop } from './gameTheme.js';
+import { paintGameBackdrop, type GameTheme, type GameThemeName } from './gameTheme.js';
 import {
   BOARD_H,
   BOARD_W,
@@ -15,6 +15,7 @@ import './tetris.css';
 
 interface TetrisSceneProps {
   language: Language;
+  theme?: GameThemeName;
   difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
@@ -112,26 +113,27 @@ function drawTetris(
   _phase: string,
   best: number,
   language: Language,
+  theme: GameTheme,
 ): void {
   const { width, height } = viewport;
   const text = TEXT[language];
   const engine = state.engine;
   const snapshot = engine.snapshot;
   ctx.clearRect(0, 0, width, height);
-  paintGameBackdrop(ctx, width, height);
+  paintGameBackdrop(ctx, width, height, theme);
 
   const boardW = Math.min(width * 0.34, height * 0.62, 360);
   const cell = boardW / BOARD_W;
   const boardX = (width - boardW) / 2;
   const boardY = Math.max(110, (height - cell * BOARD_H) / 2);
   const boardH = cell * BOARD_H;
-  ctx.fillStyle = 'rgba(255,244,224,.018)';
-  ctx.strokeStyle = 'rgba(255,236,205,.16)';
+  ctx.fillStyle = theme.boardFill;
+  ctx.strokeStyle = theme.line;
   ctx.fillRect(boardX, boardY, boardW, boardH);
   ctx.strokeRect(boardX + 0.5, boardY + 0.5, boardW - 1, boardH - 1);
   for (let x = 1; x < BOARD_W; x += 1) {
     const px = boardX + x * cell;
-    ctx.strokeStyle = 'rgba(255,236,205,.045)';
+    ctx.strokeStyle = theme.line;
     ctx.beginPath();
     ctx.moveTo(px, boardY);
     ctx.lineTo(px, boardY + boardH);
@@ -139,7 +141,7 @@ function drawTetris(
   }
   for (let y = 1; y < BOARD_H; y += 1) {
     const py = boardY + y * cell;
-    ctx.strokeStyle = 'rgba(255,236,205,.045)';
+    ctx.strokeStyle = theme.line;
     ctx.beginPath();
     ctx.moveTo(boardX, py);
     ctx.lineTo(boardX + boardW, py);
@@ -152,7 +154,7 @@ function drawTetris(
     const y = boardY + cy * cell;
     const pad = Math.max(1, cell * 0.08);
     if (ghost) {
-      ctx.strokeStyle = 'rgba(255,240,220,.28)';
+      ctx.strokeStyle = theme.dim;
       ctx.setLineDash([Math.max(2, cell * 0.12), Math.max(2, cell * 0.12)]);
       ctx.strokeRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
       ctx.setLineDash([]);
@@ -198,26 +200,26 @@ function drawTetris(
 
   ctx.textBaseline = 'top';
   const hudX = Math.max(42, boardX - 170);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.fillText(text.score, hudX, boardY + 10);
-  ctx.fillStyle = 'rgba(255,246,230,.9)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 32px ui-monospace, monospace';
   ctx.fillText(String(snapshot.score), hudX, boardY + 28);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';
   ctx.fillText(text.lines, hudX, boardY + 82);
-  ctx.fillStyle = 'rgba(255,246,230,.8)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 22px ui-monospace, monospace';
   ctx.fillText(String(snapshot.lines), hudX, boardY + 100);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';
   ctx.fillText(text.level, hudX, boardY + 140);
-  ctx.fillStyle = 'rgba(255,246,230,.8)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 22px ui-monospace, monospace';
   ctx.fillText(String(snapshot.level), hudX, boardY + 158);
 
   const nextX = boardX + boardW + Math.max(44, width * 0.035);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';
   ctx.fillText(text.next, nextX, boardY + 10);
   snapshot.queue.slice(0, 3).forEach((kind, index) => {
@@ -237,6 +239,7 @@ function drawTetris(
 
 export function TetrisScene({
   language,
+  theme,
   difficulty,
   bindingLabel,
   resume,
@@ -261,6 +264,7 @@ export function TetrisScene({
     <GameHost
       module={TETRIS_MODULE}
       language={language}
+      theme={theme}
       difficulty={difficulty}
       testId="tetris-scene"
       debugKey="__neurouTetris"
@@ -273,7 +277,7 @@ export function TetrisScene({
       onPickGame={onPickGame}
       onExit={onExit}
       commandFor={commandFor}
-      draw={(ctx, state, viewport, phase, best) => drawTetris(ctx, state, viewport, phase, best, language)}
+      draw={(ctx, state, viewport, phase, best, themeTokens) => drawTetris(ctx, state, viewport, phase, best, language, themeTokens)}
       debugSnapshot={(state) => state.engine.snapshot}
     />
   );

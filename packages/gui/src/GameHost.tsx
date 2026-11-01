@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameSession, type GameModule, type GameResult } from './gameSdk.js';
 import { GamePauseMenu } from './GamePauseMenu.js';
 import type { Language } from './i18n.js';
-import { drawGameChrome } from './gameTheme.js';
+import { drawGameChrome, themeFor, type GameTheme, type GameThemeName } from './gameTheme.js';
 import { gameModuleForName } from './gameSdk.js';
 import './tetris.css';
 
@@ -36,6 +36,7 @@ export interface HostViewport {
 interface GameHostProps<S, C> {
   module: GameModule<S, C>;
   language: Language;
+  theme?: GameThemeName;
   difficulty?: number;
   testId: string;
   debugKey: string;
@@ -48,7 +49,7 @@ interface GameHostProps<S, C> {
   onPickGame?: () => void;
   onExit: () => void;
   commandFor: (code: string, repeat: boolean) => HostInput<C> | null;
-  draw: (ctx: CanvasRenderingContext2D, state: S, viewport: HostViewport, phase: HostPhase, best: number) => void;
+  draw: (ctx: CanvasRenderingContext2D, state: S, viewport: HostViewport, phase: HostPhase, best: number, theme: GameTheme) => void;
   debugSnapshot?: (state: S) => unknown;
 }
 
@@ -78,6 +79,7 @@ function saveBest(key: string | undefined, value: number): void {
 export function GameHost<S, C>({
   module,
   language,
+  theme,
   difficulty,
   testId,
   debugKey,
@@ -131,15 +133,17 @@ export function GameHost<S, C>({
       canvas.height = Math.floor(height * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    draw(ctx, sessionRef.current.state, { width, height, dpr }, phaseRef.current, best);
+    const themeTokens = themeFor(theme);
+    draw(ctx, sessionRef.current.state, { width, height, dpr }, phaseRef.current, best, themeTokens);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawGameChrome(ctx, width, height, {
       title: overlay.title,
       subtitle: overlay.subtitle,
       keys: overlay.keys,
       best,
       bestLabel: 'BEST',
-    });
-  }, [best, draw, overlay.keys, overlay.subtitle, overlay.title]);
+    }, themeTokens);
+  }, [best, draw, overlay.keys, overlay.subtitle, overlay.title, theme]);
 
   const startGame = useCallback(() => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0 || 1;

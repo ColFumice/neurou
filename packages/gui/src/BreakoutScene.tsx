@@ -1,7 +1,7 @@
 import type { GameResult } from './gameSdk.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
-import { paintGameBackdrop, paintGameBoard, drawGameChrome, GAME_THEME } from './gameTheme.js';
+import { paintGameBackdrop, paintGameBoard, type GameTheme, type GameThemeName } from './gameTheme.js';
 import {
   BREAKOUT_H,
   BREAKOUT_MODULE,
@@ -14,6 +14,7 @@ import {
 
 interface BreakoutSceneProps {
   language: Language;
+  theme?: GameThemeName;
   difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
@@ -84,16 +85,17 @@ function drawBreakout(
   _phase: string,
   best: number,
   language: Language,
+  theme: GameTheme,
 ): void {
   const { width, height } = viewport;
   const text = TEXT[language];
-  paintGameBackdrop(ctx, width, height, 'rgba(30,34,44,.4)');
+  paintGameBackdrop(ctx, width, height, theme);
   const scale = Math.min((width * 0.62) / BREAKOUT_W, (height * 0.62) / BREAKOUT_H);
   const boardW = BREAKOUT_W * scale;
   const boardH = BREAKOUT_H * scale;
   const left = (width - boardW) / 2;
   const top = (height - boardH) / 2;
-  paintGameBoard(ctx, left, top, boardW, boardH);
+  paintGameBoard(ctx, left, top, boardW, boardH, theme);
 
   const brickW = boardW / BRICK_COLS;
   const brickH = 4 * scale;
@@ -113,21 +115,15 @@ function drawBreakout(
   ctx.arc(left + state.ballX * scale, top + state.ballY * scale, 2.1 * scale, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = GAME_THEME.ink;
-  ctx.font = `300 13px ${GAME_THEME.monoFont}`;
+  ctx.fillStyle = theme.ink;
+  ctx.font = `300 13px ${theme.monoFont}`;
   ctx.fillText(`${text.score} ${state.score}`, left, top - 34);
   ctx.fillText(`${text.lives} ${state.lives}`, left + boardW - 90, top - 34);
-  drawGameChrome(ctx, width, height, {
-    title: text.title,
-    subtitle: text.subtitle,
-    keys: text.keys,
-    best,
-    bestLabel: text.best,
-  });
 }
 
 export function BreakoutScene({
   language,
+  theme,
   difficulty,
   bindingLabel,
   resume,
@@ -152,6 +148,7 @@ export function BreakoutScene({
     <GameHost
       module={BREAKOUT_MODULE}
       language={language}
+      theme={theme}
       difficulty={difficulty}
       testId="breakout-scene"
       debugKey="__neurouBreakout"
@@ -164,7 +161,7 @@ export function BreakoutScene({
       onPickGame={onPickGame}
       onExit={onExit}
       commandFor={commandFor}
-      draw={(ctx, state, viewport, phase, best) => drawBreakout(ctx, state, viewport, phase, best, language)}
+      draw={(ctx, state, viewport, phase, best, themeTokens) => drawBreakout(ctx, state, viewport, phase, best, language, themeTokens)}
     />
   );
 }

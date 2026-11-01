@@ -1501,9 +1501,7 @@ html[data-lang='en'] .game-picker { font-family: 'Segoe Script', 'Bradley Hand',
 .game-tutorial__dot--active { background: rgba(255,160,90,.8); }
 
 /* v1.47：游戏浅色主题。画布反相 + DOM 覆盖层改为浅色。 */
-html[data-game-theme="light"] .tetris-scene__canvas {
-  filter: invert(1) hue-rotate(180deg) saturate(.78) contrast(.96);
-}
+
 html[data-game-theme="light"] .tetris-scene__overlay {
   background: rgba(247, 243, 235, 0.94);
   color: #1d1b18;

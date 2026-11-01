@@ -2,7 +2,7 @@ import type { GameResult } from './gameSdk.js';
 import { SNAKE_MODULE } from './snakeEngine.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
-import { paintGameBackdrop } from './gameTheme.js';
+import { paintGameBackdrop, type GameTheme, type GameThemeName } from './gameTheme.js';
 import {
   SNAKE_H,
   SNAKE_W,
@@ -14,6 +14,7 @@ import {
 
 interface SnakeSceneProps {
   language: Language;
+  theme?: GameThemeName;
   difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
@@ -92,21 +93,22 @@ function drawSnake(
   _phase: string,
   best: number,
   language: Language,
+  theme: GameTheme,
 ): void {
   const { width, height } = viewport;
   const text = TEXT[language];
-  paintGameBackdrop(ctx, width, height, 'rgba(34,40,32,.4)');
+  paintGameBackdrop(ctx, width, height, theme);
 
   const cell = Math.min((width * 0.5) / SNAKE_W, (height * 0.66) / SNAKE_H);
   const boardW = cell * SNAKE_W;
   const boardH = cell * SNAKE_H;
   const boardX = (width - boardW) / 2;
   const boardY = Math.max(100, (height - boardH) / 2);
-  ctx.fillStyle = 'rgba(255,244,224,.018)';
-  ctx.strokeStyle = 'rgba(255,236,205,.16)';
+  ctx.fillStyle = theme.boardFill;
+  ctx.strokeStyle = theme.line;
   ctx.fillRect(boardX, boardY, boardW, boardH);
   ctx.strokeRect(boardX + 0.5, boardY + 0.5, boardW - 1, boardH - 1);
-  ctx.strokeStyle = 'rgba(255,236,205,.045)';
+  ctx.strokeStyle = theme.line;
   for (let x = 1; x < SNAKE_W; x += 1) {
     const px = boardX + x * cell;
     ctx.beginPath();
@@ -138,7 +140,7 @@ function drawSnake(
     ctx.fillStyle = index === 0 ? 'rgba(236,248,232,.98)' : `rgba(143,206,127,${Math.max(0.32, 0.9 - index * 0.02)})`;
     ctx.fillRect(x + pad, y + pad, cell - pad * 2, cell - pad * 2);
     if (index === 0) {
-      ctx.fillStyle = '#0a0b0d';
+      ctx.fillStyle = theme.background;
       const eye = Math.max(1.5, cell * 0.1);
       ctx.fillRect(x + cell * 0.32, y + cell * 0.3, eye, eye);
       ctx.fillRect(x + cell * 0.58, y + cell * 0.3, eye, eye);
@@ -146,31 +148,32 @@ function drawSnake(
   });
 
   ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(255,246,230,.92)';
+  ctx.fillStyle = theme.ink;
   const hudX = Math.max(42, boardX - 170);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.fillText(text.score, hudX, boardY + 10);
-  ctx.fillStyle = 'rgba(255,246,230,.9)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 32px ui-monospace, monospace';
   ctx.fillText(String(state.score), hudX, boardY + 28);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';
   ctx.fillText(text.length, hudX, boardY + 82);
-  ctx.fillStyle = 'rgba(255,246,230,.8)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 22px ui-monospace, monospace';
   ctx.fillText(String(state.body.length), hudX, boardY + 100);
-  ctx.fillStyle = 'rgba(255,240,220,.35)';
+  ctx.fillStyle = theme.dim;
   ctx.font = '300 11px ui-monospace, monospace';
   ctx.fillText(text.speed, hudX, boardY + 140);
-  ctx.fillStyle = 'rgba(255,246,230,.8)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 22px ui-monospace, monospace';
   ctx.fillText(String(snakeLevel(state)), hudX, boardY + 158);
-  ctx.fillStyle = 'rgba(255,240,220,.2)';
+  ctx.fillStyle = theme.dim;
   ctx.fillText(`${snakeInterval(state)}ms`, 44, height - 74);
 }
 
 export function SnakeScene({
   language,
+  theme,
   difficulty,
   bindingLabel,
   resume,
@@ -195,6 +198,7 @@ export function SnakeScene({
     <GameHost
       module={SNAKE_MODULE}
       language={language}
+      theme={theme}
       difficulty={difficulty}
       testId="snake-scene"
       debugKey="__neurouSnake"
@@ -207,7 +211,7 @@ export function SnakeScene({
       onPickGame={onPickGame}
       onExit={onExit}
       commandFor={commandFor}
-      draw={(ctx, state, viewport, phase, best) => drawSnake(ctx, state, viewport, phase, best, language)}
+      draw={(ctx, state, viewport, phase, best, themeTokens) => drawSnake(ctx, state, viewport, phase, best, language, themeTokens)}
     />
   );
 }

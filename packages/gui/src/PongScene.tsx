@@ -1,11 +1,12 @@
 import type { GameResult } from './gameSdk.js';
 import { GameHost, type HostInput, type HostOverlayText, type HostViewport } from './GameHost.js';
 import type { Language } from './i18n.js';
-import { drawGameChrome, paintGameBackdrop, paintGameBoard } from './gameTheme.js';
+import { paintGameBackdrop, paintGameBoard, type GameTheme, type GameThemeName } from './gameTheme.js';
 import { PONG_H, PONG_MODULE, PONG_W, type PongCommand, type PongState } from './pongEngine.js';
 
 interface PongSceneProps {
   language: Language;
+  theme?: GameThemeName;
   difficulty?: number;
   bindingLabel?: string;
   resume?: unknown;
@@ -70,9 +71,10 @@ function drawPong(
   phase: string,
   best: number,
   language: Language,
+  theme: GameTheme,
 ): void {
   const { width, height } = viewport;
-  paintGameBackdrop(ctx, width, height, 'rgba(34,40,32,.4)');
+  paintGameBackdrop(ctx, width, height, theme);
   const scale = Math.min((width * 0.62) / PONG_W, (height * 0.62) / PONG_H);
   const fieldW = PONG_W * scale;
   const fieldH = PONG_H * scale;
@@ -80,9 +82,9 @@ function drawPong(
   const top = (height - fieldH) / 2;
   const text = TEXT[language];
 
-  paintGameBoard(ctx, left, top, fieldW, fieldH);
+  paintGameBoard(ctx, left, top, fieldW, fieldH, theme);
   ctx.setLineDash([6, 8]);
-  ctx.strokeStyle = 'rgba(255,236,205,.13)';
+  ctx.strokeStyle = theme.line;
   ctx.beginPath();
   ctx.moveTo(left + fieldW / 2, top);
   ctx.lineTo(left + fieldW / 2, top + fieldH);
@@ -91,7 +93,7 @@ function drawPong(
 
   const paddleW = 2.4 * scale;
   const paddleH = 14 * scale;
-  ctx.fillStyle = 'rgba(236,248,232,.92)';
+  ctx.fillStyle = theme.ink;
   ctx.fillRect(left + 4 * scale - paddleW / 2, top + state.playerY * scale - paddleH / 2, paddleW, paddleH);
   ctx.fillStyle = 'rgba(143,206,127,.85)';
   ctx.fillRect(left + (PONG_W - 4) * scale - paddleW / 2, top + state.aiY * scale - paddleH / 2, paddleW, paddleH);
@@ -100,13 +102,13 @@ function drawPong(
   ctx.arc(left + state.ballX * scale, top + state.ballY * scale, 2.4 * scale, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(255,246,230,.9)';
+  ctx.fillStyle = theme.ink;
   ctx.font = '300 28px ui-monospace, monospace';
   ctx.fillText(String(state.playerScore), left + fieldW / 2 - 46, top - 16);
   ctx.fillText(String(state.aiScore), left + fieldW / 2 + 22, top - 16);
 
   if (phase === 'ready') {
-    ctx.fillStyle = 'rgba(255,240,220,.35)';
+    ctx.fillStyle = theme.dim;
     ctx.font = '300 11px ui-monospace, monospace';
     ctx.fillText(text.start, 44, height - 74);
   }
@@ -114,6 +116,7 @@ function drawPong(
 
 export function PongScene({
   language,
+  theme,
   difficulty,
   bindingLabel,
   resume,
@@ -138,6 +141,7 @@ export function PongScene({
     <GameHost
       module={PONG_MODULE}
       language={language}
+      theme={theme}
       difficulty={difficulty}
       testId="pong-scene"
       debugKey="__neurouPong"
@@ -150,7 +154,7 @@ export function PongScene({
       onPickGame={onPickGame}
       onExit={onExit}
       commandFor={commandFor}
-      draw={(ctx, state, viewport, phase, best) => drawPong(ctx, state, viewport, phase, best, language)}
+      draw={(ctx, state, viewport, phase, best, themeTokens) => drawPong(ctx, state, viewport, phase, best, language, themeTokens)}
     />
   );
 }

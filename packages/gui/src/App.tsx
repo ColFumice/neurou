@@ -3037,6 +3037,7 @@ export function App() {
       gameBinding?.module === '贪吃蛇' ? (
         <SnakeScene
           language={language}
+          theme={gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3052,6 +3053,7 @@ export function App() {
       ) : gameBinding?.module === '打砖块' ? (
         <BreakoutScene
           language={language}
+          theme={gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3067,6 +3069,7 @@ export function App() {
       ) : gameBinding?.module === '乒乓' ? (
         <PongScene
           language={language}
+          theme={gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
@@ -3082,6 +3085,7 @@ export function App() {
       ) : (
         <TetrisScene
           language={language}
+          theme={gameTheme}
           resume={gameResume ?? undefined}
           onSave={handleGameSave}
           difficulty={gameBinding?.difficulty}
