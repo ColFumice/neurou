@@ -63,7 +63,9 @@ function withoutImports(source: string): string {
   return source.replace(IMPORT_RE, '');
 }
 
-export function compileProjectFromFiles(entryPath: string, files: ProjectSources): CompileResult {
+export function compileProjectFromFiles(entryPath: string, inputFiles: ProjectSources): CompileResult {
+  const files: ProjectSources = {};
+  for (const [path, source] of Object.entries(inputFiles)) files[normalizeProjectPath(path)] = source;
   const entry = normalizeProjectPath(entryPath);
   const visited = new Set<string>();
   const visiting = new Set<string>();
