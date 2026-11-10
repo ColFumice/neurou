@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible bug in neurou
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include a minimal reproduction.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Actual behavior, screenshots, console errors, or compiler diagnostics.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Press ...
+        3. See error ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: v1.57.0 / a806212
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - core / language
+        - runtime / engine
+        - GUI / tuner
+        - game platform
+        - CLI
+        - docs
+        - other

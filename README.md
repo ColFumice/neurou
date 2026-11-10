@@ -8,10 +8,17 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.57.0-8a7f6a" />
+  <a href="https://github.com/ColFumice/neurou/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ColFumice/neurou/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/ColFumice/neurou/releases/tag/v1.57.0"><img alt="version" src="https://img.shields.io/badge/version-1.57.0-8a7f6a" /></a>
   <img alt="license" src="https://img.shields.io/badge/license-MIT-8a7f6a" />
   <img alt="tests" src="https://img.shields.io/badge/unit%20tests-480%20passing-8a7f6a" />
   <img alt="gui" src="https://img.shields.io/badge/browser%20acceptance-431%20passing-8a7f6a" />
+</p>
+
+<p align="center">
+  <a href="https://colfumice.github.io/neurou/">在线演示</a> ·
+  <a href="https://github.com/ColFumice/neurou/releases/tag/v1.57.0">Release v1.57.0</a> ·
+  <a href="README.en.md">English</a>
 </p>
 
 neurou 是一门用来写「世界如何运转」的语言，以及执行这些世界的运行时。
