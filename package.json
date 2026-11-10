@@ -1,9 +1,29 @@
 {
   "name": "neurou",
-  "private": true,
+  "private": false,
   "version": "1.57.0",
   "type": "module",
-  "description": "neurou（雨若）— 世界弦语言与调律运行时",
+  "description": "neurou（雨若）— 世界弦语言、调律运行时与实时游戏平台",
+  "license": "MIT",
+  "author": "ColFumice",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ColFumice/neurou.git"
+  },
+  "homepage": "https://github.com/ColFumice/neurou#readme",
+  "bugs": {
+    "url": "https://github.com/ColFumice/neurou/issues"
+  },
+  "keywords": [
+    "neurou",
+    "world-string",
+    "dsl",
+    "deterministic-runtime",
+    "music",
+    "procedural-generation",
+    "canvas",
+    "game-sdk"
+  ],
   "scripts": {
     "check": "tsc -b --pretty false",
     "check:gui": "tsc -p packages/gui/tsconfig.json --noEmit --pretty false",
